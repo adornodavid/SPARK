@@ -6,7 +6,7 @@ import { listaDesplegableHoteles } from "@/app/actions/hoteles"
 import { listaDesplegableSalones, objetoSalon, objetoSalones } from "@/app/actions/salones"
 import { crearCotizacion, actualizarCotizacion, objetoCotizacion } from "@/app/actions/cotizaciones"
 import { obtenerDisponibilidadSalon, obtenerReservacionesPorDia } from "@/app/actions/reservaciones"
-import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, buscarElementosPorTabla, agregarElementoACotizacion } from "@/app/actions/catalogos"
+import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, agregarElementoACotizacion } from "@/app/actions/catalogos"
 import { Users, MapPin, DollarSign, User, Mail, Phone, Building2, Check, X, CalendarIcon } from "lucide-react"
 import { Calendar } from "@/components/ui/calendar"
 import type { DateRange } from "react-day-picker"
@@ -65,6 +65,8 @@ export function QuotationForm() {
   const [cotizacionId, setCotizacionId] = useState<number | null>(null)
   const [tiposEvento, setTiposEvento] = useState<ddlItem[]>([])
   const [showPaqueteModal, setShowPaqueteModal] = useState(false)
+  const [showLimpiarModal, setShowLimpiarModal] = useState(false)
+  const [limpiarLoading, setLimpiarLoading] = useState(false)
   const [paquetes, setPaquetes] = useState<any[]>([])
   const [selectedPaqueteId, setSelectedPaqueteId] = useState<string>("")
   const [selectedPaqueteInfo, setSelectedPaqueteInfo] = useState<any>(null)
@@ -303,24 +305,28 @@ export function QuotationForm() {
     }
   }
 
-  async function handlePaqueteChange(paqueteid: string) {
+  function handlePaqueteChange(paqueteid: string) {
     setSelectedPaqueteId(paqueteid)
-    setElementosPaquete([])
     setSelectedPaqueteInfo(null)
-
     if (paqueteid) {
-      setLoadingElementos(true)
       const paquete = paquetes.find((p) => p.paqueteid?.toString() === paqueteid || p.id?.toString() === paqueteid)
       setSelectedPaqueteInfo(paquete || null)
-
-      const result = await obtenerElementosPaquete(Number(paqueteid))
-      if (result.success && result.data) {
-        setElementosPaquete(result.data)
-        const secciones = [...new Set(result.data.map((el: any) => (el.tipoelemento || el.tipo || "otros").toLowerCase()))]
-        setSeccionesPaquete(secciones as string[])
-      }
-      setLoadingElementos(false)
     }
+  }
+
+  async function handleLimpiarPaquete() {
+    if (!cotizacionId) return
+    setLimpiarLoading(true)
+    const result = await limpiarElementosCotizacion(cotizacionId)
+    if (result.success) {
+      setElementosPaquete([])
+      setSelectedPaqueteId("")
+      setSelectedPaqueteInfo(null)
+      setShowLimpiarModal(false)
+    } else {
+      alert(`Error al limpiar paquete: ${result.error}`)
+    }
+    setLimpiarLoading(false)
   }
 
   async function handleEliminarElemento(tipoelemento: string, id: number) {
@@ -1130,15 +1136,28 @@ export function QuotationForm() {
           <CardHeader className="border-b border-gray-100 pb-4">
             <div className="flex items-center justify-between">
               <CardTitle className="text-gray-900 text-lg font-semibold">Asignación de Paquete</CardTitle>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setShowPaqueteModal(true)}
-                disabled={!formData.tipoEvento}
-              >
-                Agregar Paquete
-              </Button>
+              <div className="flex items-center gap-2">
+                {elementosPaquete.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowLimpiarModal(true)}
+                    className="border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
+                  >
+                    Limpiar Paquete
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowPaqueteModal(true)}
+                  disabled={!formData.tipoEvento}
+                >
+                  Agregar Paquete
+                </Button>
+              </div>
             </div>
             <CardDescription>
               {!formData.tipoEvento
@@ -1339,6 +1358,40 @@ export function QuotationForm() {
           >
             Ver Resumen
           </Button>
+        </div>
+      )}
+
+      {/* Modal Limpiar Paquete */}
+      {showLimpiarModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">Limpiar Paquete</h2>
+              <button
+                type="button"
+                onClick={() => setShowLimpiarModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-600">
+              ¿Estás seguro de que deseas eliminar todos los elementos del paquete asignado a esta cotización? Esta acción no se puede deshacer.
+            </p>
+            <div className="flex justify-end gap-3 pt-2">
+              <Button type="button" variant="outline" onClick={() => setShowLimpiarModal(false)} disabled={limpiarLoading}>
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                disabled={limpiarLoading}
+                onClick={handleLimpiarPaquete}
+                className="bg-red-600 hover:bg-red-700 text-white"
+              >
+                {limpiarLoading ? "Eliminando..." : "Aceptar"}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 
