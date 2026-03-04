@@ -126,6 +126,26 @@ export async function eliminarElementoCotizacion(cotizacionid: number, tipoeleme
   }
 }
 
+// Función: limpiarElementosCotizacion: elimina TODOS los elementos de elementosxcotizacion para una cotización
+export async function limpiarElementosCotizacion(cotizacionid: number) {
+  try {
+    const { error } = await supabase
+      .from("elementosxcotizacion")
+      .delete()
+      .eq("cotizacionid", cotizacionid)
+
+    if (error) {
+      console.error("Error limpiando elementos de cotización: ", error)
+      return { success: false, error: error.message }
+    }
+
+    return { success: true }
+  } catch (error) {
+    console.error("Error en limpiarElementosCotizacion: ", error)
+    return { success: false, error: "Error interno del servidor" }
+  }
+}
+
 // Mapa de tipoelemento (en minúsculas) al nombre real de la tabla en Supabase
 const TABLA_POR_TIPO: Record<string, string> = {
   lugar: "lugar",
