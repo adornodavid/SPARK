@@ -383,7 +383,14 @@ export function QuotationForm() {
       ? await buscarLugaresPorHotel(Number(formData.hotel))
       : await buscarElementosPorTabla(tipo)
     if (result.success && result.data) {
-      setElementosTabla(result.data)
+      // Filtrar elementos ya asignados en esta sección para evitar duplicados
+      const yaAsignados = new Set(
+        elementosPaquete
+          .filter(el => normalizarSeccion(el.tipoelemento || el.tipo || "") === tipo)
+          .map(el => Number(el.elementoid ?? el.id))
+      )
+      const disponibles = result.data.filter((el: any) => !yaAsignados.has(Number(el.id)))
+      setElementosTabla(disponibles)
     }
     setLoadingTabla(false)
   }
@@ -1657,7 +1664,7 @@ export function QuotationForm() {
               {loadingTabla ? (
                 <p className="text-sm text-gray-500">Cargando elementos...</p>
               ) : elementosTabla.length === 0 ? (
-                <p className="text-sm text-gray-400">No se encontraron elementos disponibles.</p>
+                <p className="text-sm text-gray-400">Todos los elementos de esta sección ya están agregados.</p>
               ) : (
                 <Select value={selectedElementoId} onValueChange={setSelectedElementoId}>
                   <SelectTrigger>
