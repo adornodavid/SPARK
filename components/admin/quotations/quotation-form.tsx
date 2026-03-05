@@ -6,7 +6,8 @@ import { listaDesplegableHoteles } from "@/app/actions/hoteles"
 import { listaDesplegableSalones, objetoSalon, objetoSalones } from "@/app/actions/salones"
 import { crearCotizacion, actualizarCotizacion, objetoCotizacion } from "@/app/actions/cotizaciones"
 import { obtenerDisponibilidadSalon, obtenerReservacionesPorDia } from "@/app/actions/reservaciones"
-import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, agregarElementoACotizacion, buscarLugaresPorHotel, modificarLugarCotizacion } from "@/app/actions/catalogos"
+import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, agregarElementoACotizacion, buscarLugaresPorHotel, modificarLugarCotizacion, listaEstatusCotizacion } from "@/app/actions/catalogos"
+import { listaCategoriaEvento } from "@/app/actions/cotizaciones"
 import { Users, MapPin, DollarSign, User, Mail, Phone, Building2, Check, X, CalendarIcon } from "lucide-react"
 import { Calendar } from "@/components/ui/calendar"
 import type { DateRange } from "react-day-picker"
@@ -78,9 +79,14 @@ export function QuotationForm() {
   const [showPackageSection, setShowPackageSection] = useState(false)
   const [cotizacionId, setCotizacionId] = useState<number | null>(null)
   const [tiposEvento, setTiposEvento] = useState<ddlItem[]>([])
+  const [categoriasEvento, setCategoriasEvento] = useState<string[]>([])
+  const [estatusList, setEstatusList] = useState<ddlItem[]>([])
   const [showPaqueteModal, setShowPaqueteModal] = useState(false)
   const [showLimpiarModal, setShowLimpiarModal] = useState(false)
   const [limpiarLoading, setLimpiarLoading] = useState(false)
+  const [elementosPreviewPaquete, setElementosPreviewPaquete] = useState<any[]>([])
+  const [loadingPreviewPaquete, setLoadingPreviewPaquete] = useState(false)
+  const [showConfirmReemplazarModal, setShowConfirmReemplazarModal] = useState(false)
   const [paquetes, setPaquetes] = useState<any[]>([])
   const [selectedPaqueteId, setSelectedPaqueteId] = useState<string>("")
   const [selectedPaqueteInfo, setSelectedPaqueteInfo] = useState<any>(null)
@@ -118,9 +124,11 @@ export function QuotationForm() {
     horaFin: "",
     // Event Details
     nombreEvento: "",
+    categoriaEvento: "",
+    tipoEvento: "",
+    estatusId: "",
     numeroInvitados: "",
     numeroHabitaciones: "",
-    tipoEvento: "",
     // Client Information
     nombreCliente: "",
     email: "",
@@ -136,6 +144,8 @@ export function QuotationForm() {
     loadHoteles()
     loadClientes()
     loadTiposEvento()
+    listaCategoriaEvento().then(r => { if (r.success && r.data) setCategoriasEvento(r.data) })
+    listaEstatusCotizacion().then(r => { if (r.success && r.data) setEstatusList(r.data as ddlItem[]) })
   }, [])
 
 
@@ -169,9 +179,11 @@ export function QuotationForm() {
         horaInicio:          hi,
         horaFin:             hf,
         nombreEvento:        c.nombreevento              ?? "",
+        categoriaEvento:     c.categoriaevento           ?? "",
+        tipoEvento:          tid,
+        estatusId:           c.estatusid?.toString()     ?? "",
         numeroInvitados:     c.numeroinvitados?.toString() ?? "",
         numeroHabitaciones:  c.numerohabitaciones?.toString() ?? "",
-        tipoEvento:          tid,
         nombreCliente:       c.cliente                  ?? "",
         email:               c.email                    ?? "",
         telefono:            c.telefono                 ?? "",
@@ -319,12 +331,17 @@ export function QuotationForm() {
     }
   }
 
-  function handlePaqueteChange(paqueteid: string) {
+  async function handlePaqueteChange(paqueteid: string) {
     setSelectedPaqueteId(paqueteid)
     setSelectedPaqueteInfo(null)
+    setElementosPreviewPaquete([])
     if (paqueteid) {
       const paquete = paquetes.find((p) => p.paqueteid?.toString() === paqueteid || p.id?.toString() === paqueteid)
       setSelectedPaqueteInfo(paquete || null)
+      setLoadingPreviewPaquete(true)
+      const res = await obtenerElementosPaquete(Number(paqueteid))
+      if (res.success && res.data) setElementosPreviewPaquete(res.data)
+      setLoadingPreviewPaquete(false)
     }
   }
 
@@ -392,20 +409,28 @@ export function QuotationForm() {
 
   async function handleConfirmPaquete() {
     if (!selectedPaqueteId || !cotizacionId) return
+    if (elementosPaquete.length > 0) {
+      setShowConfirmReemplazarModal(true)
+      return
+    }
+    await ejecutarAsignarPaquete()
+  }
 
+  async function ejecutarAsignarPaquete() {
+    if (!selectedPaqueteId || !cotizacionId) return
+    setShowConfirmReemplazarModal(false)
     setAssigningPaquete(true)
     try {
+      await limpiarElementosCotizacion(cotizacionId)
       const result = await asignarPaqueteACotizacion(cotizacionId, Number(selectedPaqueteId), Number(formData.hotel))
-      
       if (result.success) {
-        // Cargar los elementos desde elementosxcotizacion
         const elementosResult = await obtenerElementosCotizacion(cotizacionId)
         if (elementosResult.success && elementosResult.data) {
           setElementosPaquete(elementosResult.data)
         }
         setShowPaqueteModal(false)
         setSelectedPaqueteId("")
-        alert("Paquete asignado exitosamente")
+        setElementosPreviewPaquete([])
       } else {
         alert(`Error al asignar paquete: ${result.error}`)
       }
@@ -482,6 +507,7 @@ export function QuotationForm() {
 
   const handleClienteInputChange = (value: string) => {
     setFormData(prev => ({ ...prev, nombreCliente: value }))
+    setSelectedClienteId("") // invalidar selección al tipear manualmente
 
     if (value.trim() === "") {
       setFilteredClientes(clientes)
@@ -520,6 +546,12 @@ export function QuotationForm() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+
+    if (!selectedClienteId) {
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
 
     try {
@@ -540,7 +572,8 @@ export function QuotationForm() {
       formDataToSubmit.append("impuestos", formData.impuestos)
       formDataToSubmit.append("porcentajedescuento", formData.descuentoPorcentaje)
       formDataToSubmit.append("montodescuento", formData.montoDescuento)
-      formDataToSubmit.append("estatus", "cotizada")
+      formDataToSubmit.append("estatusid", formData.estatusId)
+      formDataToSubmit.append("categoriaevento", formData.categoriaEvento)
       formDataToSubmit.append("clienteid", selectedClienteId)
 
       const editId = searchParams.get("editId")
@@ -659,10 +692,12 @@ export function QuotationForm() {
                     if (filteredClientes.length > 0) setShowClienteDropdown(true)
                   }}
                   placeholder="Escribe para buscar cliente..."
-                  className="border-blue-200 focus:ring-blue-500"
-                  required
+                  className={`border-blue-200 focus:ring-blue-500 ${formData.nombreCliente && !selectedClienteId ? "border-red-400 focus:ring-red-400" : ""}`}
                   autoComplete="off"
                 />
+                {formData.nombreCliente && !selectedClienteId && (
+                  <p className="text-xs text-red-500 mt-1">Cliente no válido. Debes seleccionar uno del listado.</p>
+                )}
                 {showClienteDropdown && filteredClientes.length > 0 && (
                   <div className="absolute z-50 w-full mt-1 bg-white border border-blue-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                     {filteredClientes.map((cliente) => (
@@ -682,32 +717,32 @@ export function QuotationForm() {
               <div className="space-y-2">
                 <Label htmlFor="email" className="text-sm font-medium flex items-center gap-2">
                   <Mail className="h-4 w-4" />
-                  Email <span className="text-red-500">*</span>
+                  Email
                 </Label>
                 <Input
                   id="email"
                   type="email"
                   value={formData.email}
-                  onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                  placeholder="cliente@example.com"
-                  className="border-blue-200 focus:ring-blue-500"
-                  required
+                  placeholder="Se completa al seleccionar cliente"
+                  className="border-blue-200 bg-gray-50 text-gray-500 cursor-not-allowed"
+                  disabled
+                  readOnly
                 />
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="telefono" className="text-sm font-medium flex items-center gap-2">
                   <Phone className="h-4 w-4" />
-                  Teléfono <span className="text-red-500">*</span>
+                  Teléfono
                 </Label>
                 <Input
                   id="telefono"
                   type="tel"
                   value={formData.telefono}
-                  onChange={(e) => setFormData(prev => ({ ...prev, telefono: e.target.value }))}
-                  placeholder="(555) 123-4567"
-                  className="border-blue-200 focus:ring-blue-500"
-                  required
+                  placeholder="Se completa al seleccionar cliente"
+                  className="border-blue-200 bg-gray-50 text-gray-500 cursor-not-allowed"
+                  disabled
+                  readOnly
                 />
               </div>
             </div>
@@ -1089,7 +1124,23 @@ export function QuotationForm() {
                   placeholder="Ej: Boda de Juan y María"
                   className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
                   required
-                />
+  />
+              </div>
+
+              <div className="space-y-1 w-48">
+                <Label htmlFor="categoriaEvento" className="text-xs font-medium">
+                  Categoría del Evento
+                </Label>
+                <Select value={formData.categoriaEvento} onValueChange={(v) => setFormData(prev => ({ ...prev, categoriaEvento: v }))}>
+                  <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full">
+                    <SelectValue placeholder="Selecciona categoría" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categoriasEvento.map((cat) => (
+                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-1 w-48">
@@ -1103,6 +1154,22 @@ export function QuotationForm() {
                   <SelectContent>
                     {tiposEvento.map((tipo) => (
                       <SelectItem key={tipo.value} value={tipo.value}>{tipo.text}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1 w-48">
+                <Label htmlFor="estatus" className="text-xs font-medium">
+                  Estatus
+                </Label>
+                <Select value={formData.estatusId} onValueChange={(v) => setFormData(prev => ({ ...prev, estatusId: v }))}>
+                  <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full">
+                    <SelectValue placeholder="Selecciona estatus" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {estatusList.map((e) => (
+                      <SelectItem key={e.value} value={e.value}>{e.text}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1137,7 +1204,7 @@ export function QuotationForm() {
       <div className="flex gap-4 justify-end">
         <Button
           type="submit"
-          disabled={loading || (!searchParams.get("editId") && !!cotizacionId)}
+          disabled={loading || !selectedClienteId || (!searchParams.get("editId") && !!cotizacionId)}
           className="min-w-[120px] bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:opacity-50"
         >
           {loading ? "Guardando..." : searchParams.get("editId") ? "Actualizar Cotización" : "Crear Cotización"}
@@ -1428,12 +1495,12 @@ export function QuotationForm() {
       {/* Modal Agregar Paquete */}
       {showPaqueteModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-5">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 space-y-5">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900">Seleccionar Paquete</h2>
               <button
                 type="button"
-                onClick={() => setShowPaqueteModal(false)}
+                onClick={() => { setShowPaqueteModal(false); setElementosPreviewPaquete([]) }}
                 className="text-gray-400 hover:text-gray-600"
               >
                 <X className="w-5 h-5" />
@@ -1445,23 +1512,15 @@ export function QuotationForm() {
               {loadingPaquetes ? (
                 <p className="text-sm text-gray-500">Cargando paquetes...</p>
               ) : paquetes.length === 0 ? (
-                <p className="text-sm text-gray-400">
-                  No hay paquetes disponibles para el tipo de evento seleccionado.
-                </p>
+                <p className="text-sm text-gray-400">No hay paquetes disponibles para el tipo de evento seleccionado.</p>
               ) : (
-                <Select
-                  value={selectedPaqueteId}
-                  onValueChange={handlePaqueteChange}
-                >
+                <Select value={selectedPaqueteId} onValueChange={handlePaqueteChange}>
                   <SelectTrigger>
                     <SelectValue placeholder="Selecciona un paquete" />
                   </SelectTrigger>
                   <SelectContent>
                     {paquetes.map((p) => (
-                      <SelectItem
-                        key={p.paqueteid || p.id}
-                        value={(p.paqueteid || p.id)?.toString()}
-                      >
+                      <SelectItem key={p.paqueteid || p.id} value={(p.paqueteid || p.id)?.toString()}>
                         {p.nombre || p.name}
                       </SelectItem>
                     ))}
@@ -1470,37 +1529,106 @@ export function QuotationForm() {
               )}
             </div>
 
-            {/* Package preview inside modal */}
-            {selectedPaqueteInfo && (
-              <div className="border rounded-lg p-4 bg-gray-50 space-y-1">
-                <p className="text-sm font-semibold text-gray-800">{selectedPaqueteInfo.nombre || selectedPaqueteInfo.name}</p>
-                {selectedPaqueteInfo.descripcion && (
-                  <p className="text-xs text-gray-500">{selectedPaqueteInfo.descripcion}</p>
+            {/* Preview de elementos del paquete */}
+            {selectedPaqueteId && (
+              <div className="border rounded-lg bg-[#f7f5f0] overflow-hidden">
+                {/* Header con nombre y precio */}
+                {selectedPaqueteInfo && (
+                  <div className="px-4 py-3 border-b border-[#1a3d2e]/10 bg-[#1a3d2e]/5">
+                    <p className="text-sm font-bold text-[#1a3d2e] uppercase tracking-wide">
+                      {selectedPaqueteInfo.nombre || selectedPaqueteInfo.name}
+                    </p>
+                    {(selectedPaqueteInfo.precio2025 || selectedPaqueteInfo.precio2026 || selectedPaqueteInfo.precio) && (
+                      <p className="text-xs text-[#1a3d2e]/70 mt-0.5">
+                        {selectedPaqueteInfo.precio2025
+                          ? `$${selectedPaqueteInfo.precio2025} (2025)`
+                          : selectedPaqueteInfo.precio2026
+                          ? `$${selectedPaqueteInfo.precio2026} (2026)`
+                          : `$${selectedPaqueteInfo.precio}`}
+                      </p>
+                    )}
+                  </div>
                 )}
-                {(selectedPaqueteInfo.precio2025 || selectedPaqueteInfo.precio2026 || selectedPaqueteInfo.precio) && (
-                  <p className="text-xs text-[#1a3d2e] font-medium mt-1">
-                    Precio:{" "}
-                    {selectedPaqueteInfo.precio2025
-                      ? `$${selectedPaqueteInfo.precio2025} (2025)`
-                      : selectedPaqueteInfo.precio2026
-                      ? `$${selectedPaqueteInfo.precio2026} (2026)`
-                      : `$${selectedPaqueteInfo.precio}`}
-                  </p>
-                )}
+
+                {/* Elementos agrupados */}
+                <div className="p-4 max-h-72 overflow-y-auto">
+                  {loadingPreviewPaquete ? (
+                    <p className="text-sm text-gray-500 text-center py-4">Cargando elementos...</p>
+                  ) : elementosPreviewPaquete.length === 0 ? (
+                    <p className="text-sm text-gray-400 text-center py-4">Este paquete no tiene elementos registrados.</p>
+                  ) : (() => {
+                    const grouped: Record<string, any[]> = {}
+                    for (const el of elementosPreviewPaquete) {
+                      const key = normalizarSeccion(el.tipoelemento || el.tipo || "otros")
+                      if (!grouped[key]) grouped[key] = []
+                      grouped[key].push(el)
+                    }
+                    return (
+                      <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+                        {Object.entries(grouped).map(([tipo, items]) => (
+                          <div key={tipo}>
+                            <p className="text-[10px] font-bold text-[#1a3d2e] uppercase tracking-widest mb-1">{tipo}</p>
+                            <ul className="space-y-0.5">
+                              {items.map((item, i) => (
+                                <li key={i} className={`text-xs ${item.destacado ? "text-[#b87333]" : "text-gray-600"}`}>
+                                  • {item.descripcion || item.nombre || item.elemento || ""}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })()}
+                </div>
               </div>
             )}
 
             <div className="flex justify-end gap-3 pt-2">
-              <Button type="button" variant="outline" onClick={() => setShowPaqueteModal(false)}>
+              <Button type="button" variant="outline" onClick={() => { setShowPaqueteModal(false); setElementosPreviewPaquete([]) }}>
                 Cancelar
               </Button>
               <Button
                 type="button"
-                disabled={!selectedPaqueteId || assigningPaquete}
+                disabled={!selectedPaqueteId || assigningPaquete || loadingPreviewPaquete}
                 onClick={handleConfirmPaquete}
                 className="bg-[#1a3d2e] hover:bg-[#1a3d2e]/90 text-white"
               >
                 {assigningPaquete ? "Asignando..." : "Confirmar"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal confirmar reemplazo de elementos */}
+      {showConfirmReemplazarModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5 text-amber-600">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">¿Reemplazar elementos actuales?</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Esta cotización ya tiene elementos asignados. Si continúas, todos serán eliminados y reemplazados con los del paquete seleccionado.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-1">
+              <Button type="button" variant="outline" onClick={() => setShowConfirmReemplazarModal(false)}>
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={ejecutarAsignarPaquete}
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                Sí, reemplazar
               </Button>
             </div>
           </div>

@@ -21,6 +21,7 @@ import {
   Menu,
   LogOut,
   X,
+  ClipboardList,
 } from "lucide-react"
 import { eliminarSesionCookies } from "@/app/actions/session"
 import { Button } from "@/components/ui/button"
@@ -108,6 +109,11 @@ const quickAccessItems = [
     title: "Habitaciones",
     href: "/habitaciones",
     icon: BedDouble,
+  },
+  {
+    title: "Cotizaciones",
+    href: "/cotizaciones",
+    icon: ClipboardList,
   },
 ]
 

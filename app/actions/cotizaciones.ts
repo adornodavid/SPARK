@@ -100,7 +100,22 @@ export async function objetoCotizacion(
       }
     }
 
-    return { success: true, error: "", data: data?.[0] ?? null }
+    const row = data?.[0] ?? null
+
+    // Complementar con campos no incluidos en la vista
+    if (row?.id) {
+      const { data: extra } = await supabase
+        .from("cotizaciones")
+        .select("categoriaevento, estatusid")
+        .eq("id", row.id)
+        .single()
+      if (extra) {
+        row.categoriaevento = extra.categoriaevento
+        row.estatusid = extra.estatusid
+      }
+    }
+
+    return { success: true, error: "", data: row }
   } catch (error: unknown) {
     console.error("Error en app/actions/cotizaciones en objetoCotizacion (Individual): ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
@@ -185,7 +200,8 @@ export async function crearCotizacion(formData: FormData) {
     const horainicio = formData.get("horainicio") as string
     const horafin = formData.get("horafin") as string
     const numeroinvitados = formData.get("numeroinvitados") as string
-    const estatus = formData.get("estatus") as string
+    const estatusid = formData.get("estatusid") as string
+    const categoriaevento = formData.get("categoriaevento") as string
     const subtotal = formData.get("subtotal") as string
     const impuestos = formData.get("impuestos") as string
     const porcentajedescuento = formData.get("porcentajedescuento") as string
@@ -257,7 +273,8 @@ export async function crearCotizacion(formData: FormData) {
       horainicio: horainicio || null,
       horafin: horafin || null,
       numeroinvitados: numeroinvitados || null,
-      estatus,
+      estatusid: estatusid ? Number(estatusid) : null,
+      categoriaevento: categoriaevento || null,
       subtotal: subtotal ? Number(subtotal) : null,
       impuestos: impuestos ? Number(impuestos) : null,
       porcentajedescuento: porcentajedescuento ? Number(porcentajedescuento) : null,
@@ -380,7 +397,8 @@ export async function actualizarCotizacion(formData: FormData) {
     const horainicio = formData.get("horainicio") as string
     const horafin = formData.get("horafin") as string
     const numeroinvitados = formData.get("numeroinvitados") as string
-    const estatus = formData.get("estatus") as string
+    const estatusid = formData.get("estatusid") as string
+    const categoriaevento = formData.get("categoriaevento") as string
     const subtotal = formData.get("subtotal") as string
     const impuestos = formData.get("impuestos") as string
     const porcentajedescuento = formData.get("porcentajedescuento") as string
@@ -420,7 +438,8 @@ export async function actualizarCotizacion(formData: FormData) {
       horainicio,
       horafin,
       numeroinvitados,
-      estatus,
+      estatusid: estatusid ? Number(estatusid) : null,
+      categoriaevento: categoriaevento || null,
       subtotal: subtotal ? Number(subtotal) : null,
       impuestos: impuestos ? Number(impuestos) : null,
       porcentajedescuento: porcentajedescuento ? Number(porcentajedescuento) : null,
@@ -500,6 +519,28 @@ export async function estatusActivoCotizacion(
     console.error("Error en estatusActivoCotizacion de app/actions/cotizaciones: ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error interno del servidor: " + errorMessage }
+  }
+}
+
+// Función: listaCategoriaEvento: obtiene valores distintos de categoriaevento para el dropdownlist
+export async function listaCategoriaEvento() {
+  try {
+    const { data, error } = await supabase
+      .from("cotizaciones")
+      .select("categoriaevento")
+      .not("categoriaevento", "is", null)
+      .order("categoriaevento", { ascending: true })
+
+    if (error) {
+      console.error("Error obteniendo categorías de evento:", error)
+      return { success: false, error: error.message }
+    }
+
+    const categorias: string[] = [...new Set((data || []).map((r: any) => r.categoriaevento).filter(Boolean))]
+    return { success: true, data: categorias }
+  } catch (error) {
+    console.error("Error en listaCategoriaEvento:", error)
+    return { success: false, error: "Error interno del servidor" }
   }
 }
 

@@ -19,6 +19,28 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey) // Declare the su
 	* LIST
     - listaDesplegableCatalogos / ddlCatalogos
 ================================================== */
+// Función: listaEstatusCotizacion: obtiene id y nombre de estatus donde seccion = 'Cotizacion'
+export async function listaEstatusCotizacion() {
+  try {
+    const { data, error } = await supabase
+      .from("estatus")
+      .select("id, nombre")
+      .eq("seccion", "Cotizacion")
+      .order("orden", { ascending: true })
+
+    if (error) {
+      console.error("Error obteniendo estatus de cotización:", error)
+      return { success: false, error: error.message }
+    }
+
+    const lista = (data || []).map((r: any) => ({ value: r.id.toString(), text: r.nombre }))
+    return { success: true, data: lista }
+  } catch (error) {
+    console.error("Error en listaEstatusCotizacion:", error)
+    return { success: false, error: "Error interno del servidor" }
+  }
+}
+
 // Función: listaDesplegableTipoEvento: obtiene id y nombre de la tabla tipoevento
 export async function listaDesplegableTipoEvento() {
   try {
