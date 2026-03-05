@@ -26,6 +26,20 @@ interface QuotationFormProps {
   quotationId?: string
 }
 
+// Normaliza tipoelemento de BD a la clave de sección del UI (plural, minúsculas)
+const TIPO_A_SECCION: Record<string, string> = {
+  alimento: "alimentos",
+  platillo: "alimentos",
+  platillos: "alimentos",
+  bebida: "bebidas",
+  cortesia: "cortesias",
+  servicio: "servicio",
+}
+function normalizarSeccion(tipo: string): string {
+  const lower = tipo.toLowerCase().trim()
+  return TIPO_A_SECCION[lower] ?? lower
+}
+
 // Horarios permitidos: 8:00 AM a 1:00 AM (intervalos de 30 min)
 const HORARIOS_EVENTO = (() => {
   const slots: { value: string; label: string }[] = []
@@ -215,7 +229,7 @@ export function QuotationForm() {
                 // Cargar secciones del template del paquete para mantenerlas aunque estén vacías
                 obtenerElementosPaquete(Number(paqueteid)).then((tmplRes) => {
                   if (tmplRes.success && tmplRes.data) {
-                    const secciones = [...new Set(tmplRes.data.map((el: any) => (el.tipoelemento || el.tipo || "otros").toLowerCase()))]
+                    const secciones = [...new Set(tmplRes.data.map((el: any) => normalizarSeccion(el.tipoelemento || el.tipo || "otros")))]
                     setSeccionesPaquete(secciones as string[])
                   }
                 })
@@ -1243,7 +1257,7 @@ export function QuotationForm() {
                   }
                   // Llenar con elementos actuales
                   for (const el of elementosPaquete) {
-                    const key = (el.tipoelemento || el.tipo || "otros").toLowerCase()
+                    const key = normalizarSeccion(el.tipoelemento || el.tipo || "otros")
                     if (!grouped[key]) grouped[key] = []
                     grouped[key].push(el)
                   }

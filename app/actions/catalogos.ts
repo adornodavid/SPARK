@@ -149,12 +149,16 @@ export async function limpiarElementosCotizacion(cotizacionid: number) {
 // Mapa de tipoelemento (en minúsculas) al nombre real de la tabla en Supabase
 const TABLA_POR_TIPO: Record<string, string> = {
   lugar: "lugar",
-  alimentos: "alimentos",
+  alimento: "platillos",
+  alimentos: "platillos",
+  platillo: "platillos",
   platillos: "platillos",
   bebidas: "bebidas",
+  bebida: "bebidas",
   mobiliario: "mobiliario",
   servicio: "servicio",
   servicios: "servicios",
+  cortesia: "cortesias",
   cortesias: "cortesias",
   "beneficios adicionales": "beneficiosadicionales",
   beneficiosadicionales: "beneficiosadicionales",
