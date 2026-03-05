@@ -506,16 +506,16 @@ export function QuotationForm() {
   }
 
   const handleClienteInputChange = (value: string) => {
-    setFormData(prev => ({ ...prev, nombreCliente: value }))
     setSelectedClienteId("") // invalidar selección al tipear manualmente
-
     if (value.trim() === "") {
+      setFormData(prev => ({ ...prev, nombreCliente: "", email: "", telefono: "" }))
       setFilteredClientes(clientes)
       setShowClienteDropdown(false)
       setSelectedClienteId("")
       return
     }
 
+    setFormData(prev => ({ ...prev, nombreCliente: value }))
     const searchTerm = value.toLowerCase()
     const filtered = clientes.filter((cliente) => cliente.text.toLowerCase().includes(searchTerm))
 
