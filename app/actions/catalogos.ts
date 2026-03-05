@@ -175,6 +175,71 @@ function capitalizarPrimera(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1)
 }
 
+// Función: buscarLugaresPorHotel: busca lugares filtrando por hotelid
+export async function buscarLugaresPorHotel(hotelid: number) {
+  try {
+    const { data, error } = await supabase
+      .from("lugares")
+      .select("*")
+      .eq("hotelid", hotelid)
+      .order("nombre", { ascending: true })
+
+    if (error) {
+      console.error("Error buscando lugares por hotel: ", error)
+      return { success: false, error: error.message }
+    }
+
+    return { success: true, data: data || [] }
+  } catch (error) {
+    console.error("Error en buscarLugaresPorHotel: ", error)
+    return { success: false, error: "Error interno del servidor" }
+  }
+}
+
+// Función: modificarLugarCotizacion: update si ya existe lugar en cotización, insert si no
+export async function modificarLugarCotizacion(cotizacionid: number, hotelid: number, elementoid: number) {
+  try {
+    const { data: existing, error: errorGet } = await supabase
+      .from("elementosxcotizacion")
+      .select("id")
+      .eq("cotizacionid", cotizacionid)
+      .eq("tipoelemento", "Lugar")
+      .limit(1)
+
+    if (errorGet) {
+      console.error("Error verificando lugar existente: ", errorGet)
+      return { success: false, error: errorGet.message }
+    }
+
+    if (existing && existing.length > 0) {
+      const { error } = await supabase
+        .from("elementosxcotizacion")
+        .update({ elementoid, hotelid })
+        .eq("cotizacionid", cotizacionid)
+        .eq("tipoelemento", "Lugar")
+
+      if (error) {
+        console.error("Error actualizando lugar: ", error)
+        return { success: false, error: error.message }
+      }
+    } else {
+      const { error } = await supabase
+        .from("elementosxcotizacion")
+        .insert({ cotizacionid, hotelid, elementoid, tipoelemento: "Lugar" })
+
+      if (error) {
+        console.error("Error insertando lugar: ", error)
+        return { success: false, error: error.message }
+      }
+    }
+
+    return { success: true }
+  } catch (error) {
+    console.error("Error en modificarLugarCotizacion: ", error)
+    return { success: false, error: "Error interno del servidor" }
+  }
+}
+
 // Función: buscarElementosPorTabla: busca elementos en la tabla correspondiente al tipoelemento
 export async function buscarElementosPorTabla(tipo: string) {
   const tabla = resolverTabla(tipo)

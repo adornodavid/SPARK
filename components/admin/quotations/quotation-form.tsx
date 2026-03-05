@@ -6,7 +6,7 @@ import { listaDesplegableHoteles } from "@/app/actions/hoteles"
 import { listaDesplegableSalones, objetoSalon, objetoSalones } from "@/app/actions/salones"
 import { crearCotizacion, actualizarCotizacion, objetoCotizacion } from "@/app/actions/cotizaciones"
 import { obtenerDisponibilidadSalon, obtenerReservacionesPorDia } from "@/app/actions/reservaciones"
-import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, agregarElementoACotizacion } from "@/app/actions/catalogos"
+import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, agregarElementoACotizacion, buscarLugaresPorHotel, modificarLugarCotizacion } from "@/app/actions/catalogos"
 import { Users, MapPin, DollarSign, User, Mail, Phone, Building2, Check, X, CalendarIcon } from "lucide-react"
 import { Calendar } from "@/components/ui/calendar"
 import type { DateRange } from "react-day-picker"
@@ -362,7 +362,9 @@ export function QuotationForm() {
     setElementosTabla([])
     setShowAgregarModal(true)
     setLoadingTabla(true)
-    const result = await buscarElementosPorTabla(tipo)
+    const result = tipo === "lugar"
+      ? await buscarLugaresPorHotel(Number(formData.hotel))
+      : await buscarElementosPorTabla(tipo)
     if (result.success && result.data) {
       setElementosTabla(result.data)
     }
@@ -372,12 +374,9 @@ export function QuotationForm() {
   async function handleAgregarElemento() {
     if (!selectedElementoId || !cotizacionId) return
     setSavingElemento(true)
-    const result = await agregarElementoACotizacion(
-      cotizacionId,
-      Number(formData.hotel),
-      Number(selectedElementoId),
-      agregarTipo
-    )
+    const result = agregarTipo === "lugar"
+      ? await modificarLugarCotizacion(cotizacionId, Number(formData.hotel), Number(selectedElementoId))
+      : await agregarElementoACotizacion(cotizacionId, Number(formData.hotel), Number(selectedElementoId), agregarTipo)
     if (result.success) {
       const elementosResult = await obtenerElementosCotizacion(cotizacionId)
       if (elementosResult.success && elementosResult.data) {
@@ -1282,32 +1281,49 @@ export function QuotationForm() {
                               <p className={`text-sm ${item.destacado ? "text-[#b87333]" : "text-gray-600"}`}>
                                 {item.descripcion || item.nombre || item.elemento || ""}
                               </p>
-                              <button
-                                type="button"
-                                onClick={() => handleEliminarElemento(item.tipoelemento, item.elementoid ?? item.id)}
-                                className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600 p-0.5 rounded flex-shrink-0"
-                                title="Eliminar elemento"
-                              >
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
-                                  <polyline points="3 6 5 6 21 6"/>
-                                  <path d="M19 6l-1 14H6L5 6"/>
-                                  <path d="M10 11v6M14 11v6"/>
-                                  <path d="M9 6V4h6v2"/>
-                                </svg>
-                              </button>
+                              {tipo !== "lugar" && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleEliminarElemento(item.tipoelemento, item.elementoid ?? item.id)}
+                                  className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600 p-0.5 rounded flex-shrink-0"
+                                  title="Eliminar elemento"
+                                >
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
+                                    <polyline points="3 6 5 6 21 6"/>
+                                    <path d="M19 6l-1 14H6L5 6"/>
+                                    <path d="M10 11v6M14 11v6"/>
+                                    <path d="M9 6V4h6v2"/>
+                                  </svg>
+                                </button>
+                              )}
                             </div>
                           ))}
-                          <button
-                            type="button"
-                            onClick={() => handleAbrirAgregar(tipo)}
-                            className="mt-2 flex items-center gap-1 text-xs text-[#1a3d2e] hover:text-[#1a3d2e]/70 border border-[#1a3d2e]/30 hover:border-[#1a3d2e]/60 rounded px-2 py-1 transition-colors"
-                          >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
-                              <line x1="12" y1="5" x2="12" y2="19"/>
-                              <line x1="5" y1="12" x2="19" y2="12"/>
-                            </svg>
-                            Agregar
-                          </button>
+                          {(tipo !== "lugar" || items.length === 0) && (
+                            <button
+                              type="button"
+                              onClick={() => handleAbrirAgregar(tipo)}
+                              className="mt-2 flex items-center gap-1 text-xs text-[#1a3d2e] hover:text-[#1a3d2e]/70 border border-[#1a3d2e]/30 hover:border-[#1a3d2e]/60 rounded px-2 py-1 transition-colors"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
+                                <line x1="12" y1="5" x2="12" y2="19"/>
+                                <line x1="5" y1="12" x2="19" y2="12"/>
+                              </svg>
+                              Agregar
+                            </button>
+                          )}
+                          {tipo === "lugar" && items.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleAbrirAgregar(tipo)}
+                              className="mt-2 flex items-center gap-1 text-xs text-[#1a3d2e] hover:text-[#1a3d2e]/70 border border-[#1a3d2e]/30 hover:border-[#1a3d2e]/60 rounded px-2 py-1 transition-colors"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
+                                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                              </svg>
+                              Modificar
+                            </button>
+                          )}
                         </div>
                       </div>
                     )
@@ -1497,7 +1513,7 @@ export function QuotationForm() {
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-5">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900 capitalize">
-                Agregar elemento — {agregarTipo}
+                {agregarTipo === "lugar" ? "Modificar lugar" : `Agregar elemento — ${agregarTipo}`}
               </h2>
               <button
                 type="button"
@@ -1540,7 +1556,7 @@ export function QuotationForm() {
                 onClick={handleAgregarElemento}
                 className="bg-[#1a3d2e] hover:bg-[#1a3d2e]/90 text-white"
               >
-                {savingElemento ? "Guardando..." : "Agregar"}
+                {savingElemento ? "Guardando..." : agregarTipo === "lugar" ? "Modificar" : "Agregar"}
               </Button>
             </div>
           </div>
