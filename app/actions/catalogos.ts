@@ -192,9 +192,27 @@ function resolverTabla(tipo: string): string {
   return TABLA_POR_TIPO[key] || key
 }
 
-function capitalizarPrimera(str: string): string {
-  if (!str) return str
-  return str.charAt(0).toUpperCase() + str.slice(1)
+// Mapa de clave de sección (UI) al valor canónico que se guarda en tipoelemento
+const TIPO_CANONICO: Record<string, string> = {
+  alimentos: "Alimento",
+  alimento: "Alimento",
+  platillo: "Alimento",
+  platillos: "Alimento",
+  bebidas: "Bebida",
+  bebida: "Bebida",
+  cortesias: "Cortesia",
+  cortesia: "Cortesia",
+  servicios: "Servicio",
+  servicio: "Servicio",
+  mobiliario: "Mobiliario",
+  audiovisual: "Audiovisual",
+  beneficiosadicionales: "Beneficios adicionales",
+  lugar: "Lugar",
+}
+
+function normalizarTipoElemento(tipo: string): string {
+  const key = tipo.toLowerCase().trim()
+  return TIPO_CANONICO[key] ?? (tipo.charAt(0).toUpperCase() + tipo.slice(1))
 }
 
 // Función: buscarLugaresPorHotel: busca lugares filtrando por hotelid
@@ -262,6 +280,22 @@ export async function modificarLugarCotizacion(cotizacionid: number, hotelid: nu
   }
 }
 
+// Función: obtenerDocumentoPDF: obtiene la URL del documentoPDF de un elemento en platillos o bebidas
+export async function obtenerDocumentoPDF(elementoid: number, tipo: string) {
+  const tabla = resolverTabla(tipo)
+  try {
+    const { data, error } = await supabase
+      .from(tabla)
+      .select("documentopdf")
+      .eq("id", elementoid)
+      .single()
+    if (error) return { success: false, pdf: null }
+    return { success: true, pdf: (data as any)?.documentopdf ?? null }
+  } catch {
+    return { success: false, pdf: null }
+  }
+}
+
 // Función: buscarElementosPorTabla: busca elementos en la tabla correspondiente al tipoelemento
 export async function buscarElementosPorTabla(tipo: string) {
   const tabla = resolverTabla(tipo)
@@ -285,7 +319,7 @@ export async function buscarElementosPorTabla(tipo: string) {
 
 // Función: agregarElementoACotizacion: agrega un elemento a elementosxcotizacion
 export async function agregarElementoACotizacion(cotizacionid: number, hotelid: number, elementoid: number, tipoelemento: string) {
-  const tipoCapitalizado = capitalizarPrimera(tipoelemento)
+  const tipoCapitalizado = normalizarTipoElemento(tipoelemento)
   try {
     const { data, error } = await supabase
       .from("elementosxcotizacion")

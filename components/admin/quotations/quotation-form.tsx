@@ -6,7 +6,7 @@ import { listaDesplegableHoteles } from "@/app/actions/hoteles"
 import { listaDesplegableSalones, objetoSalon, objetoSalones } from "@/app/actions/salones"
 import { crearCotizacion, actualizarCotizacion, objetoCotizacion } from "@/app/actions/cotizaciones"
 import { obtenerDisponibilidadSalon, obtenerReservacionesPorDia } from "@/app/actions/reservaciones"
-import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, agregarElementoACotizacion, buscarLugaresPorHotel, modificarLugarCotizacion, listaEstatusCotizacion } from "@/app/actions/catalogos"
+import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, agregarElementoACotizacion, buscarLugaresPorHotel, modificarLugarCotizacion, listaEstatusCotizacion, obtenerDocumentoPDF } from "@/app/actions/catalogos"
 import { listaCategoriaEvento } from "@/app/actions/cotizaciones"
 import { Users, MapPin, DollarSign, User, Mail, Phone, Building2, Check, X, CalendarIcon } from "lucide-react"
 import { Calendar } from "@/components/ui/calendar"
@@ -87,6 +87,9 @@ export function QuotationForm() {
   const [elementosPreviewPaquete, setElementosPreviewPaquete] = useState<any[]>([])
   const [loadingPreviewPaquete, setLoadingPreviewPaquete] = useState(false)
   const [showConfirmReemplazarModal, setShowConfirmReemplazarModal] = useState(false)
+  const [showPDFModal, setShowPDFModal] = useState(false)
+  const [pdfModalUrl, setPdfModalUrl] = useState<string>("")
+  const [loadingPDF, setLoadingPDF] = useState(false)
   const [paquetes, setPaquetes] = useState<any[]>([])
   const [selectedPaqueteId, setSelectedPaqueteId] = useState<string>("")
   const [selectedPaqueteInfo, setSelectedPaqueteInfo] = useState<any>(null)
@@ -371,6 +374,15 @@ export function QuotationForm() {
     } else {
       alert(`Error al eliminar: ${result.error}`)
     }
+  }
+
+  async function handleVerPDF(elementoid: number, tipo: string) {
+    setShowPDFModal(true)
+    setPdfModalUrl("")
+    setLoadingPDF(true)
+    const result = await obtenerDocumentoPDF(elementoid, tipo)
+    if (result.success && result.pdf) setPdfModalUrl(result.pdf)
+    setLoadingPDF(false)
   }
 
   async function handleAbrirAgregar(tipo: string) {
@@ -1352,9 +1364,20 @@ export function QuotationForm() {
                         <div className="pl-11 space-y-1">
                           {items.map((item, i) => (
                             <div key={i} className="flex items-center justify-between gap-2 group">
-                              <p className={`text-sm ${item.destacado ? "text-[#b87333]" : "text-gray-600"}`}>
-                                {item.descripcion || item.nombre || item.elemento || ""}
-                              </p>
+                              {(tipo === "alimentos" || tipo === "bebidas") ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleVerPDF(Number(item.elementoid ?? item.id), tipo)}
+                                  className={`text-sm text-left underline decoration-dotted cursor-pointer ${item.destacado ? "text-[#b87333] hover:text-[#b87333]/70" : "text-[#1a3d2e] hover:text-[#1a3d2e]/70"}`}
+                                  title="Ver documento PDF"
+                                >
+                                  {item.descripcion || item.nombre || item.elemento || ""}
+                                </button>
+                              ) : (
+                                <p className={`text-sm ${item.destacado ? "text-[#b87333]" : "text-gray-600"}`}>
+                                  {item.descripcion || item.nombre || item.elemento || ""}
+                                </p>
+                              )}
                               {tipo !== "lugar" && (
                                 <button
                                   type="button"
@@ -1681,6 +1704,19 @@ export function QuotationForm() {
               )}
             </div>
 
+            {/* Preview PDF al seleccionar elemento en Alimentos o Bebidas */}
+            {(agregarTipo === "alimentos" || agregarTipo === "bebidas") && selectedElementoId && (() => {
+              const el = elementosTabla.find((e: any) => e.id.toString() === selectedElementoId)
+              const pdf = el?.documentopdf
+              return pdf ? (
+                <div className="border rounded overflow-hidden" style={{ height: "280px" }}>
+                  <iframe src={pdf} className="w-full h-full" title="Vista previa PDF" />
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic">Este elemento no tiene PDF asociado.</p>
+              )
+            })()}
+
             <div className="flex justify-end gap-3 pt-2">
               <Button type="button" variant="outline" onClick={() => setShowAgregarModal(false)}>
                 Cancelar
@@ -1694,6 +1730,51 @@ export function QuotationForm() {
                 {savingElemento ? "Guardando..." : agregarTipo === "lugar" ? "Modificar" : "Agregar"}
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal visor PDF */}
+      {showPDFModal && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-2">
+          <div className="relative w-full h-full max-w-6xl" style={{ height: "96vh" }}>
+            {/* Controles flotantes */}
+            <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
+              {pdfModalUrl && (
+                <a
+                  href={pdfModalUrl}
+                  download
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white/90 hover:bg-white text-gray-800 text-sm font-medium rounded-lg shadow transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Descargar PDF
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowPDFModal(false)}
+                className="flex items-center justify-center w-8 h-8 bg-white/90 hover:bg-white text-gray-700 rounded-lg shadow transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Contenido PDF */}
+            {loadingPDF ? (
+              <div className="w-full h-full flex items-center justify-center">
+                <p className="text-white text-sm">Cargando documento...</p>
+              </div>
+            ) : pdfModalUrl ? (
+              <iframe src={pdfModalUrl} className="w-full h-full rounded-lg" title="Documento PDF" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <p className="text-white/70 text-sm">Este elemento no tiene documento PDF asociado.</p>
+              </div>
+            )}
           </div>
         </div>
       )}
