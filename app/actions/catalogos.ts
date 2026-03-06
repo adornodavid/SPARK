@@ -19,6 +19,28 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey) // Declare the su
 	* LIST
     - listaDesplegableCatalogos / ddlCatalogos
 ================================================== */
+// Función: listaEstatusCotizacion: obtiene id y nombre de estatus donde seccion = 'Cotizacion'
+export async function listaEstatusCotizacion() {
+  try {
+    const { data, error } = await supabase
+      .from("estatus")
+      .select("id, nombre")
+      .eq("seccion", "Cotizacion")
+      .order("orden", { ascending: true })
+
+    if (error) {
+      console.error("Error obteniendo estatus de cotización:", error)
+      return { success: false, error: error.message }
+    }
+
+    const lista = (data || []).map((r: any) => ({ value: r.id.toString(), text: r.nombre }))
+    return { success: true, data: lista }
+  } catch (error) {
+    console.error("Error en listaEstatusCotizacion:", error)
+    return { success: false, error: "Error interno del servidor" }
+  }
+}
+
 // Función: listaDesplegableTipoEvento: obtiene id y nombre de la tabla tipoevento
 export async function listaDesplegableTipoEvento() {
   try {
@@ -170,9 +192,108 @@ function resolverTabla(tipo: string): string {
   return TABLA_POR_TIPO[key] || key
 }
 
-function capitalizarPrimera(str: string): string {
-  if (!str) return str
-  return str.charAt(0).toUpperCase() + str.slice(1)
+// Mapa de clave de sección (UI) al valor canónico que se guarda en tipoelemento
+const TIPO_CANONICO: Record<string, string> = {
+  alimentos: "Alimento",
+  alimento: "Alimento",
+  platillo: "Alimento",
+  platillos: "Alimento",
+  bebidas: "Bebida",
+  bebida: "Bebida",
+  cortesias: "Cortesia",
+  cortesia: "Cortesia",
+  servicios: "Servicio",
+  servicio: "Servicio",
+  mobiliario: "Mobiliario",
+  audiovisual: "Audiovisual",
+  beneficiosadicionales: "Beneficios adicionales",
+  lugar: "Lugar",
+}
+
+function normalizarTipoElemento(tipo: string): string {
+  const key = tipo.toLowerCase().trim()
+  return TIPO_CANONICO[key] ?? (tipo.charAt(0).toUpperCase() + tipo.slice(1))
+}
+
+// Función: buscarLugaresPorHotel: busca lugares filtrando por hotelid
+export async function buscarLugaresPorHotel(hotelid: number) {
+  try {
+    const { data, error } = await supabase
+      .from("lugares")
+      .select("*")
+      .eq("hotelid", hotelid)
+      .order("nombre", { ascending: true })
+
+    if (error) {
+      console.error("Error buscando lugares por hotel: ", error)
+      return { success: false, error: error.message }
+    }
+
+    return { success: true, data: data || [] }
+  } catch (error) {
+    console.error("Error en buscarLugaresPorHotel: ", error)
+    return { success: false, error: "Error interno del servidor" }
+  }
+}
+
+// Función: modificarLugarCotizacion: update si ya existe lugar en cotización, insert si no
+export async function modificarLugarCotizacion(cotizacionid: number, hotelid: number, elementoid: number) {
+  try {
+    const { data: existing, error: errorGet } = await supabase
+      .from("elementosxcotizacion")
+      .select("id")
+      .eq("cotizacionid", cotizacionid)
+      .eq("tipoelemento", "Lugar")
+      .limit(1)
+
+    if (errorGet) {
+      console.error("Error verificando lugar existente: ", errorGet)
+      return { success: false, error: errorGet.message }
+    }
+
+    if (existing && existing.length > 0) {
+      const { error } = await supabase
+        .from("elementosxcotizacion")
+        .update({ elementoid, hotelid })
+        .eq("cotizacionid", cotizacionid)
+        .eq("tipoelemento", "Lugar")
+
+      if (error) {
+        console.error("Error actualizando lugar: ", error)
+        return { success: false, error: error.message }
+      }
+    } else {
+      const { error } = await supabase
+        .from("elementosxcotizacion")
+        .insert({ cotizacionid, hotelid, elementoid, tipoelemento: "Lugar" })
+
+      if (error) {
+        console.error("Error insertando lugar: ", error)
+        return { success: false, error: error.message }
+      }
+    }
+
+    return { success: true }
+  } catch (error) {
+    console.error("Error en modificarLugarCotizacion: ", error)
+    return { success: false, error: "Error interno del servidor" }
+  }
+}
+
+// Función: obtenerDocumentoPDF: obtiene la URL del documentoPDF de un elemento en platillos o bebidas
+export async function obtenerDocumentoPDF(elementoid: number, tipo: string) {
+  const tabla = resolverTabla(tipo)
+  try {
+    const { data, error } = await supabase
+      .from(tabla)
+      .select("documentopdf")
+      .eq("id", elementoid)
+      .single()
+    if (error) return { success: false, pdf: null }
+    return { success: true, pdf: (data as any)?.documentopdf ?? null }
+  } catch {
+    return { success: false, pdf: null }
+  }
 }
 
 // Función: buscarElementosPorTabla: busca elementos en la tabla correspondiente al tipoelemento
@@ -198,7 +319,7 @@ export async function buscarElementosPorTabla(tipo: string) {
 
 // Función: agregarElementoACotizacion: agrega un elemento a elementosxcotizacion
 export async function agregarElementoACotizacion(cotizacionid: number, hotelid: number, elementoid: number, tipoelemento: string) {
-  const tipoCapitalizado = capitalizarPrimera(tipoelemento)
+  const tipoCapitalizado = normalizarTipoElemento(tipoelemento)
   try {
     const { data, error } = await supabase
       .from("elementosxcotizacion")

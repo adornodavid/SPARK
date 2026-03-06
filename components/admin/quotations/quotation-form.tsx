@@ -6,7 +6,8 @@ import { listaDesplegableHoteles } from "@/app/actions/hoteles"
 import { listaDesplegableSalones, objetoSalon, objetoSalones } from "@/app/actions/salones"
 import { crearCotizacion, actualizarCotizacion, objetoCotizacion } from "@/app/actions/cotizaciones"
 import { obtenerDisponibilidadSalon, obtenerReservacionesPorDia } from "@/app/actions/reservaciones"
-import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, agregarElementoACotizacion } from "@/app/actions/catalogos"
+import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, agregarElementoACotizacion, buscarLugaresPorHotel, modificarLugarCotizacion, listaEstatusCotizacion, obtenerDocumentoPDF } from "@/app/actions/catalogos"
+import { listaCategoriaEvento } from "@/app/actions/cotizaciones"
 import { Users, MapPin, DollarSign, User, Mail, Phone, Building2, Check, X, CalendarIcon } from "lucide-react"
 import { Calendar } from "@/components/ui/calendar"
 import type { DateRange } from "react-day-picker"
@@ -78,9 +79,17 @@ export function QuotationForm() {
   const [showPackageSection, setShowPackageSection] = useState(false)
   const [cotizacionId, setCotizacionId] = useState<number | null>(null)
   const [tiposEvento, setTiposEvento] = useState<ddlItem[]>([])
+  const [categoriasEvento, setCategoriasEvento] = useState<string[]>([])
+  const [estatusList, setEstatusList] = useState<ddlItem[]>([])
   const [showPaqueteModal, setShowPaqueteModal] = useState(false)
   const [showLimpiarModal, setShowLimpiarModal] = useState(false)
   const [limpiarLoading, setLimpiarLoading] = useState(false)
+  const [elementosPreviewPaquete, setElementosPreviewPaquete] = useState<any[]>([])
+  const [loadingPreviewPaquete, setLoadingPreviewPaquete] = useState(false)
+  const [showConfirmReemplazarModal, setShowConfirmReemplazarModal] = useState(false)
+  const [showPDFModal, setShowPDFModal] = useState(false)
+  const [pdfModalUrl, setPdfModalUrl] = useState<string>("")
+  const [loadingPDF, setLoadingPDF] = useState(false)
   const [paquetes, setPaquetes] = useState<any[]>([])
   const [selectedPaqueteId, setSelectedPaqueteId] = useState<string>("")
   const [selectedPaqueteInfo, setSelectedPaqueteInfo] = useState<any>(null)
@@ -118,9 +127,11 @@ export function QuotationForm() {
     horaFin: "",
     // Event Details
     nombreEvento: "",
+    categoriaEvento: "",
+    tipoEvento: "",
+    estatusId: "",
     numeroInvitados: "",
     numeroHabitaciones: "",
-    tipoEvento: "",
     // Client Information
     nombreCliente: "",
     email: "",
@@ -136,6 +147,8 @@ export function QuotationForm() {
     loadHoteles()
     loadClientes()
     loadTiposEvento()
+    listaCategoriaEvento().then(r => { if (r.success && r.data) setCategoriasEvento(r.data) })
+    listaEstatusCotizacion().then(r => { if (r.success && r.data) setEstatusList(r.data as ddlItem[]) })
   }, [])
 
 
@@ -169,9 +182,11 @@ export function QuotationForm() {
         horaInicio:          hi,
         horaFin:             hf,
         nombreEvento:        c.nombreevento              ?? "",
+        categoriaEvento:     c.categoriaevento           ?? "",
+        tipoEvento:          tid,
+        estatusId:           c.estatusid?.toString()     ?? "",
         numeroInvitados:     c.numeroinvitados?.toString() ?? "",
         numeroHabitaciones:  c.numerohabitaciones?.toString() ?? "",
-        tipoEvento:          tid,
         nombreCliente:       c.cliente                  ?? "",
         email:               c.email                    ?? "",
         telefono:            c.telefono                 ?? "",
@@ -319,12 +334,17 @@ export function QuotationForm() {
     }
   }
 
-  function handlePaqueteChange(paqueteid: string) {
+  async function handlePaqueteChange(paqueteid: string) {
     setSelectedPaqueteId(paqueteid)
     setSelectedPaqueteInfo(null)
+    setElementosPreviewPaquete([])
     if (paqueteid) {
       const paquete = paquetes.find((p) => p.paqueteid?.toString() === paqueteid || p.id?.toString() === paqueteid)
       setSelectedPaqueteInfo(paquete || null)
+      setLoadingPreviewPaquete(true)
+      const res = await obtenerElementosPaquete(Number(paqueteid))
+      if (res.success && res.data) setElementosPreviewPaquete(res.data)
+      setLoadingPreviewPaquete(false)
     }
   }
 
@@ -356,15 +376,33 @@ export function QuotationForm() {
     }
   }
 
+  async function handleVerPDF(elementoid: number, tipo: string) {
+    setShowPDFModal(true)
+    setPdfModalUrl("")
+    setLoadingPDF(true)
+    const result = await obtenerDocumentoPDF(elementoid, tipo)
+    if (result.success && result.pdf) setPdfModalUrl(result.pdf)
+    setLoadingPDF(false)
+  }
+
   async function handleAbrirAgregar(tipo: string) {
     setAgregarTipo(tipo)
     setSelectedElementoId("")
     setElementosTabla([])
     setShowAgregarModal(true)
     setLoadingTabla(true)
-    const result = await buscarElementosPorTabla(tipo)
+    const result = tipo === "lugar"
+      ? await buscarLugaresPorHotel(Number(formData.hotel))
+      : await buscarElementosPorTabla(tipo)
     if (result.success && result.data) {
-      setElementosTabla(result.data)
+      // Filtrar elementos ya asignados en esta sección para evitar duplicados
+      const yaAsignados = new Set(
+        elementosPaquete
+          .filter(el => normalizarSeccion(el.tipoelemento || el.tipo || "") === tipo)
+          .map(el => Number(el.elementoid ?? el.id))
+      )
+      const disponibles = result.data.filter((el: any) => !yaAsignados.has(Number(el.id)))
+      setElementosTabla(disponibles)
     }
     setLoadingTabla(false)
   }
@@ -372,12 +410,9 @@ export function QuotationForm() {
   async function handleAgregarElemento() {
     if (!selectedElementoId || !cotizacionId) return
     setSavingElemento(true)
-    const result = await agregarElementoACotizacion(
-      cotizacionId,
-      Number(formData.hotel),
-      Number(selectedElementoId),
-      agregarTipo
-    )
+    const result = agregarTipo === "lugar"
+      ? await modificarLugarCotizacion(cotizacionId, Number(formData.hotel), Number(selectedElementoId))
+      : await agregarElementoACotizacion(cotizacionId, Number(formData.hotel), Number(selectedElementoId), agregarTipo)
     if (result.success) {
       const elementosResult = await obtenerElementosCotizacion(cotizacionId)
       if (elementosResult.success && elementosResult.data) {
@@ -393,20 +428,28 @@ export function QuotationForm() {
 
   async function handleConfirmPaquete() {
     if (!selectedPaqueteId || !cotizacionId) return
+    if (elementosPaquete.length > 0) {
+      setShowConfirmReemplazarModal(true)
+      return
+    }
+    await ejecutarAsignarPaquete()
+  }
 
+  async function ejecutarAsignarPaquete() {
+    if (!selectedPaqueteId || !cotizacionId) return
+    setShowConfirmReemplazarModal(false)
     setAssigningPaquete(true)
     try {
+      await limpiarElementosCotizacion(cotizacionId)
       const result = await asignarPaqueteACotizacion(cotizacionId, Number(selectedPaqueteId), Number(formData.hotel))
-      
       if (result.success) {
-        // Cargar los elementos desde elementosxcotizacion
         const elementosResult = await obtenerElementosCotizacion(cotizacionId)
         if (elementosResult.success && elementosResult.data) {
           setElementosPaquete(elementosResult.data)
         }
         setShowPaqueteModal(false)
         setSelectedPaqueteId("")
-        alert("Paquete asignado exitosamente")
+        setElementosPreviewPaquete([])
       } else {
         alert(`Error al asignar paquete: ${result.error}`)
       }
@@ -482,15 +525,16 @@ export function QuotationForm() {
   }
 
   const handleClienteInputChange = (value: string) => {
-    setFormData(prev => ({ ...prev, nombreCliente: value }))
-
+    setSelectedClienteId("") // invalidar selección al tipear manualmente
     if (value.trim() === "") {
+      setFormData(prev => ({ ...prev, nombreCliente: "", email: "", telefono: "" }))
       setFilteredClientes(clientes)
       setShowClienteDropdown(false)
       setSelectedClienteId("")
       return
     }
 
+    setFormData(prev => ({ ...prev, nombreCliente: value }))
     const searchTerm = value.toLowerCase()
     const filtered = clientes.filter((cliente) => cliente.text.toLowerCase().includes(searchTerm))
 
@@ -521,6 +565,12 @@ export function QuotationForm() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+
+    if (!selectedClienteId) {
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
 
     try {
@@ -541,7 +591,8 @@ export function QuotationForm() {
       formDataToSubmit.append("impuestos", formData.impuestos)
       formDataToSubmit.append("porcentajedescuento", formData.descuentoPorcentaje)
       formDataToSubmit.append("montodescuento", formData.montoDescuento)
-      formDataToSubmit.append("estatus", "cotizada")
+      formDataToSubmit.append("estatusid", formData.estatusId)
+      formDataToSubmit.append("categoriaevento", formData.categoriaEvento)
       formDataToSubmit.append("clienteid", selectedClienteId)
 
       const editId = searchParams.get("editId")
@@ -660,10 +711,12 @@ export function QuotationForm() {
                     if (filteredClientes.length > 0) setShowClienteDropdown(true)
                   }}
                   placeholder="Escribe para buscar cliente..."
-                  className="border-blue-200 focus:ring-blue-500"
-                  required
+                  className={`border-blue-200 focus:ring-blue-500 ${formData.nombreCliente && !selectedClienteId ? "border-red-400 focus:ring-red-400" : ""}`}
                   autoComplete="off"
                 />
+                {formData.nombreCliente && !selectedClienteId && (
+                  <p className="text-xs text-red-500 mt-1">Cliente no válido. Debes seleccionar uno del listado.</p>
+                )}
                 {showClienteDropdown && filteredClientes.length > 0 && (
                   <div className="absolute z-50 w-full mt-1 bg-white border border-blue-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                     {filteredClientes.map((cliente) => (
@@ -683,32 +736,32 @@ export function QuotationForm() {
               <div className="space-y-2">
                 <Label htmlFor="email" className="text-sm font-medium flex items-center gap-2">
                   <Mail className="h-4 w-4" />
-                  Email <span className="text-red-500">*</span>
+                  Email
                 </Label>
                 <Input
                   id="email"
                   type="email"
                   value={formData.email}
-                  onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                  placeholder="cliente@example.com"
-                  className="border-blue-200 focus:ring-blue-500"
-                  required
+                  placeholder="Se completa al seleccionar cliente"
+                  className="border-blue-200 bg-gray-50 text-gray-500 cursor-not-allowed"
+                  disabled
+                  readOnly
                 />
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="telefono" className="text-sm font-medium flex items-center gap-2">
                   <Phone className="h-4 w-4" />
-                  Teléfono <span className="text-red-500">*</span>
+                  Teléfono
                 </Label>
                 <Input
                   id="telefono"
                   type="tel"
                   value={formData.telefono}
-                  onChange={(e) => setFormData(prev => ({ ...prev, telefono: e.target.value }))}
-                  placeholder="(555) 123-4567"
-                  className="border-blue-200 focus:ring-blue-500"
-                  required
+                  placeholder="Se completa al seleccionar cliente"
+                  className="border-blue-200 bg-gray-50 text-gray-500 cursor-not-allowed"
+                  disabled
+                  readOnly
                 />
               </div>
             </div>
@@ -1090,7 +1143,23 @@ export function QuotationForm() {
                   placeholder="Ej: Boda de Juan y María"
                   className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
                   required
-                />
+  />
+              </div>
+
+              <div className="space-y-1 w-48">
+                <Label htmlFor="categoriaEvento" className="text-xs font-medium">
+                  Categoría del Evento
+                </Label>
+                <Select value={formData.categoriaEvento} onValueChange={(v) => setFormData(prev => ({ ...prev, categoriaEvento: v }))}>
+                  <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full">
+                    <SelectValue placeholder="Selecciona categoría" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categoriasEvento.map((cat) => (
+                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-1 w-48">
@@ -1104,6 +1173,22 @@ export function QuotationForm() {
                   <SelectContent>
                     {tiposEvento.map((tipo) => (
                       <SelectItem key={tipo.value} value={tipo.value}>{tipo.text}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1 w-48">
+                <Label htmlFor="estatus" className="text-xs font-medium">
+                  Estatus
+                </Label>
+                <Select value={formData.estatusId} onValueChange={(v) => setFormData(prev => ({ ...prev, estatusId: v }))}>
+                  <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full">
+                    <SelectValue placeholder="Selecciona estatus" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {estatusList.map((e) => (
+                      <SelectItem key={e.value} value={e.value}>{e.text}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1138,7 +1223,7 @@ export function QuotationForm() {
       <div className="flex gap-4 justify-end">
         <Button
           type="submit"
-          disabled={loading || (!searchParams.get("editId") && !!cotizacionId)}
+          disabled={loading || !selectedClienteId || (!searchParams.get("editId") && !!cotizacionId)}
           className="min-w-[120px] bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:opacity-50"
         >
           {loading ? "Guardando..." : searchParams.get("editId") ? "Actualizar Cotización" : "Crear Cotización"}
@@ -1279,35 +1364,63 @@ export function QuotationForm() {
                         <div className="pl-11 space-y-1">
                           {items.map((item, i) => (
                             <div key={i} className="flex items-center justify-between gap-2 group">
-                              <p className={`text-sm ${item.destacado ? "text-[#b87333]" : "text-gray-600"}`}>
-                                {item.descripcion || item.nombre || item.elemento || ""}
-                              </p>
-                              <button
-                                type="button"
-                                onClick={() => handleEliminarElemento(item.tipoelemento, item.elementoid ?? item.id)}
-                                className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600 p-0.5 rounded flex-shrink-0"
-                                title="Eliminar elemento"
-                              >
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
-                                  <polyline points="3 6 5 6 21 6"/>
-                                  <path d="M19 6l-1 14H6L5 6"/>
-                                  <path d="M10 11v6M14 11v6"/>
-                                  <path d="M9 6V4h6v2"/>
-                                </svg>
-                              </button>
+                              {(tipo === "alimentos" || tipo === "bebidas") ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleVerPDF(Number(item.elementoid ?? item.id), tipo)}
+                                  className={`text-sm text-left underline decoration-dotted cursor-pointer ${item.destacado ? "text-[#b87333] hover:text-[#b87333]/70" : "text-[#1a3d2e] hover:text-[#1a3d2e]/70"}`}
+                                  title="Ver documento PDF"
+                                >
+                                  {item.descripcion || item.nombre || item.elemento || ""}
+                                </button>
+                              ) : (
+                                <p className={`text-sm ${item.destacado ? "text-[#b87333]" : "text-gray-600"}`}>
+                                  {item.descripcion || item.nombre || item.elemento || ""}
+                                </p>
+                              )}
+                              {tipo !== "lugar" && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleEliminarElemento(item.tipoelemento, item.elementoid ?? item.id)}
+                                  className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600 p-0.5 rounded flex-shrink-0"
+                                  title="Eliminar elemento"
+                                >
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
+                                    <polyline points="3 6 5 6 21 6"/>
+                                    <path d="M19 6l-1 14H6L5 6"/>
+                                    <path d="M10 11v6M14 11v6"/>
+                                    <path d="M9 6V4h6v2"/>
+                                  </svg>
+                                </button>
+                              )}
                             </div>
                           ))}
-                          <button
-                            type="button"
-                            onClick={() => handleAbrirAgregar(tipo)}
-                            className="mt-2 flex items-center gap-1 text-xs text-[#1a3d2e] hover:text-[#1a3d2e]/70 border border-[#1a3d2e]/30 hover:border-[#1a3d2e]/60 rounded px-2 py-1 transition-colors"
-                          >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
-                              <line x1="12" y1="5" x2="12" y2="19"/>
-                              <line x1="5" y1="12" x2="19" y2="12"/>
-                            </svg>
-                            Agregar
-                          </button>
+                          {(tipo !== "lugar" || items.length === 0) && (
+                            <button
+                              type="button"
+                              onClick={() => handleAbrirAgregar(tipo)}
+                              className="mt-2 flex items-center gap-1 text-xs text-[#1a3d2e] hover:text-[#1a3d2e]/70 border border-[#1a3d2e]/30 hover:border-[#1a3d2e]/60 rounded px-2 py-1 transition-colors"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
+                                <line x1="12" y1="5" x2="12" y2="19"/>
+                                <line x1="5" y1="12" x2="19" y2="12"/>
+                              </svg>
+                              Agregar
+                            </button>
+                          )}
+                          {tipo === "lugar" && items.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleAbrirAgregar(tipo)}
+                              className="mt-2 flex items-center gap-1 text-xs text-[#1a3d2e] hover:text-[#1a3d2e]/70 border border-[#1a3d2e]/30 hover:border-[#1a3d2e]/60 rounded px-2 py-1 transition-colors"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
+                                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                              </svg>
+                              Modificar
+                            </button>
+                          )}
                         </div>
                       </div>
                     )
@@ -1412,12 +1525,12 @@ export function QuotationForm() {
       {/* Modal Agregar Paquete */}
       {showPaqueteModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-5">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 space-y-5">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900">Seleccionar Paquete</h2>
               <button
                 type="button"
-                onClick={() => setShowPaqueteModal(false)}
+                onClick={() => { setShowPaqueteModal(false); setElementosPreviewPaquete([]) }}
                 className="text-gray-400 hover:text-gray-600"
               >
                 <X className="w-5 h-5" />
@@ -1429,23 +1542,15 @@ export function QuotationForm() {
               {loadingPaquetes ? (
                 <p className="text-sm text-gray-500">Cargando paquetes...</p>
               ) : paquetes.length === 0 ? (
-                <p className="text-sm text-gray-400">
-                  No hay paquetes disponibles para el tipo de evento seleccionado.
-                </p>
+                <p className="text-sm text-gray-400">No hay paquetes disponibles para el tipo de evento seleccionado.</p>
               ) : (
-                <Select
-                  value={selectedPaqueteId}
-                  onValueChange={handlePaqueteChange}
-                >
+                <Select value={selectedPaqueteId} onValueChange={handlePaqueteChange}>
                   <SelectTrigger>
                     <SelectValue placeholder="Selecciona un paquete" />
                   </SelectTrigger>
                   <SelectContent>
                     {paquetes.map((p) => (
-                      <SelectItem
-                        key={p.paqueteid || p.id}
-                        value={(p.paqueteid || p.id)?.toString()}
-                      >
+                      <SelectItem key={p.paqueteid || p.id} value={(p.paqueteid || p.id)?.toString()}>
                         {p.nombre || p.name}
                       </SelectItem>
                     ))}
@@ -1454,37 +1559,106 @@ export function QuotationForm() {
               )}
             </div>
 
-            {/* Package preview inside modal */}
-            {selectedPaqueteInfo && (
-              <div className="border rounded-lg p-4 bg-gray-50 space-y-1">
-                <p className="text-sm font-semibold text-gray-800">{selectedPaqueteInfo.nombre || selectedPaqueteInfo.name}</p>
-                {selectedPaqueteInfo.descripcion && (
-                  <p className="text-xs text-gray-500">{selectedPaqueteInfo.descripcion}</p>
+            {/* Preview de elementos del paquete */}
+            {selectedPaqueteId && (
+              <div className="border rounded-lg bg-[#f7f5f0] overflow-hidden">
+                {/* Header con nombre y precio */}
+                {selectedPaqueteInfo && (
+                  <div className="px-4 py-3 border-b border-[#1a3d2e]/10 bg-[#1a3d2e]/5">
+                    <p className="text-sm font-bold text-[#1a3d2e] uppercase tracking-wide">
+                      {selectedPaqueteInfo.nombre || selectedPaqueteInfo.name}
+                    </p>
+                    {(selectedPaqueteInfo.precio2025 || selectedPaqueteInfo.precio2026 || selectedPaqueteInfo.precio) && (
+                      <p className="text-xs text-[#1a3d2e]/70 mt-0.5">
+                        {selectedPaqueteInfo.precio2025
+                          ? `$${selectedPaqueteInfo.precio2025} (2025)`
+                          : selectedPaqueteInfo.precio2026
+                          ? `$${selectedPaqueteInfo.precio2026} (2026)`
+                          : `$${selectedPaqueteInfo.precio}`}
+                      </p>
+                    )}
+                  </div>
                 )}
-                {(selectedPaqueteInfo.precio2025 || selectedPaqueteInfo.precio2026 || selectedPaqueteInfo.precio) && (
-                  <p className="text-xs text-[#1a3d2e] font-medium mt-1">
-                    Precio:{" "}
-                    {selectedPaqueteInfo.precio2025
-                      ? `$${selectedPaqueteInfo.precio2025} (2025)`
-                      : selectedPaqueteInfo.precio2026
-                      ? `$${selectedPaqueteInfo.precio2026} (2026)`
-                      : `$${selectedPaqueteInfo.precio}`}
-                  </p>
-                )}
+
+                {/* Elementos agrupados */}
+                <div className="p-4 max-h-72 overflow-y-auto">
+                  {loadingPreviewPaquete ? (
+                    <p className="text-sm text-gray-500 text-center py-4">Cargando elementos...</p>
+                  ) : elementosPreviewPaquete.length === 0 ? (
+                    <p className="text-sm text-gray-400 text-center py-4">Este paquete no tiene elementos registrados.</p>
+                  ) : (() => {
+                    const grouped: Record<string, any[]> = {}
+                    for (const el of elementosPreviewPaquete) {
+                      const key = normalizarSeccion(el.tipoelemento || el.tipo || "otros")
+                      if (!grouped[key]) grouped[key] = []
+                      grouped[key].push(el)
+                    }
+                    return (
+                      <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+                        {Object.entries(grouped).map(([tipo, items]) => (
+                          <div key={tipo}>
+                            <p className="text-[10px] font-bold text-[#1a3d2e] uppercase tracking-widest mb-1">{tipo}</p>
+                            <ul className="space-y-0.5">
+                              {items.map((item, i) => (
+                                <li key={i} className={`text-xs ${item.destacado ? "text-[#b87333]" : "text-gray-600"}`}>
+                                  • {item.descripcion || item.nombre || item.elemento || ""}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })()}
+                </div>
               </div>
             )}
 
             <div className="flex justify-end gap-3 pt-2">
-              <Button type="button" variant="outline" onClick={() => setShowPaqueteModal(false)}>
+              <Button type="button" variant="outline" onClick={() => { setShowPaqueteModal(false); setElementosPreviewPaquete([]) }}>
                 Cancelar
               </Button>
               <Button
                 type="button"
-                disabled={!selectedPaqueteId || assigningPaquete}
+                disabled={!selectedPaqueteId || assigningPaquete || loadingPreviewPaquete}
                 onClick={handleConfirmPaquete}
                 className="bg-[#1a3d2e] hover:bg-[#1a3d2e]/90 text-white"
               >
                 {assigningPaquete ? "Asignando..." : "Confirmar"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal confirmar reemplazo de elementos */}
+      {showConfirmReemplazarModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5 text-amber-600">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">¿Reemplazar elementos actuales?</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Esta cotización ya tiene elementos asignados. Si continúas, todos serán eliminados y reemplazados con los del paquete seleccionado.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-1">
+              <Button type="button" variant="outline" onClick={() => setShowConfirmReemplazarModal(false)}>
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={ejecutarAsignarPaquete}
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                Sí, reemplazar
               </Button>
             </div>
           </div>
@@ -1497,7 +1671,7 @@ export function QuotationForm() {
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-5">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900 capitalize">
-                Agregar elemento — {agregarTipo}
+                {agregarTipo === "lugar" ? "Modificar lugar" : `Agregar elemento — ${agregarTipo}`}
               </h2>
               <button
                 type="button"
@@ -1513,7 +1687,7 @@ export function QuotationForm() {
               {loadingTabla ? (
                 <p className="text-sm text-gray-500">Cargando elementos...</p>
               ) : elementosTabla.length === 0 ? (
-                <p className="text-sm text-gray-400">No se encontraron elementos disponibles.</p>
+                <p className="text-sm text-gray-400">Todos los elementos de esta sección ya están agregados.</p>
               ) : (
                 <Select value={selectedElementoId} onValueChange={setSelectedElementoId}>
                   <SelectTrigger>
@@ -1530,6 +1704,19 @@ export function QuotationForm() {
               )}
             </div>
 
+            {/* Preview PDF al seleccionar elemento en Alimentos o Bebidas */}
+            {(agregarTipo === "alimentos" || agregarTipo === "bebidas") && selectedElementoId && (() => {
+              const el = elementosTabla.find((e: any) => e.id.toString() === selectedElementoId)
+              const pdf = el?.documentopdf
+              return pdf ? (
+                <div className="border rounded overflow-hidden" style={{ height: "280px" }}>
+                  <iframe src={pdf} className="w-full h-full" title="Vista previa PDF" />
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic">Este elemento no tiene PDF asociado.</p>
+              )
+            })()}
+
             <div className="flex justify-end gap-3 pt-2">
               <Button type="button" variant="outline" onClick={() => setShowAgregarModal(false)}>
                 Cancelar
@@ -1540,9 +1727,54 @@ export function QuotationForm() {
                 onClick={handleAgregarElemento}
                 className="bg-[#1a3d2e] hover:bg-[#1a3d2e]/90 text-white"
               >
-                {savingElemento ? "Guardando..." : "Agregar"}
+                {savingElemento ? "Guardando..." : agregarTipo === "lugar" ? "Modificar" : "Agregar"}
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal visor PDF */}
+      {showPDFModal && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-2">
+          <div className="relative w-full h-full max-w-6xl" style={{ height: "96vh" }}>
+            {/* Controles flotantes */}
+            <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
+              {pdfModalUrl && (
+                <a
+                  href={pdfModalUrl}
+                  download
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white/90 hover:bg-white text-gray-800 text-sm font-medium rounded-lg shadow transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Descargar PDF
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowPDFModal(false)}
+                className="flex items-center justify-center w-8 h-8 bg-white/90 hover:bg-white text-gray-700 rounded-lg shadow transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Contenido PDF */}
+            {loadingPDF ? (
+              <div className="w-full h-full flex items-center justify-center">
+                <p className="text-white text-sm">Cargando documento...</p>
+              </div>
+            ) : pdfModalUrl ? (
+              <iframe src={pdfModalUrl} className="w-full h-full rounded-lg" title="Documento PDF" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <p className="text-white/70 text-sm">Este elemento no tiene documento PDF asociado.</p>
+              </div>
+            )}
           </div>
         </div>
       )}
