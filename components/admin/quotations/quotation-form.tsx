@@ -86,6 +86,7 @@ export function QuotationForm() {
   const [limpiarLoading, setLimpiarLoading] = useState(false)
   const [elementosPreviewPaquete, setElementosPreviewPaquete] = useState<any[]>([])
   const [loadingPreviewPaquete, setLoadingPreviewPaquete] = useState(false)
+  const [requerirHabitaciones, setRequerirHabitaciones] = useState(false)
   const [showConfirmReemplazarModal, setShowConfirmReemplazarModal] = useState(false)
   const [showConfirmEliminarModal, setShowConfirmEliminarModal] = useState(false)
   const [eliminarPendiente, setEliminarPendiente] = useState<{ tipoelemento: string; id: number; nombre: string } | null>(null)
@@ -135,6 +136,8 @@ export function QuotationForm() {
     estatusId: "",
     numeroInvitados: "",
     numeroHabitaciones: "",
+    hospedajeFechaInicio: "",
+    hospedajeFechaFin: "",
     // Client Information
     nombreCliente: "",
     email: "",
@@ -190,6 +193,8 @@ export function QuotationForm() {
         estatusId:           c.estatusid?.toString()     ?? "",
         numeroInvitados:     c.numeroinvitados?.toString() ?? "",
         numeroHabitaciones:  c.numerohabitaciones?.toString() ?? "",
+        hospedajeFechaInicio: c.hospedajefechainicio?.slice(0, 10) ?? "",
+        hospedajeFechaFin:    c.hospedajefechafin?.slice(0, 10)   ?? "",
         nombreCliente:       c.cliente                  ?? "",
         email:               c.email                    ?? "",
         telefono:            c.telefono                 ?? "",
@@ -199,6 +204,11 @@ export function QuotationForm() {
         montoDescuento:      c.montodescuento?.toString() ?? "",
         totalMonto:          c.totalmonto?.toString()   ?? "",
       })
+
+      // Activar checkbox habitaciones si hay datos
+      if (c.numerohabitaciones || c.hospedajefechainicio || c.hospedajefechafin) {
+        setRequerirHabitaciones(true)
+      }
 
       // Calendario visual
       if (fi && ff) {
@@ -610,6 +620,9 @@ export function QuotationForm() {
       formDataToSubmit.append("estatusid", formData.estatusId)
       formDataToSubmit.append("categoriaevento", formData.categoriaEvento)
       formDataToSubmit.append("clienteid", selectedClienteId)
+      formDataToSubmit.append("numerohabitaciones", requerirHabitaciones ? formData.numeroHabitaciones : "")
+      formDataToSubmit.append("hospedajefechainicio", requerirHabitaciones ? formData.hospedajeFechaInicio : "")
+      formDataToSubmit.append("hospedajefechafin", requerirHabitaciones ? formData.hospedajeFechaFin : "")
 
       const editId = searchParams.get("editId")
 
@@ -1230,6 +1243,58 @@ export function QuotationForm() {
                   required
                 />
               </div>
+            </div>
+
+            {/* Checkbox Requerimiento de Habitaciones */}
+            <div className="mt-4 space-y-3">
+              <label className="flex items-center gap-2 cursor-pointer select-none w-fit">
+                <input
+                  type="checkbox"
+                  checked={requerirHabitaciones}
+                  onChange={(e) => {
+                    setRequerirHabitaciones(e.target.checked)
+                    if (!e.target.checked) {
+                      setFormData(prev => ({ ...prev, numeroHabitaciones: "", hospedajeFechaInicio: "", hospedajeFechaFin: "" }))
+                    }
+                  }}
+                  className="w-4 h-4 rounded border-blue-300 text-blue-600 accent-blue-600"
+                />
+                <span className="text-sm font-medium text-gray-700">Requerimiento de Habitaciones</span>
+              </label>
+
+              {requerirHabitaciones && (
+                <div className="grid grid-cols-3 gap-3 pl-6 border-l-2 border-blue-200">
+                  <div className="space-y-1">
+                    <Label className="text-xs font-medium">Número de Habitaciones</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={formData.numeroHabitaciones}
+                      onChange={(e) => setFormData(prev => ({ ...prev, numeroHabitaciones: e.target.value }))}
+                      placeholder="Ej: 10"
+                      className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs font-medium">Fecha Inicio Hospedaje</Label>
+                    <Input
+                      type="date"
+                      value={formData.hospedajeFechaInicio}
+                      onChange={(e) => setFormData(prev => ({ ...prev, hospedajeFechaInicio: e.target.value }))}
+                      className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs font-medium">Fecha Fin Hospedaje</Label>
+                    <Input
+                      type="date"
+                      value={formData.hospedajeFechaFin}
+                      onChange={(e) => setFormData(prev => ({ ...prev, hospedajeFechaFin: e.target.value }))}
+                      className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
