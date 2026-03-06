@@ -6,7 +6,7 @@ import { listaDesplegableHoteles } from "@/app/actions/hoteles"
 import { listaDesplegableSalones, objetoSalon, objetoSalones } from "@/app/actions/salones"
 import { crearCotizacion, actualizarCotizacion, objetoCotizacion } from "@/app/actions/cotizaciones"
 import { obtenerDisponibilidadSalon, obtenerReservacionesPorDia } from "@/app/actions/reservaciones"
-import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, agregarElementoACotizacion, buscarLugaresPorHotel, modificarLugarCotizacion, listaEstatusCotizacion, obtenerDocumentoPDF } from "@/app/actions/catalogos"
+import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, agregarElementoACotizacion, buscarLugaresPorHotel, modificarLugarCotizacion, listaEstatusCotizacion, obtenerDocumentoPDF, obtenerPlatillosCotizacion, buscarPlatillosItems } from "@/app/actions/catalogos"
 import { listaCategoriaEvento } from "@/app/actions/cotizaciones"
 import { Users, MapPin, DollarSign, User, Mail, Phone, Building2, Check, X, CalendarIcon } from "lucide-react"
 import { Calendar } from "@/components/ui/calendar"
@@ -30,8 +30,8 @@ interface QuotationFormProps {
 // Normaliza tipoelemento de BD a la clave de sección del UI (plural, minúsculas)
 const TIPO_A_SECCION: Record<string, string> = {
   alimento: "alimentos",
-  platillo: "alimentos",
-  platillos: "alimentos",
+  platillo: "platillos",
+  platillos: "platillos",
   bebida: "bebidas",
   cortesia: "cortesias",
   servicio: "servicio",
@@ -87,6 +87,8 @@ export function QuotationForm() {
   const [elementosPreviewPaquete, setElementosPreviewPaquete] = useState<any[]>([])
   const [loadingPreviewPaquete, setLoadingPreviewPaquete] = useState(false)
   const [showConfirmReemplazarModal, setShowConfirmReemplazarModal] = useState(false)
+  const [showConfirmEliminarModal, setShowConfirmEliminarModal] = useState(false)
+  const [eliminarPendiente, setEliminarPendiente] = useState<{ tipoelemento: string; id: number; nombre: string } | null>(null)
   const [showPDFModal, setShowPDFModal] = useState(false)
   const [pdfModalUrl, setPdfModalUrl] = useState<string>("")
   const [loadingPDF, setLoadingPDF] = useState(false)
@@ -94,8 +96,9 @@ export function QuotationForm() {
   const [selectedPaqueteId, setSelectedPaqueteId] = useState<string>("")
   const [selectedPaqueteInfo, setSelectedPaqueteInfo] = useState<any>(null)
   const [elementosPaquete, setElementosPaquete] = useState<any[]>([])
+  const [platillosItems, setPlatillosItems] = useState<any[]>([])
   const [seccionesPaquete, setSeccionesPaquete] = useState<string[]>([
-    "lugar", "alimentos", "bebidas", "cortesias", "mobiliario", "beneficios adicionales", "servicio",
+    "lugar", "alimentos", "platillos", "bebidas", "cortesias", "mobiliario", "beneficios adicionales", "servicio",
   ])
   const [loadingPaquetes, setLoadingPaquetes] = useState(false)
   const [loadingElementos, setLoadingElementos] = useState(false)
@@ -231,6 +234,9 @@ export function QuotationForm() {
 
           // Cargar elementos ya asignados a esta cotización
           setLoadingElementos(true)
+          obtenerPlatillosCotizacion(Number(editId)).then((platRes) => {
+            if (platRes.success && platRes.data) setPlatillosItems(platRes.data)
+          })
           obtenerElementosCotizacion(Number(editId)).then((elemRes) => {
             if (elemRes.success && elemRes.data && elemRes.data.length > 0) {
               setElementosPaquete(elemRes.data)
@@ -367,10 +373,12 @@ export function QuotationForm() {
     if (!cotizacionId) return
     const result = await eliminarElementoCotizacion(cotizacionId, tipoelemento, id)
     if (result.success) {
-      const elementosResult = await obtenerElementosCotizacion(cotizacionId)
-      if (elementosResult.success && elementosResult.data) {
-        setElementosPaquete(elementosResult.data)
-      }
+      const [elementosResult, platRes] = await Promise.all([
+        obtenerElementosCotizacion(cotizacionId),
+        obtenerPlatillosCotizacion(cotizacionId),
+      ])
+      if (elementosResult.success && elementosResult.data) setElementosPaquete(elementosResult.data)
+      if (platRes.success && platRes.data) setPlatillosItems(platRes.data)
     } else {
       alert(`Error al eliminar: ${result.error}`)
     }
@@ -391,18 +399,24 @@ export function QuotationForm() {
     setElementosTabla([])
     setShowAgregarModal(true)
     setLoadingTabla(true)
-    const result = tipo === "lugar"
-      ? await buscarLugaresPorHotel(Number(formData.hotel))
-      : await buscarElementosPorTabla(tipo)
-    if (result.success && result.data) {
-      // Filtrar elementos ya asignados en esta sección para evitar duplicados
-      const yaAsignados = new Set(
-        elementosPaquete
-          .filter(el => normalizarSeccion(el.tipoelemento || el.tipo || "") === tipo)
-          .map(el => Number(el.elementoid ?? el.id))
-      )
-      const disponibles = result.data.filter((el: any) => !yaAsignados.has(Number(el.id)))
-      setElementosTabla(disponibles)
+    if (tipo === "platillos") {
+      const result = await buscarPlatillosItems()
+      if (result.success && result.data) {
+        const yaAsignados = new Set(platillosItems.map(el => Number(el.elementoid)))
+        setElementosTabla(result.data.filter((el: any) => !yaAsignados.has(Number(el.id))))
+      }
+    } else {
+      const result = tipo === "lugar"
+        ? await buscarLugaresPorHotel(Number(formData.hotel))
+        : await buscarElementosPorTabla(tipo)
+      if (result.success && result.data) {
+        const yaAsignados = new Set(
+          elementosPaquete
+            .filter(el => normalizarSeccion(el.tipoelemento || el.tipo || "") === tipo)
+            .map(el => Number(el.elementoid ?? el.id))
+        )
+        setElementosTabla(result.data.filter((el: any) => !yaAsignados.has(Number(el.id))))
+      }
     }
     setLoadingTabla(false)
   }
@@ -414,10 +428,12 @@ export function QuotationForm() {
       ? await modificarLugarCotizacion(cotizacionId, Number(formData.hotel), Number(selectedElementoId))
       : await agregarElementoACotizacion(cotizacionId, Number(formData.hotel), Number(selectedElementoId), agregarTipo)
     if (result.success) {
-      const elementosResult = await obtenerElementosCotizacion(cotizacionId)
-      if (elementosResult.success && elementosResult.data) {
-        setElementosPaquete(elementosResult.data)
-      }
+      const [elementosResult, platRes] = await Promise.all([
+        obtenerElementosCotizacion(cotizacionId),
+        obtenerPlatillosCotizacion(cotizacionId),
+      ])
+      if (elementosResult.success && elementosResult.data) setElementosPaquete(elementosResult.data)
+      if (platRes.success && platRes.data) setPlatillosItems(platRes.data)
       setShowAgregarModal(false)
       setSelectedElementoId("")
     } else {
@@ -1347,7 +1363,8 @@ export function QuotationForm() {
                     grouped[key].push(el)
                   }
 
-                  const grupos = Object.entries(grouped)
+                  // "platillos" se renderiza como subsección dentro de "alimentos", no como grupo top-level
+                  const grupos = Object.entries(grouped).filter(([tipo]) => tipo !== "platillos")
                   const mitad = Math.ceil(grupos.length / 2)
                   const leftGroups = grupos.slice(0, mitad)
                   const rightGroups = grupos.slice(mitad)
@@ -1364,7 +1381,7 @@ export function QuotationForm() {
                         <div className="pl-11 space-y-1">
                           {items.map((item, i) => (
                             <div key={i} className="flex items-center justify-between gap-2 group">
-                              {(tipo === "alimentos" || tipo === "bebidas") ? (
+                              {(tipo === "alimentos" || tipo === "bebidas" || tipo === "platillos") ? (
                                 <button
                                   type="button"
                                   onClick={() => handleVerPDF(Number(item.elementoid ?? item.id), tipo)}
@@ -1381,7 +1398,11 @@ export function QuotationForm() {
                               {tipo !== "lugar" && (
                                 <button
                                   type="button"
-                                  onClick={() => handleEliminarElemento(item.tipoelemento, item.elementoid ?? item.id)}
+                                  onClick={() => {
+                                    const nombre = item.descripcion || item.nombre || item.elemento || ""
+                                    setEliminarPendiente({ tipoelemento: item.tipoelemento, id: item.elementoid ?? item.id, nombre })
+                                    setShowConfirmEliminarModal(true)
+                                  }}
                                   className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600 p-0.5 rounded flex-shrink-0"
                                   title="Eliminar elemento"
                                 >
@@ -1422,6 +1443,60 @@ export function QuotationForm() {
                             </button>
                           )}
                         </div>
+
+                        {/* Subsección Platillos dentro de Alimentos */}
+                        {tipo === "alimentos" && (
+                          <div className="mt-4 ml-11 border-l-2 border-[#1a3d2e]/20 pl-4">
+                            <div className="flex items-center gap-2 mb-2">
+                              <div className="w-6 h-6 flex items-center justify-center text-[#1a3d2e]">
+                                {tipoIconMap["platillos"]}
+                              </div>
+                              <h4 className="text-xs font-bold tracking-widest text-[#1a3d2e] uppercase">Platillos</h4>
+                            </div>
+                            <div className="space-y-1">
+                              {platillosItems.map((item: any, i: number) => (
+                                <div key={i} className="flex items-center justify-between gap-2 group">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleVerPDF(Number(item.elementoid ?? item.id), "platillos")}
+                                    className={`text-sm text-left underline decoration-dotted cursor-pointer ${item.destacado ? "text-[#b87333] hover:text-[#b87333]/70" : "text-[#1a3d2e] hover:text-[#1a3d2e]/70"}`}
+                                    title="Ver documento PDF"
+                                  >
+                                    {item.descripcion || item.nombre || item.elemento || ""}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const nombre = item.descripcion || item.nombre || item.elemento || ""
+                                      setEliminarPendiente({ tipoelemento: item.tipoelemento, id: item.elementoid ?? item.id, nombre })
+                                      setShowConfirmEliminarModal(true)
+                                    }}
+                                    className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600 p-0.5 rounded flex-shrink-0"
+                                    title="Eliminar elemento"
+                                  >
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
+                                      <polyline points="3 6 5 6 21 6"/>
+                                      <path d="M19 6l-1 14H6L5 6"/>
+                                      <path d="M10 11v6M14 11v6"/>
+                                      <path d="M9 6V4h6v2"/>
+                                    </svg>
+                                  </button>
+                                </div>
+                              ))}
+                              <button
+                                type="button"
+                                onClick={() => handleAbrirAgregar("platillos")}
+                                className="mt-2 flex items-center gap-1 text-xs text-[#1a3d2e] hover:text-[#1a3d2e]/70 border border-[#1a3d2e]/30 hover:border-[#1a3d2e]/60 rounded px-2 py-1 transition-colors"
+                              >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
+                                  <line x1="12" y1="5" x2="12" y2="19"/>
+                                  <line x1="5" y1="12" x2="19" y2="12"/>
+                                </svg>
+                                Agregar
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )
                   }
@@ -1631,6 +1706,50 @@ export function QuotationForm() {
         </div>
       )}
 
+      {/* Modal confirmar eliminación de elemento */}
+      {showConfirmEliminarModal && eliminarPendiente && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5 text-red-600">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6l-1 14H6L5 6"/>
+                  <path d="M10 11v6M14 11v6"/>
+                  <path d="M9 6V4h6v2"/>
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-gray-900">Eliminar elemento</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  ¿Deseas eliminar <span className="font-medium text-gray-800">"{eliminarPendiente.nombre}"</span> de la cotización?
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => { setShowConfirmEliminarModal(false); setEliminarPendiente(null) }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                className="bg-red-600 hover:bg-red-700 text-white"
+                onClick={async () => {
+                  setShowConfirmEliminarModal(false)
+                  await handleEliminarElemento(eliminarPendiente.tipoelemento, eliminarPendiente.id)
+                  setEliminarPendiente(null)
+                }}
+              >
+                Eliminar
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal confirmar reemplazo de elementos */}
       {showConfirmReemplazarModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -1708,7 +1827,7 @@ export function QuotationForm() {
             </div>
 
             {/* Preview PDF inline al seleccionar elemento en Alimentos o Bebidas */}
-            {(agregarTipo === "alimentos" || agregarTipo === "bebidas") && selectedElementoId && (() => {
+            {(agregarTipo === "alimentos" || agregarTipo === "bebidas" || agregarTipo === "platillos") && selectedElementoId && (() => {
               const el = elementosTabla.find((e: any) => e.id.toString() === selectedElementoId)
               const pdf = el?.documentopdf
               return pdf ? (

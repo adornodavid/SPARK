@@ -173,8 +173,8 @@ const TABLA_POR_TIPO: Record<string, string> = {
   lugar: "lugar",
   alimento: "platillos",
   alimentos: "platillos",
-  platillo: "platillos",
-  platillos: "platillos",
+  platillo: "platillositems",
+  platillos: "platillositems",
   bebidas: "bebidas",
   bebida: "bebidas",
   mobiliario: "mobiliario",
@@ -196,8 +196,8 @@ function resolverTabla(tipo: string): string {
 const TIPO_CANONICO: Record<string, string> = {
   alimentos: "Alimento",
   alimento: "Alimento",
-  platillo: "Alimento",
-  platillos: "Alimento",
+  platillo: "Platillo",
+  platillos: "Platillo",
   bebidas: "Bebida",
   bebida: "Bebida",
   cortesias: "Cortesia",
@@ -670,6 +670,70 @@ export async function listaDesplegableCiudadesXHoteles(id = -1, descripcion = ""
     return { success: true, data }
   } catch (error) {
     console.error("Error en listaDesplegableCiudades: ", error)
+    return { success: false, error: "Error interno del servidor" }
+  }
+}
+
+// Función: obtenerPlatillosCotizacion: obtiene elementos de tipo 'Platillo' de una cotización
+// uniendo elementosxcotizacion con platillositems
+export async function obtenerPlatillosCotizacion(cotizacionid: number) {
+  try {
+    const { data: elemRows, error: elemError } = await supabase
+      .from("elementosxcotizacion")
+      .select("*")
+      .eq("cotizacionid", cotizacionid)
+      .eq("tipoelemento", "Platillo")
+
+    if (elemError) {
+      console.error("Error obteniendo platillos de cotización:", elemError)
+      return { success: false, error: elemError.message }
+    }
+
+    if (!elemRows || elemRows.length === 0) return { success: true, data: [] }
+
+    const ids = elemRows.map((e: any) => e.elementoid).filter(Boolean)
+    const { data: itemRows, error: itemError } = await supabase
+      .from("platillositems")
+      .select("*")
+      .in("id", ids)
+
+    if (itemError) {
+      console.error("Error obteniendo platillositems:", itemError)
+      return { success: false, error: itemError.message }
+    }
+
+    const data = elemRows.map((e: any) => {
+      const item = (itemRows || []).find((p: any) => p.id === e.elementoid) || {}
+      return {
+        ...e,
+        nombre: item.nombre || item.descripcion || item.name || "",
+        documentopdf: item.documentopdf || null,
+      }
+    })
+
+    return { success: true, data }
+  } catch (error) {
+    console.error("Error en obtenerPlatillosCotizacion:", error)
+    return { success: false, error: "Error interno del servidor" }
+  }
+}
+
+// Función: buscarPlatillosItems: obtiene todos los registros de platillositems para el dropdown de Agregar
+export async function buscarPlatillosItems() {
+  try {
+    const { data, error } = await supabase
+      .from("platillositems")
+      .select("*")
+      .order("nombre", { ascending: true })
+
+    if (error) {
+      console.error("Error buscando platillositems:", error)
+      return { success: false, error: error.message }
+    }
+
+    return { success: true, data: data || [] }
+  } catch (error) {
+    console.error("Error en buscarPlatillosItems:", error)
     return { success: false, error: "Error interno del servidor" }
   }
 }
