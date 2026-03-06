@@ -1668,7 +1668,7 @@ export function QuotationForm() {
       {/* Modal Agregar Elemento */}
       {showAgregarModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-5">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900 capitalize">
                 {agregarTipo === "lugar" ? "Modificar lugar" : `Agregar elemento — ${agregarTipo}`}
@@ -1689,7 +1689,10 @@ export function QuotationForm() {
               ) : elementosTabla.length === 0 ? (
                 <p className="text-sm text-gray-400">Todos los elementos de esta sección ya están agregados.</p>
               ) : (
-                <Select value={selectedElementoId} onValueChange={setSelectedElementoId}>
+                <Select
+                  value={selectedElementoId}
+                  onValueChange={(val) => setSelectedElementoId(val)}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder={`Selecciona un elemento de ${agregarTipo}`} />
                   </SelectTrigger>
@@ -1704,13 +1707,13 @@ export function QuotationForm() {
               )}
             </div>
 
-            {/* Preview PDF al seleccionar elemento en Alimentos o Bebidas */}
+            {/* Preview PDF inline al seleccionar elemento en Alimentos o Bebidas */}
             {(agregarTipo === "alimentos" || agregarTipo === "bebidas") && selectedElementoId && (() => {
               const el = elementosTabla.find((e: any) => e.id.toString() === selectedElementoId)
               const pdf = el?.documentopdf
               return pdf ? (
-                <div className="border rounded overflow-hidden" style={{ height: "280px" }}>
-                  <iframe src={pdf} className="w-full h-full" title="Vista previa PDF" />
+                <div className="border rounded-lg overflow-hidden" style={{ height: "600px" }}>
+                  <iframe src={`${pdf}#navpanes=0`} className="w-full h-full" title="Vista previa PDF" />
                 </div>
               ) : (
                 <p className="text-xs text-gray-400 italic">Este elemento no tiene PDF asociado.</p>
@@ -1736,7 +1739,7 @@ export function QuotationForm() {
 
       {/* Modal visor PDF */}
       {showPDFModal && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-2">
+        <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-2">
           <div className="relative w-full h-full max-w-6xl" style={{ height: "96vh" }}>
             {/* Controles flotantes */}
             <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
