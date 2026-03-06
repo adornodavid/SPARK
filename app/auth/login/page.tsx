@@ -87,11 +87,11 @@ export default function LoginPage() {
               {/* Header Section */}
               <div className="flex flex-col gap-3">
                 <h1 className="text-balance text-5xl font-bold leading-tight tracking-tight">
-                  Portal Banquetes y Comercial
+                  SPARK
                   <br />
                   <span className="text-primary"></span>
                 </h1>
-                <p className="text-lg text-muted-foreground">El sistema para los que hacen eventos memorables</p>
+                <p className="text-lg text-muted-foreground">Portal Banquetes y Comercial</p>
               </div>
 
               {/* Login Form Card */}
