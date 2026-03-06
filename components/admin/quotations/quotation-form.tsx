@@ -1668,7 +1668,7 @@ export function QuotationForm() {
       {/* Modal Agregar Elemento */}
       {showAgregarModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900 capitalize">
                 {agregarTipo === "lugar" ? "Modificar lugar" : `Agregar elemento — ${agregarTipo}`}
@@ -1712,8 +1712,8 @@ export function QuotationForm() {
               const el = elementosTabla.find((e: any) => e.id.toString() === selectedElementoId)
               const pdf = el?.documentopdf
               return pdf ? (
-                <div className="border rounded-lg overflow-hidden" style={{ height: "420px" }}>
-                  <iframe src={pdf} className="w-full h-full" title="Vista previa PDF" />
+                <div className="border rounded-lg overflow-hidden" style={{ height: "600px" }}>
+                  <iframe src={`${pdf}#navpanes=0`} className="w-full h-full" title="Vista previa PDF" />
                 </div>
               ) : (
                 <p className="text-xs text-gray-400 italic">Este elemento no tiene PDF asociado.</p>
