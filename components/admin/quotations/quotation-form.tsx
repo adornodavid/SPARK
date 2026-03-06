@@ -1668,7 +1668,7 @@ export function QuotationForm() {
       {/* Modal Agregar Elemento */}
       {showAgregarModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-5">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900 capitalize">
                 {agregarTipo === "lugar" ? "Modificar lugar" : `Agregar elemento — ${agregarTipo}`}
@@ -1691,17 +1691,7 @@ export function QuotationForm() {
               ) : (
                 <Select
                   value={selectedElementoId}
-                  onValueChange={(val) => {
-                    setSelectedElementoId(val)
-                    if (agregarTipo === "alimentos" || agregarTipo === "bebidas") {
-                      const el = elementosTabla.find((e: any) => e.id.toString() === val)
-                      if (el?.documentopdf) {
-                        setPdfModalUrl(el.documentopdf)
-                        setLoadingPDF(false)
-                        setShowPDFModal(true)
-                      }
-                    }
-                  }}
+                  onValueChange={(val) => setSelectedElementoId(val)}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder={`Selecciona un elemento de ${agregarTipo}`} />
@@ -1717,6 +1707,18 @@ export function QuotationForm() {
               )}
             </div>
 
+            {/* Preview PDF inline al seleccionar elemento en Alimentos o Bebidas */}
+            {(agregarTipo === "alimentos" || agregarTipo === "bebidas") && selectedElementoId && (() => {
+              const el = elementosTabla.find((e: any) => e.id.toString() === selectedElementoId)
+              const pdf = el?.documentopdf
+              return pdf ? (
+                <div className="border rounded-lg overflow-hidden" style={{ height: "420px" }}>
+                  <iframe src={pdf} className="w-full h-full" title="Vista previa PDF" />
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic">Este elemento no tiene PDF asociado.</p>
+              )
+            })()}
 
             <div className="flex justify-end gap-3 pt-2">
               <Button type="button" variant="outline" onClick={() => setShowAgregarModal(false)}>
