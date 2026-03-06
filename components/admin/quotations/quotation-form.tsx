@@ -1689,7 +1689,20 @@ export function QuotationForm() {
               ) : elementosTabla.length === 0 ? (
                 <p className="text-sm text-gray-400">Todos los elementos de esta sección ya están agregados.</p>
               ) : (
-                <Select value={selectedElementoId} onValueChange={setSelectedElementoId}>
+                <Select
+                  value={selectedElementoId}
+                  onValueChange={(val) => {
+                    setSelectedElementoId(val)
+                    if (agregarTipo === "alimentos" || agregarTipo === "bebidas") {
+                      const el = elementosTabla.find((e: any) => e.id.toString() === val)
+                      if (el?.documentopdf) {
+                        setPdfModalUrl(el.documentopdf)
+                        setLoadingPDF(false)
+                        setShowPDFModal(true)
+                      }
+                    }
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder={`Selecciona un elemento de ${agregarTipo}`} />
                   </SelectTrigger>
@@ -1704,18 +1717,6 @@ export function QuotationForm() {
               )}
             </div>
 
-            {/* Preview PDF al seleccionar elemento en Alimentos o Bebidas */}
-            {(agregarTipo === "alimentos" || agregarTipo === "bebidas") && selectedElementoId && (() => {
-              const el = elementosTabla.find((e: any) => e.id.toString() === selectedElementoId)
-              const pdf = el?.documentopdf
-              return pdf ? (
-                <div className="border rounded overflow-hidden" style={{ height: "280px" }}>
-                  <iframe src={pdf} className="w-full h-full" title="Vista previa PDF" />
-                </div>
-              ) : (
-                <p className="text-xs text-gray-400 italic">Este elemento no tiene PDF asociado.</p>
-              )
-            })()}
 
             <div className="flex justify-end gap-3 pt-2">
               <Button type="button" variant="outline" onClick={() => setShowAgregarModal(false)}>
@@ -1736,7 +1737,7 @@ export function QuotationForm() {
 
       {/* Modal visor PDF */}
       {showPDFModal && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-2">
+        <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-2">
           <div className="relative w-full h-full max-w-6xl" style={{ height: "96vh" }}>
             {/* Controles flotantes */}
             <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
