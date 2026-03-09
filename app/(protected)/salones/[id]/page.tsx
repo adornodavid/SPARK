@@ -1,50 +1,69 @@
-import { objetoSalon, obtenerMontajesXSalon } from "@/app/actions/salones"
-import { SalonDetail } from "@/components/admin/salones/salon-detail"
-import { notFound } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { ArrowLeft } from "lucide-react"
-import Link from "next/link"
+"use client"
 
-export default async function SalonDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>
-}) {
-  const { id } = await params
-  const salonId = Number(id)
+import { useEffect, useState } from "react"
+import { useRouter, useParams } from "next/navigation"
+import { obtenerSesion } from "@/app/actions/session"
+import { listaDesplegableHoteles } from "@/app/actions/hoteles"
+import { EventSpaceForm } from "@/components/admin/event-spaces/event-space-form"
+import type { ddlItem } from "@/types/common"
+import { createClient } from "@/lib/supabase/client"
 
-  if (isNaN(salonId) || salonId <= 0) {
-    notFound()
-  }
+export default function EditEventSpacePage() {
+  const router = useRouter()
+  const params = useParams()
+  const id = params.id as string
+  const [loading, setLoading] = useState(true)
+  const [hotelesList, setHotelesList] = useState<ddlItem[]>([])
+  const [eventSpace, setEventSpace] = useState<any>(null)
 
-  // Fetch salon and montajes in parallel
-  const [salonResult, montajesResult] = await Promise.all([
-    objetoSalon(salonId),
-    obtenerMontajesXSalon(salonId),
-  ])
+  useEffect(() => {
+    async function init() {
+      const session = await obtenerSesion()
+      if (!session || !session.SesionActiva) {
+        router.push("/auth/login")
+        return
+      }
+      const allowedRoles = [1, 2, 3, 4]
+      if (!allowedRoles.includes(Number(session.RolId))) {
+        router.push("/dashboard")
+        return
+      }
 
-  if (!salonResult.success || !salonResult.data) {
-    notFound()
+      const [hotelesResult] = await Promise.all([listaDesplegableHoteles()])
+      if (hotelesResult.success && hotelesResult.data) {
+        setHotelesList(hotelesResult.data)
+      }
+
+      const supabase = createClient()
+      const { data } = await supabase.from("event_spaces").select("*").eq("id", id).single()
+      if (!data) {
+        router.push("/salones")
+        return
+      }
+      setEventSpace(data)
+      setLoading(false)
+    }
+    init()
+  }, [router, id])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      </div>
+    )
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Button variant="ghost" size="sm" asChild className="gap-1 px-2">
-          <Link href="/salones">
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Salones
-          </Link>
-        </Button>
-        <span>/</span>
-        <span className="text-foreground font-medium">{salonResult.data.nombre}</span>
-      </div>
+    <div className="min-h-screen bg-[#FFFAF5] p-6">
+      <div className="mx-auto max-w-3xl space-y-6">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Editar Salón de Eventos</h1>
+          <p className="text-sm text-muted-foreground">Modifica la información del salón</p>
+        </div>
 
-      <SalonDetail
-        salon={salonResult.data}
-        montajes={montajesResult.data || []}
-      />
+        <EventSpaceForm eventSpace={eventSpace} hotelesList={hotelesList} />
+      </div>
     </div>
   )
 }

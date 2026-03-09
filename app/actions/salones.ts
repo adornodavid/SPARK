@@ -155,10 +155,11 @@ export async function obtenerSalones(
   nombre = "",
   hotelid = -1,
   activo = "Todos",
+  capacidad = -1,
 ): Promise<{ success: boolean; error: string; data: unknown }> {
   try {
-    // Query principal
-    let query = supabase.from("salones").select("*")
+    // Query principal - usa vw_osalones para incluir nombre del hotel
+    let query = supabase.from("vw_osalones").select("*")
 
     // Agregar filtros condicionales
     if (id !== -1) {
@@ -180,6 +181,11 @@ export async function obtenerSalones(
       } else if (isInactive) {
         query = query.eq("activo", false)
       }
+    }
+
+    // Filtro de capacidad: la capacidad seleccionada debe ser menor a cantidadmaxima
+    if (capacidad !== -1) {
+      query = query.gte("capacidadmaxima", capacidad)
     }
 
     // Ejecutar query
