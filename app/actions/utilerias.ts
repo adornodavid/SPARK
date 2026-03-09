@@ -20,6 +20,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey)
   *
     - imagenValidaciones / imageValidations
     - imagenSubir / imageUpload
+    - imagenSubirFormData / imageUploadFormData
     - imagenBorrar / imageDelete
     - imagenBuscar / imageSearch ?
     - imagenSustituir / imageReplace ?
@@ -36,7 +37,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey)
   --------------------
   Funciones: Encryption
   --------------------
-  * 
+  *
     - Encrypt - (Crypto-js)
     - Desencrypt - (Crypto-js)
     - HashData - (Bcrypt-js)
@@ -70,19 +71,20 @@ export async function imagenSubir(imageFile: File, name: string, folder: string)
     const fileExtension = imageFile.name.split(".").pop()
     const fileName = `${name}-${Date.now()}.${fileExtension}`
 
-    // Subir imagen a repositorio
+    // Subir imagen al bucket "Imagenes"
+    const fullPath = `${folder}/${fileName}`
     const { data: uploadData, error: uploadError } = await supabase.storage
-      .from("healthylab")
-      .upload(`${folder}/${fileName}`, imageFile)
+      .from("Imagenes")
+      .upload(fullPath, imageFile)
 
     // Si se presentó un error
     if (uploadError) {
       console.error("Error subiendo imagen en actions/utilerias imagenSubir:", uploadError)
-      return { success: false, error: "Error al subir la imagen: " + uploadError }
+      return { success: false, error: "Error al subir la imagen: " + uploadError.message }
     }
 
     // Obtener URL
-    const { data: urlData } = supabase.storage.from("healthylab").getPublicUrl(`${folder}/${fileName}`)
+    const { data: urlData } = supabase.storage.from("Imagenes").getPublicUrl(fullPath)
     if (!urlData) {
       return { success: false, error: "No se obtuvo la url en imagenSubir de actions/utilerias." }
     }
@@ -95,49 +97,13 @@ export async function imagenSubir(imageFile: File, name: string, folder: string)
   }
 }
 
-// Función: imagenSubirFormData: Subir imagen recibida como FormData (compatible con client components)
-export async function imagenSubirFormData(formData: FormData) {
-  try {
-    const imageFile = formData.get("file") as File
-    const folder = formData.get("folder") as string
-    const name = formData.get("name") as string
-
-    if (!imageFile || imageFile.size === 0) {
-      return { success: false, error: "No se proporcionó una imagen válida" }
-    }
-
-    const validTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"]
-    if (!validTypes.includes(imageFile.type)) {
-      return { success: false, error: "Tipo de archivo no válido" }
-    }
-
-    const MAX_SIZE = 10 * 1024 * 1024
-    if (imageFile.size > MAX_SIZE) {
-      return { success: false, error: "La imagen excede el tamaño máximo de 10MB" }
-    }
-
-    const fileExtension = imageFile.name.split(".").pop()
-    const fileName = `${name}-${Date.now()}.${fileExtension}`
-
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from("healthylab")
-      .upload(`${folder}/${fileName}`, imageFile)
-
-    if (uploadError) {
-      console.error("[v0] Error subiendo imagen:", uploadError)
-      return { success: false, error: "Error al subir la imagen: " + uploadError.message }
-    }
-
-    const { data: urlData } = supabase.storage.from("healthylab").getPublicUrl(`${folder}/${fileName}`)
-    if (!urlData) {
-      return { success: false, error: "No se obtuvo la url de la imagen." }
-    }
-
-    return { success: true, url: urlData.publicUrl }
-  } catch (error) {
-    console.error("[v0] Error en imagenSubirFormData:", error)
-    return { success: false, error: "Error procesando subida de imagen: " + error }
-  }
+// Función: imagenSubirFormData — wrapper que recibe FormData (file, folder, name)
+export async function imagenSubirFormData(fd: FormData) {
+  const file = fd.get("file") as File
+  const folder = fd.get("folder") as string
+  const name = fd.get("name") as string
+  console.log(`[imagenSubirFormData] Bucket: "Imagenes" | Ruta: ${folder}/${name}-[timestamp] | Archivo: ${file?.name} (${file?.size} bytes)`)
+  return imagenSubir(file, name, folder)
 }
 
 // Función: imagenBorrar / imageDelete: Eliminar una imagen de un repositorio/folder
@@ -156,7 +122,7 @@ export async function imagenBorrar(imageUrl: string, folder: string) {
     const filePath = `${folder}/${fileName}`
 
     // Eliminar la imagen del bucket de Supabase
-    const { data, error } = await supabase.storage.from("healthylab").remove([filePath])
+    const { data, error } = await supabase.storage.from("Imagenes").remove([filePath])
 
     // Si se presentó un error
     if (error) {

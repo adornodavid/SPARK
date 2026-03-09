@@ -12,7 +12,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { AlertCircle, Plus, Trash2, Upload, ImageIcon, X } from "lucide-react"
+import { AlertCircle, Plus, Trash2, Upload, ImageIcon, X, CheckCircle2 } from "lucide-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { listaDesplegableSalones } from "@/app/actions/salones"
 import { imagenSubirFormData } from "@/app/actions/utilerias"
@@ -41,6 +42,7 @@ export function EventSpaceForm({ eventSpace, hotelesList }: EventSpaceFormProps)
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showSuccess, setShowSuccess] = useState(false)
 
   const [formData, setFormData] = useState<EventSpace>({
     hotel_id: eventSpace?.hotel_id || "",
@@ -134,8 +136,8 @@ export function EventSpaceForm({ eventSpace, hotelesList }: EventSpaceFormProps)
       const hotelNombre = hotelItem?.text || "hotel"
       const salonNombre = formData.name || "salon"
 
-      // Ruta: Imagenes/Salones/[NombreHotel]/[NombreSalon]/
-      const folderPath = `Imagenes/Salones/${hotelNombre}/${salonNombre}`
+      // Ruta: Hoteles/[NombreHotel]/[NombreSalon]/ (dentro del bucket "Imagenes")
+      const folderPath = `Hoteles/${hotelNombre}/${salonNombre}`
 
       // Subir fotos al bucket via FormData
       const uploadedUrls: string[] = []
@@ -200,8 +202,7 @@ export function EventSpaceForm({ eventSpace, hotelesList }: EventSpaceFormProps)
         }
       }
 
-      router.push("/salones")
-      router.refresh()
+      setShowSuccess(true)
     } catch (err: unknown) {
       console.error("[v0] Error saving event space:", err)
       setError(err instanceof Error ? err.message : "Error al guardar el salón")
@@ -559,6 +560,22 @@ export function EventSpaceForm({ eventSpace, hotelesList }: EventSpaceFormProps)
           </div>
         </CardContent>
       </Card>
+      <Dialog open={showSuccess} onOpenChange={setShowSuccess}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="flex flex-col items-center gap-2">
+            <CheckCircle2 className="h-12 w-12 text-green-500" />
+            <DialogTitle>Salón registrado correctamente</DialogTitle>
+            <DialogDescription>
+              El salón <span className="font-semibold">{formData.name}</span> ha sido creado exitosamente.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="sm:justify-center">
+            <Button onClick={() => { setShowSuccess(false); router.push("/salones"); router.refresh(); }}>
+              Aceptar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </form>
   )
 }
