@@ -95,6 +95,51 @@ export async function imagenSubir(imageFile: File, name: string, folder: string)
   }
 }
 
+// Función: imagenSubirFormData: Subir imagen recibida como FormData (compatible con client components)
+export async function imagenSubirFormData(formData: FormData) {
+  try {
+    const imageFile = formData.get("file") as File
+    const folder = formData.get("folder") as string
+    const name = formData.get("name") as string
+
+    if (!imageFile || imageFile.size === 0) {
+      return { success: false, error: "No se proporcionó una imagen válida" }
+    }
+
+    const validTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"]
+    if (!validTypes.includes(imageFile.type)) {
+      return { success: false, error: "Tipo de archivo no válido" }
+    }
+
+    const MAX_SIZE = 10 * 1024 * 1024
+    if (imageFile.size > MAX_SIZE) {
+      return { success: false, error: "La imagen excede el tamaño máximo de 10MB" }
+    }
+
+    const fileExtension = imageFile.name.split(".").pop()
+    const fileName = `${name}-${Date.now()}.${fileExtension}`
+
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from("healthylab")
+      .upload(`${folder}/${fileName}`, imageFile)
+
+    if (uploadError) {
+      console.error("[v0] Error subiendo imagen:", uploadError)
+      return { success: false, error: "Error al subir la imagen: " + uploadError.message }
+    }
+
+    const { data: urlData } = supabase.storage.from("healthylab").getPublicUrl(`${folder}/${fileName}`)
+    if (!urlData) {
+      return { success: false, error: "No se obtuvo la url de la imagen." }
+    }
+
+    return { success: true, url: urlData.publicUrl }
+  } catch (error) {
+    console.error("[v0] Error en imagenSubirFormData:", error)
+    return { success: false, error: "Error procesando subida de imagen: " + error }
+  }
+}
+
 // Función: imagenBorrar / imageDelete: Eliminar una imagen de un repositorio/folder
 export async function imagenBorrar(imageUrl: string, folder: string) {
   // Validar que se recibió la URL
