@@ -1,85 +1,83 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { AlertCircle } from "lucide-react"
-
-interface Hotel {
-  id: string
-  code: string
-  name: string
-}
-
-interface RoomCategory {
-  id?: string
-  hotel_id: string
-  name: string
-  description?: string
-  max_occupancy: number
-  amenities?: Record<string, unknown>
-}
+import { AlertCircle, ArrowLeft, Save, Loader2 } from "lucide-react"
+import { toast } from "sonner"
+import { crearCategoriaHabitacion, actualizarCategoriaHabitacion } from "@/app/actions/habitaciones"
+import type { oCategoriaHabitacionDetalle, ddlHotel } from "@/types/habitaciones"
+import Link from "next/link"
 
 interface RoomCategoryFormProps {
-  category?: RoomCategory
-  hotels: Hotel[]
+  category?: oCategoriaHabitacionDetalle | null
+  hotels: ddlHotel[]
+}
+
+const COMMON_AMENITIES = [
+  "WiFi Gratis",
+  "TV por Cable",
+  "Aire Acondicionado",
+  "Minibar",
+  "Caja de Seguridad",
+  "Cafetera",
+  "Secadora de Pelo",
+  "Plancha y Tabla",
+  "Escritorio de Trabajo",
+  "Balcon o Terraza",
+  "Bano Privado",
+  "Servicio a Habitacion",
+  "Telefono",
+  "Vista al Mar",
+  "Jacuzzi",
+  "Sala de Estar",
+  "Room Service 24h",
+  "Desayuno Incluido",
+]
+
+function parseAmenities(amenities: unknown): string[] {
+  if (!amenities) return []
+  if (Array.isArray(amenities)) return amenities as string[]
+  if (typeof amenities === "string") {
+    try {
+      const parsed = JSON.parse(amenities)
+      if (Array.isArray(parsed)) return parsed
+      if (typeof parsed === "object" && parsed !== null) return Object.keys(parsed)
+    } catch {
+      return []
+    }
+  }
+  if (typeof amenities === "object" && amenities !== null) {
+    return Object.keys(amenities as Record<string, unknown>)
+  }
+  return []
 }
 
 export function RoomCategoryForm({ category, hotels }: RoomCategoryFormProps) {
   const router = useRouter()
+  const isEditing = !!category?.id
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const [formData, setFormData] = useState<RoomCategory>({
-    hotel_id: category?.hotel_id || "",
-    name: category?.name || "",
-    description: category?.description || "",
-    max_occupancy: category?.max_occupancy || 2,
-    amenities: category?.amenities || {},
-  })
-
-  const [amenitiesList, setAmenitiesList] = useState<string[]>(
-    category?.amenities ? Object.keys(category.amenities) : [],
-  )
-
-  const commonAmenities = [
-    "WiFi Gratis",
-    "TV por Cable",
-    "Aire Acondicionado",
-    "Minibar",
-    "Caja de Seguridad",
-    "Cafetera",
-    "Secadora de Pelo",
-    "Plancha y Tabla",
-    "Escritorio de Trabajo",
-    "Balcón o Terraza",
-    "Baño Privado",
-    "Servicio a Habitación",
-  ]
+  const [hotelId, setHotelId] = useState(category?.hotel_id || "")
+  const [name, setName] = useState(category?.name || "")
+  const [description, setDescription] = useState(category?.description || "")
+  const [basePrice, setBasePrice] = useState<string>(category?.base_price ? String(category.base_price) : "")
+  const [maxOccupancy, setMaxOccupancy] = useState<string>(category?.max_occupancy ? String(category.max_occupancy) : "2")
+  const [selectedAmenities, setSelectedAmenities] = useState<string[]>(parseAmenities(category?.amenities))
 
   const toggleAmenity = (amenity: string) => {
-    if (amenitiesList.includes(amenity)) {
-      const newList = amenitiesList.filter((a) => a !== amenity)
-      setAmenitiesList(newList)
-      const newAmenities = { ...formData.amenities }
-      delete newAmenities[amenity]
-      setFormData({ ...formData, amenities: newAmenities })
-    } else {
-      setAmenitiesList([...amenitiesList, amenity])
-      setFormData({
-        ...formData,
-        amenities: { ...formData.amenities, [amenity]: true },
-      })
-    }
+    setSelectedAmenities((prev) =>
+      prev.includes(amenity)
+        ? prev.filter((a) => a !== amenity)
+        : [...prev, amenity]
+    )
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -87,144 +85,216 @@ export function RoomCategoryForm({ category, hotels }: RoomCategoryFormProps) {
     setIsLoading(true)
     setError(null)
 
-    const supabase = createClient()
+    const formData = {
+      hotel_id: hotelId,
+      name,
+      description,
+      base_price: basePrice ? parseFloat(basePrice) : null,
+      max_occupancy: maxOccupancy ? parseInt(maxOccupancy) : null,
+      amenities: selectedAmenities,
+    }
 
     try {
-      const dataToSave = {
-        ...formData,
-        description: formData.description || null,
-        amenities: Object.keys(formData.amenities || {}).length > 0 ? formData.amenities : null,
-      }
-
-      if (category?.id) {
-        const { error: updateError } = await supabase.from("room_categories").update(dataToSave).eq("id", category.id)
-
-        if (updateError) throw updateError
+      if (isEditing && category?.id) {
+        const result = await actualizarCategoriaHabitacion(category.id, formData)
+        if (!result.success) {
+          setError(result.error)
+          toast.error(result.error)
+        } else {
+          toast.success("Categoria actualizada correctamente")
+          router.push("/room-categories")
+          router.refresh()
+        }
       } else {
-        const { error: insertError } = await supabase.from("room_categories").insert(dataToSave)
-
-        if (insertError) throw insertError
+        const result = await crearCategoriaHabitacion(formData)
+        if (!result.success) {
+          setError(result.error)
+          toast.error(result.error)
+        } else {
+          toast.success("Categoria creada correctamente")
+          router.push("/room-categories")
+          router.refresh()
+        }
       }
-
-      router.push("/admin/room-categories")
-      router.refresh()
     } catch (err: unknown) {
-      console.error("[v0] Error saving room category:", err)
-      setError(err instanceof Error ? err.message : "Error al guardar la categoría")
+      const msg = err instanceof Error ? err.message : "Error al guardar la categoria"
+      setError(msg)
+      toast.error(msg)
     } finally {
       setIsLoading(false)
     }
   }
 
   return (
-    <form onSubmit={handleSubmit}>
-      <Card>
-        <CardHeader>
-          <CardTitle>Información de la Categoría</CardTitle>
-          <CardDescription>
-            Define las características de este tipo de habitación. Los campos marcados con * son obligatorios.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="space-y-2">
-            <Label htmlFor="hotel_id">Hotel *</Label>
-            <Select
-              required
-              value={formData.hotel_id}
-              onValueChange={(value) => setFormData({ ...formData, hotel_id: value })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Selecciona un hotel" />
-              </SelectTrigger>
-              <SelectContent>
-                {hotels.map((hotel) => (
-                  <SelectItem key={hotel.id} value={hotel.id}>
-                    {hotel.name} ({hotel.code})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <Button asChild variant="ghost" size="sm" className="h-8 w-8 p-0">
+          <Link href="/room-categories">
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+        </Button>
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {isEditing ? "Editar Categoria" : "Nueva Categoria"}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {isEditing
+              ? `Modificando "${category?.name}" - ${category?.hotel?.name || ""}`
+              : "Define una nueva categoria o tipo de habitacion"}
+          </p>
+        </div>
+      </div>
 
+      {/* Info General */}
+      <div className="spark-card p-6 space-y-6">
+        <div>
+          <h2 className="text-lg font-medium">Informacion de la Categoria</h2>
+          <p className="text-sm text-muted-foreground">
+            Define las caracteristicas de este tipo de habitacion. Los campos con * son obligatorios.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="hotel_id">Hotel *</Label>
+          <Select
+            required
+            value={hotelId}
+            onValueChange={setHotelId}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Selecciona un hotel" />
+            </SelectTrigger>
+            <SelectContent>
+              {hotels.map((hotel) => (
+                <SelectItem key={hotel.id} value={hotel.id}>
+                  {hotel.name} ({hotel.code})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="name">Nombre de la Categoria *</Label>
+          <Input
+            id="name"
+            required
+            placeholder="Habitacion Estandar, Suite Junior, etc."
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">Ejemplo: Estandar, Deluxe, Suite Junior, Master Suite</p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="description">Descripcion</Label>
+          <Textarea
+            id="description"
+            placeholder="Describe las caracteristicas principales de esta categoria..."
+            rows={3}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
+
+        <div className="grid gap-6 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="name">Nombre de la Categoría *</Label>
+            <Label htmlFor="base_price">Precio Base (MXN)</Label>
             <Input
-              id="name"
-              required
-              placeholder="Habitación Estándar, Suite Junior, etc."
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              id="base_price"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="1500.00"
+              value={basePrice}
+              onChange={(e) => setBasePrice(e.target.value)}
             />
-            <p className="text-xs text-muted-foreground">Ejemplo: Estándar, Deluxe, Suite Junior, Master Suite</p>
+            <p className="text-xs text-muted-foreground">
+              Precio de referencia para esta categoria. Cada habitacion puede tener su propio precio rack.
+            </p>
           </div>
-
           <div className="space-y-2">
-            <Label htmlFor="description">Descripción</Label>
-            <Textarea
-              id="description"
-              placeholder="Describe las características principales de esta categoría..."
-              rows={4}
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="max_occupancy">Ocupación Máxima *</Label>
+            <Label htmlFor="max_occupancy">Ocupacion Maxima *</Label>
             <Input
               id="max_occupancy"
               type="number"
               required
               min="1"
+              max="20"
               placeholder="2"
-              value={formData.max_occupancy}
-              onChange={(e) => setFormData({ ...formData, max_occupancy: Number.parseInt(e.target.value) })}
+              value={maxOccupancy}
+              onChange={(e) => setMaxOccupancy(e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              Número máximo de personas que pueden hospedarse en esta categoría
+              Numero maximo de personas que pueden hospedarse
             </p>
           </div>
+        </div>
+      </div>
 
-          <div className="space-y-3">
-            <Label>Amenidades Incluidas</Label>
-            <p className="text-xs text-muted-foreground">
-              Selecciona las amenidades que incluye esta categoría de habitación
-            </p>
-            <div className="grid gap-3 md:grid-cols-2">
-              {commonAmenities.map((amenity) => (
-                <div key={amenity} className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id={amenity}
-                    checked={amenitiesList.includes(amenity)}
-                    onChange={() => toggleAmenity(amenity)}
-                    className="h-4 w-4 rounded border-gray-300"
-                  />
-                  <Label htmlFor={amenity} className="font-normal cursor-pointer">
-                    {amenity}
-                  </Label>
-                </div>
-              ))}
-            </div>
-          </div>
+      {/* Amenidades */}
+      <div className="spark-card p-6 space-y-4">
+        <div>
+          <h2 className="text-lg font-medium">Amenidades Incluidas</h2>
+          <p className="text-sm text-muted-foreground">
+            Selecciona las amenidades que incluye esta categoria de habitacion
+          </p>
+        </div>
 
-          {error && (
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
+        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+          {COMMON_AMENITIES.map((amenity) => (
+            <label
+              key={amenity}
+              className={`flex items-center gap-2.5 rounded-lg border p-3 cursor-pointer transition-colors ${
+                selectedAmenities.includes(amenity)
+                  ? "border-foreground/30 bg-muted"
+                  : "border-border/50 hover:border-border"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={selectedAmenities.includes(amenity)}
+                onChange={() => toggleAmenity(amenity)}
+                className="h-4 w-4 rounded border-border accent-foreground"
+              />
+              <span className="text-sm">{amenity}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Error */}
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* Actions */}
+      <div className="flex items-center gap-4">
+        <Button
+          type="submit"
+          disabled={isLoading}
+          className="bg-foreground text-background hover:bg-foreground/90"
+        >
+          {isLoading ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Guardando...
+            </>
+          ) : (
+            <>
+              <Save className="mr-2 h-4 w-4" />
+              {isEditing ? "Actualizar Categoria" : "Crear Categoria"}
+            </>
           )}
-
-          <div className="flex gap-4">
-            <Button type="submit" disabled={isLoading}>
-              {isLoading ? "Guardando..." : category?.id ? "Actualizar Categoría" : "Crear Categoría"}
-            </Button>
-            <Button type="button" variant="outline" onClick={() => router.push("/admin/room-categories")}>
-              Cancelar
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+        </Button>
+        <Button type="button" variant="outline" onClick={() => router.push("/room-categories")}>
+          Cancelar
+        </Button>
+      </div>
     </form>
   )
 }

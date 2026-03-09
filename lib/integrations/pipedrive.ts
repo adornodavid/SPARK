@@ -21,8 +21,6 @@ export class PipedriveClient {
     orgId?: number
   }) {
     // TODO: Implement Pipedrive API call
-    console.log("[Pipedrive] Creating deal:", data)
-
     // Example implementation:
     // const response = await fetch(
     //   `https://${this.config.companyDomain}.pipedrive.com/api/v1/deals?api_token=${this.config.apiToken}`,
@@ -43,7 +41,6 @@ export class PipedriveClient {
     phone?: string
     orgId?: number
   }) {
-    console.log("[Pipedrive] Creating person:", data)
     return { success: true, id: "mock-person-id" }
   }
 
@@ -51,12 +48,10 @@ export class PipedriveClient {
     name: string
     address?: string
   }) {
-    console.log("[Pipedrive] Creating organization:", data)
     return { success: true, id: "mock-org-id" }
   }
 
   async updateDealStage(dealId: string, stageId: number) {
-    console.log("[Pipedrive] Updating deal stage:", { dealId, stageId })
     return { success: true }
   }
 }
@@ -64,8 +59,6 @@ export class PipedriveClient {
 // Sync quotation to Pipedrive
 export async function syncQuotationToPipedrive(quotationId: string) {
   // TODO: Implement when Pipedrive is configured
-  console.log("[Pipedrive] Would sync quotation:", quotationId)
-
   // Example workflow:
   // 1. Get quotation data
   // 2. Create/update person in Pipedrive

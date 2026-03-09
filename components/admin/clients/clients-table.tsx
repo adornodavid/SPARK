@@ -18,6 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { toast } from "sonner"
 
 interface Client {
   id: string
@@ -52,8 +53,7 @@ export function ClientsTable({ clients }: ClientsTableProps) {
     const { error } = await supabase.from("clients").delete().eq("id", deleteId)
 
     if (error) {
-      console.error("[v0] Error deleting client:", error)
-      alert("Error al eliminar el cliente")
+      toast.error("Error al eliminar el cliente")
     } else {
       router.refresh()
     }

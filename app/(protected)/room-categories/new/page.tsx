@@ -1,23 +1,33 @@
-import { createClient } from "@/lib/supabase/server"
+import { Suspense } from "react"
 import { RoomCategoryForm } from "@/components/admin/room-categories/room-category-form"
+import { ddlHotelesHabitaciones } from "@/app/actions/habitaciones"
 
-export default async function NewRoomCategoryPage() {
-  const supabase = await createClient()
-
-  const { data: hotels } = await supabase
-    .from("hotels")
-    .select("id, code, name")
-    .eq("status", "activo")
-    .order("name", { ascending: true })
-
+function LoadingState() {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Nueva Categoría de Habitación</h1>
-        <p className="text-sm text-muted-foreground">Define una nueva categoría o tipo de habitación</p>
-      </div>
-
-      <RoomCategoryForm hotels={hotels || []} />
+      <div className="h-7 w-48 animate-pulse rounded bg-muted" />
+      <div className="h-4 w-72 animate-pulse rounded bg-muted" />
+      <div className="h-[500px] animate-pulse rounded-xl bg-muted" />
     </div>
+  )
+}
+
+async function NewCategoryContent() {
+  const hotelsResult = await ddlHotelesHabitaciones()
+
+  return (
+    <div className="mx-auto max-w-3xl">
+      <RoomCategoryForm
+        hotels={hotelsResult.data || []}
+      />
+    </div>
+  )
+}
+
+export default function NewRoomCategoryPage() {
+  return (
+    <Suspense fallback={<LoadingState />}>
+      <NewCategoryContent />
+    </Suspense>
   )
 }

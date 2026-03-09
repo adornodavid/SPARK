@@ -65,7 +65,7 @@ export default function AdminDashboardPage() {
     "Diciembre",
   ]
 
-  const upcomingEvents = []
+  const upcomingEvents: Array<{ type: string; date: string; title: string; location: string }> = []
 
   const getDaysInMonth = (month: number, year: number) => {
     return new Date(year, month + 1, 0).getDate()

@@ -12,9 +12,19 @@ export async function createAdminUser() {
   })
 
   try {
+    // SECURITY: Admin credentials must come from environment variables
+    const adminEmail = process.env.ADMIN_SETUP_EMAIL
+    const adminPassword = process.env.ADMIN_SETUP_PASSWORD
+    if (!adminEmail || !adminPassword) {
+      return {
+        success: false,
+        error: "ADMIN_SETUP_EMAIL and ADMIN_SETUP_PASSWORD environment variables are required",
+      }
+    }
+
     const { data: userData, error: userError } = await supabase.auth.admin.createUser({
-      email: "arkamia.ti.ia@gmail.com",
-      password: "Arkamia25",
+      email: adminEmail,
+      password: adminPassword,
       email_confirm: true,
       user_metadata: {
         full_name: "Arkamia",
@@ -23,11 +33,9 @@ export async function createAdminUser() {
     })
 
     if (userError) {
-      console.error("[v0] Error creating user:", userError)
-
       // Check if user already exists
       const { data: existingUsers } = await supabase.auth.admin.listUsers()
-      const existingUser = existingUsers?.users.find((u) => u.email === "arkamia.ti.ia@gmail.com")
+      const existingUser = existingUsers?.users.find((u) => u.email === adminEmail)
 
       if (existingUser) {
         const { data: userRecord, error: userCheckError } = await supabase
@@ -39,14 +47,13 @@ export async function createAdminUser() {
         if (!userRecord && !userCheckError) {
           const { error: directInsertError } = await supabase.from("users").insert({
             id: existingUser.id,
-            email: existingUser.email || "arkamia.ti.ia@gmail.com",
+            email: existingUser.email || adminEmail,
             full_name: "Arkamia",
             role: "admin_principal",
             is_active: true,
           })
 
           if (directInsertError) {
-            console.error("[v0] Error creating user record:", directInsertError)
             return { success: false, error: directInsertError.message }
           }
         }
@@ -74,14 +81,13 @@ export async function createAdminUser() {
       if (!userRecord || userCheckError) {
         const { error: insertError } = await supabase.from("users").insert({
           id: userData.user.id,
-          email: userData.user.email || "arkamia.ti.ia@gmail.com",
+          email: userData.user.email || adminEmail,
           full_name: "Arkamia",
           role: "admin_principal",
           is_active: true,
         })
 
         if (insertError) {
-          console.error("[v0] Error creating user record:", insertError)
           return { success: false, error: insertError.message }
         }
       } else if (userRecord.role !== "admin_principal") {
@@ -91,7 +97,6 @@ export async function createAdminUser() {
           .eq("id", userData.user.id)
 
         if (updateError) {
-          console.error("[v0] Error updating user role:", updateError)
           return { success: false, error: updateError.message }
         }
       }
@@ -106,7 +111,7 @@ export async function createAdminUser() {
       },
     }
   } catch (error) {
-    console.error("[v0] Unexpected error:", error)
+    console.error("Error inesperado en createAdminUser:", error)
     return { success: false, error: String(error) }
   }
 }

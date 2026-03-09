@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { createBrowserClient } from "@/lib/supabase/client"
+import { toast } from "sonner"
 
 interface PackageFormProps {
   packageId?: string
@@ -50,7 +51,6 @@ export function PackageForm({ packageId }: PackageFormProps) {
     const { data, error } = await supabase.from("banquet_packages").select("*").eq("id", packageId).single()
 
     if (error) {
-      console.error("Error loading package:", error)
       return
     }
 
@@ -90,8 +90,7 @@ export function PackageForm({ packageId }: PackageFormProps) {
     setLoading(false)
 
     if (error) {
-      console.error("Error saving package:", error)
-      alert("Error al guardar el paquete")
+      toast.error("Error al guardar el paquete")
       return
     }
 

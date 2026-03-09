@@ -4,87 +4,106 @@ import { useEffect, useState } from "react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Card, CardContent } from "@/components/ui/card"
-import { createBrowserClient } from "@/lib/supabase/client"
-import { Search } from "lucide-react"
+import { Search, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { listaDesplegableHoteles } from "@/app/actions/hoteles"
+import type { ddlItem } from "@/types/common"
 
 interface AgreementsFilterProps {
   filters: {
-    status: string
-    hotel_id: string
-    search: string
+    estado: string
+    hotelid: number
+    busqueda: string
   }
-  onFiltersChange: (filters: any) => void
+  onFiltersChange: (filters: { estado: string; hotelid: number; busqueda: string }) => void
 }
 
 export function AgreementsFilter({ filters, onFiltersChange }: AgreementsFilterProps) {
-  const [hotels, setHotels] = useState<any[]>([])
-  const supabase = createBrowserClient()
+  const [hoteles, setHoteles] = useState<ddlItem[]>([])
 
   useEffect(() => {
-    loadHotels()
+    async function loadHoteles() {
+      const result = await listaDesplegableHoteles()
+      if (result.success && result.data) {
+        setHoteles(result.data as ddlItem[])
+      }
+    }
+    loadHoteles()
   }, [])
 
-  async function loadHotels() {
-    const { data } = await supabase.from("hotels").select("id, name").eq("status", "active").order("name")
+  const hasActiveFilters = filters.estado !== "" || filters.hotelid !== -1 || filters.busqueda !== ""
 
-    if (data) setHotels(data)
+  function clearFilters() {
+    onFiltersChange({ estado: "", hotelid: -1, busqueda: "" })
   }
 
   return (
-    <Card>
-      <CardContent className="pt-6">
-        <div className="grid grid-cols-3 gap-4">
-          <div className="space-y-2">
-            <Label>Buscar</Label>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por nombre..."
-                value={filters.search}
-                onChange={(e) => onFiltersChange({ ...filters, search: e.target.value })}
-                className="pl-9"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Estado</Label>
-            <Select value={filters.status} onValueChange={(value) => onFiltersChange({ ...filters, status: value })}>
-              <SelectTrigger>
-                <SelectValue placeholder="Todos los estados" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos los estados</SelectItem>
-                <SelectItem value="draft">Borrador</SelectItem>
-                <SelectItem value="active">Activo</SelectItem>
-                <SelectItem value="expired">Expirado</SelectItem>
-                <SelectItem value="cancelled">Cancelado</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Hotel</Label>
-            <Select
-              value={filters.hotel_id}
-              onValueChange={(value) => onFiltersChange({ ...filters, hotel_id: value })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Todos los hoteles" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos los hoteles</SelectItem>
-                {hotels.map((hotel) => (
-                  <SelectItem key={hotel.id} value={hotel.id}>
-                    {hotel.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+    <div className="rounded-xl border border-border/50 bg-card p-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+        {/* Busqueda */}
+        <div className="space-y-2">
+          <Label className="text-sm text-muted-foreground">Buscar</Label>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Empresa, contacto, email..."
+              value={filters.busqueda}
+              onChange={(e) => onFiltersChange({ ...filters, busqueda: e.target.value })}
+              className="pl-9"
+            />
           </div>
         </div>
-      </CardContent>
-    </Card>
+
+        {/* Estado */}
+        <div className="space-y-2">
+          <Label className="text-sm text-muted-foreground">Estado</Label>
+          <Select
+            value={filters.estado || "todos"}
+            onValueChange={(value) => onFiltersChange({ ...filters, estado: value === "todos" ? "" : value })}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Todos los estados" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos los estados</SelectItem>
+              <SelectItem value="activo">Activo</SelectItem>
+              <SelectItem value="vencido">Vencido</SelectItem>
+              <SelectItem value="cancelado">Cancelado</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Hotel */}
+        <div className="space-y-2">
+          <Label className="text-sm text-muted-foreground">Hotel</Label>
+          <Select
+            value={filters.hotelid === -1 ? "todos" : filters.hotelid.toString()}
+            onValueChange={(value) =>
+              onFiltersChange({ ...filters, hotelid: value === "todos" ? -1 : Number(value) })
+            }
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Todos los hoteles" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos los hoteles</SelectItem>
+              {hoteles.map((hotel) => (
+                <SelectItem key={hotel.value} value={hotel.value}>
+                  {hotel.text}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Limpiar filtros */}
+        {hasActiveFilters && (
+          <Button variant="outline" onClick={clearFilters} className="h-9">
+            <X className="h-4 w-4 mr-2" />
+            Limpiar
+          </Button>
+        )}
+      </div>
+    </div>
   )
 }

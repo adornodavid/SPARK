@@ -21,7 +21,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey)
   * Objetos
     - objetoCalendario / oCalendario (Individual)
     - objetoCalendarios / oCalendarios (Listado / Array)
-  
+
   --------------------
   Funciones
   --------------------
@@ -30,6 +30,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
   * SELECTS: READ/OBTENER/SELECT
     - obtenerCalendarios / selCalendarios
+    - obtenerCalendariosPorRango / selCalendariosPorRango (NUEVO - Fase 3)
 
   * UPDATES: EDIT/ACTUALIZAR/UPDATE
     - actualizarCalendario / updCalendario
@@ -90,7 +91,6 @@ export async function objetoCalendario(
     const { data, error } = await query.maybeSingle()
 
     if (error) {
-      console.error("Error en la funcion objetoCalendario (Individual) de actions/calendario : ", error)
       return {
         success: false,
         error: "Error en la funcion objetoCalendario de actions/calendario: " + error.message,
@@ -100,7 +100,6 @@ export async function objetoCalendario(
 
     return { success: true, error: "", data: data }
   } catch (error: unknown) {
-    console.error("Error en app/actions/calendario en objetoCalendario (Individual): ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion objetoCalendario: " + errorMessage, data: null }
   }
@@ -141,11 +140,10 @@ export async function objetoCalendarios(
       query = query.eq("fechafin", fecharangofin)
     }
 
-  
+
     const { data, error } = await query
 
     if (error) {
-      console.error("Error en la funcion objetoCalendarios (Listado) de actions/calendario : ", error)
       return {
         success: false,
         error: "Error en la funcion objetoCalendarios de actions/calendario: " + error.message,
@@ -155,7 +153,6 @@ export async function objetoCalendarios(
 
     return { success: true, error: "", data: data }
   } catch (error: unknown) {
-    console.error("Error en app/actions/calendario en objetoCalendarios (Listado): ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion objetoCalendarios: " + errorMessage, data: null }
   }
@@ -169,7 +166,7 @@ export async function crearCalendario(formData: unknown) {}
 /*==================================================
   SELECTS: READ / OBTENER / SELECT
 ================================================== */
-// Función: obtenerCalendarios / selCalendarios: Función para obtener
+// Función: obtenerCalendarios / selCalendarios: Función para obtener (LEGACY - mantener compatibilidad)
 export async function obtenerCalendarios(
   id = -1,
   nombreevento = "",
@@ -209,13 +206,12 @@ export async function obtenerCalendarios(
       query = query.eq("fechafin", fecharangofin)
     }
 
-    
+
 
     // Ejecutar query
     const { data, error } = await query
 
     if (error) {
-      console.error("Error en la funcion obtenerCalendarios de actions/calendario: ", error)
       return {
         success: false,
         error: "Error en la funcion obtenerCalendarios de actions/calendario: " + error.message,
@@ -226,9 +222,97 @@ export async function obtenerCalendarios(
     // Regreso de data
     return { success: true, error: "", data: data }
   } catch (error: unknown) {
-    console.error("Error en app/actions/calendario en obtenerCalendarios: ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion obtenerCalendarios: " + errorMessage, data: null }
+  }
+}
+
+// Función: obtenerCalendariosPorRango / selCalendariosPorRango
+// FASE 3: Calendario Multipropiedad — consulta optimizada por rango de fechas
+// IMPORTANTE: Usa gte/lte en lugar de eq para filtrar por rango de fechas (fix de performance critico)
+// Un evento aparece en el rango si: fechainicio <= rangoFin AND fechafin >= rangoInicio (overlap)
+export async function obtenerCalendariosPorRango(
+  rangoInicio: string,
+  rangoFin: string,
+  hotelid = -1,
+  salonid = -1,
+): Promise<{ success: boolean; error: string; data: unknown }> {
+  try {
+    // Query principal — solo eventos que se solapan con el rango solicitado
+    let query = supabase.from("vw_ocalendarios").select("*")
+
+    // Filtro de rango: evento.fechainicio <= rangoFin AND evento.fechafin >= rangoInicio
+    // Esto captura eventos que inician antes del fin del rango Y terminan despues del inicio del rango
+    query = query.lte("fechainicio", rangoFin)
+    query = query.gte("fechafin", rangoInicio)
+
+    // Filtros opcionales de hotel y salon
+    if (hotelid !== -1) {
+      query = query.eq("hotelid", hotelid)
+    }
+    if (salonid !== -1) {
+      query = query.eq("salonid", salonid)
+    }
+
+    // Ordenar por fecha de inicio
+    query = query.order("fechainicio", { ascending: true })
+
+    // Ejecutar query
+    const { data, error } = await query
+
+    if (error) {
+      return {
+        success: false,
+        error: "Error en la funcion obtenerCalendariosPorRango de actions/calendario: " + error.message,
+        data: null,
+      }
+    }
+
+    // Regreso de data
+    return { success: true, error: "", data: data }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error en funcion obtenerCalendariosPorRango: " + errorMessage, data: null }
+  }
+}
+
+// Función: obtenerEventosPorDia / selEventosPorDia
+// FASE 3: Obtiene todos los eventos para un dia especifico (para el Day Detail Panel)
+export async function obtenerEventosPorDia(
+  fecha: string,
+  hotelid = -1,
+  salonid = -1,
+): Promise<{ success: boolean; error: string; data: unknown }> {
+  try {
+    let query = supabase.from("vw_ocalendarios").select("*")
+
+    // Un evento esta activo en esta fecha si: fechainicio <= fecha AND fechafin >= fecha
+    query = query.lte("fechainicio", fecha)
+    query = query.gte("fechafin", fecha)
+
+    if (hotelid !== -1) {
+      query = query.eq("hotelid", hotelid)
+    }
+    if (salonid !== -1) {
+      query = query.eq("salonid", salonid)
+    }
+
+    query = query.order("hotel", { ascending: true }).order("salon", { ascending: true })
+
+    const { data, error } = await query
+
+    if (error) {
+      return {
+        success: false,
+        error: "Error en la funcion obtenerEventosPorDia de actions/calendario: " + error.message,
+        data: null,
+      }
+    }
+
+    return { success: true, error: "", data: data }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error en funcion obtenerEventosPorDia: " + errorMessage, data: null }
   }
 }
 

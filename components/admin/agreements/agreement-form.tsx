@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -10,159 +9,217 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { createBrowserClient } from "@/lib/supabase/client"
+import { toast } from "sonner"
+import { Save, ArrowLeft, Loader2 } from "lucide-react"
+import { crearConvenio, actualizarConvenio, obtenerConvenio } from "@/app/actions/convenios"
+import { listaDesplegableHoteles } from "@/app/actions/hoteles"
+import type { oConvenioForm } from "@/types/convenios"
+import { TIPOS_DESCUENTO, APLICA_A_OPTIONS } from "@/types/convenios"
+import type { ddlItem } from "@/types/common"
 
 interface AgreementFormProps {
   agreementId?: string
 }
 
+const emptyForm: oConvenioForm = {
+  empresa: "",
+  contacto: "",
+  email: "",
+  telefono: "",
+  hotelid: null,
+  tipo_descuento: "porcentaje",
+  descuento_valor: 0,
+  aplica_a: "ambos",
+  condiciones: "",
+  vigencia_inicio: "",
+  vigencia_fin: "",
+  estado: "activo",
+  notas: "",
+}
+
 export function AgreementForm({ agreementId }: AgreementFormProps) {
   const router = useRouter()
-  const supabase = createBrowserClient()
   const [loading, setLoading] = useState(false)
-  const [clients, setClients] = useState<any[]>([])
-  const [hotels, setHotels] = useState<any[]>([])
-  const [currentUserId, setCurrentUserId] = useState<string>("")
-  const [formData, setFormData] = useState({
-    name: "",
-    client_id: "",
-    hotel_id: "",
-    start_date: "",
-    end_date: "",
-    discount_percentage: "",
-    description: "",
-    terms_conditions: "",
-    notes: "",
-  })
+  const [loadingData, setLoadingData] = useState(!!agreementId)
+  const [hoteles, setHoteles] = useState<ddlItem[]>([])
+  const [formData, setFormData] = useState<oConvenioForm>(emptyForm)
+
+  const isEditing = !!agreementId
 
   useEffect(() => {
+    async function loadInitialData() {
+      const hotelResult = await listaDesplegableHoteles()
+      if (hotelResult.success && hotelResult.data) {
+        setHoteles(hotelResult.data as ddlItem[])
+      }
+
+      if (agreementId) {
+        const result = await obtenerConvenio(Number(agreementId))
+        if (result.success && result.data) {
+          const c = result.data
+          setFormData({
+            empresa: c.empresa || "",
+            contacto: c.contacto || "",
+            email: c.email || "",
+            telefono: c.telefono || "",
+            hotelid: c.hotelid,
+            tipo_descuento: c.tipo_descuento,
+            descuento_valor: c.descuento_valor,
+            aplica_a: c.aplica_a,
+            condiciones: c.condiciones || "",
+            vigencia_inicio: c.vigencia_inicio || "",
+            vigencia_fin: c.vigencia_fin || "",
+            estado: c.estado,
+            notas: c.notas || "",
+          })
+        } else {
+          toast.error("No se pudo cargar el convenio")
+          router.push("/agreements")
+        }
+        setLoadingData(false)
+      }
+    }
     loadInitialData()
-    if (agreementId) {
-      loadAgreement()
-    }
-  }, [agreementId])
+  }, [agreementId, router])
 
-  async function loadInitialData() {
-    const [{ data: user }, clientsRes, hotelsRes] = await Promise.all([
-      supabase.auth.getUser(),
-      supabase.from("clients").select("id, name, type").eq("status", "active").order("name"),
-      supabase.from("hotels").select("id, name").eq("status", "active").order("name"),
-    ])
-
-    if (user?.user) setCurrentUserId(user.user.id)
-    if (clientsRes.data) setClients(clientsRes.data)
-    if (hotelsRes.data) setHotels(hotelsRes.data)
-  }
-
-  async function loadAgreement() {
-    const { data, error } = await supabase.from("corporate_agreements").select("*").eq("id", agreementId).single()
-
-    if (error) {
-      console.error("Error loading agreement:", error)
-      return
-    }
-
-    if (data) {
-      setFormData({
-        name: data.name || "",
-        client_id: data.client_id || "",
-        hotel_id: data.hotel_id || "",
-        start_date: data.start_date || "",
-        end_date: data.end_date || "",
-        discount_percentage: data.discount_percentage?.toString() || "",
-        description: data.description || "",
-        terms_conditions: data.terms_conditions || "",
-        notes: data.notes || "",
-      })
-    }
+  function updateField<K extends keyof oConvenioForm>(key: K, value: oConvenioForm[K]) {
+    setFormData((prev) => ({ ...prev, [key]: value }))
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
 
-    const agreementData = {
-      name: formData.name,
-      client_id: formData.client_id,
-      hotel_id: formData.hotel_id,
-      start_date: formData.start_date,
-      end_date: formData.end_date,
-      discount_percentage: Number.parseFloat(formData.discount_percentage),
-      description: formData.description || null,
-      terms_conditions: formData.terms_conditions || null,
-      notes: formData.notes || null,
-      status: "active",
-      salesperson_id: currentUserId,
+    try {
+      if (isEditing) {
+        const result = await actualizarConvenio(Number(agreementId), formData)
+        if (result.success) {
+          toast.success("Convenio actualizado correctamente")
+          router.push(`/agreements/${agreementId}`)
+        } else {
+          toast.error(result.error)
+        }
+      } else {
+        const result = await crearConvenio(formData)
+        if (result.success && result.data) {
+          toast.success("Convenio creado correctamente")
+          router.push(`/agreements/${result.data.id}`)
+        } else {
+          toast.error(result.error)
+        }
+      }
+    } catch {
+      toast.error("Error inesperado al guardar")
     }
-
-    const { error } = agreementId
-      ? await supabase.from("corporate_agreements").update(agreementData).eq("id", agreementId)
-      : await supabase.from("corporate_agreements").insert(agreementData)
 
     setLoading(false)
+  }
 
-    if (error) {
-      console.error("Error saving agreement:", error)
-      alert("Error al guardar el convenio")
-      return
-    }
-
-    router.push("/admin/agreements")
+  if (loadingData) {
+    return (
+      <div className="rounded-xl border border-border/50 bg-card p-8">
+        <div className="flex items-center justify-center text-muted-foreground">
+          <Loader2 className="h-6 w-6 animate-spin mr-3" />
+          Cargando convenio...
+        </div>
+      </div>
+    )
   }
 
   return (
-    <form onSubmit={handleSubmit}>
-      <Card>
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {/* Informacion de la empresa */}
+      <Card className="rounded-xl border-border/50">
         <CardHeader>
-          <CardTitle>Información del Convenio</CardTitle>
+          <CardTitle>Informacion de la Empresa</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="name">Nombre del Convenio *</Label>
+            <Label htmlFor="empresa">Nombre de la Empresa *</Label>
             <Input
-              id="name"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              placeholder="Ej: Convenio Corporativo Empresa XYZ"
+              id="empresa"
+              value={formData.empresa}
+              onChange={(e) => updateField("empresa", e.target.value)}
+              placeholder="Ej: Grupo Industrial MTY SA de CV"
               required
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="client_id">Cliente *</Label>
-              <Select
-                value={formData.client_id}
-                onValueChange={(value) => setFormData({ ...formData, client_id: value })}
-                required
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecciona un cliente" />
-                </SelectTrigger>
-                <SelectContent>
-                  {clients.map((client) => (
-                    <SelectItem key={client.id} value={client.id}>
-                      {client.name} ({client.type === "individual" ? "Individual" : "Empresa"})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label htmlFor="contacto">Persona de Contacto</Label>
+              <Input
+                id="contacto"
+                value={formData.contacto}
+                onChange={(e) => updateField("contacto", e.target.value)}
+                placeholder="Nombre completo"
+              />
             </div>
-
             <div className="space-y-2">
-              <Label htmlFor="hotel_id">Hotel *</Label>
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                value={formData.email}
+                onChange={(e) => updateField("email", e.target.value)}
+                placeholder="correo@empresa.com"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="telefono">Telefono</Label>
+              <Input
+                id="telefono"
+                value={formData.telefono}
+                onChange={(e) => updateField("telefono", e.target.value)}
+                placeholder="+52 81 1234 5678"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Detalles del convenio */}
+      <Card className="rounded-xl border-border/50">
+        <CardHeader>
+          <CardTitle>Detalles del Convenio</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="hotelid">Hotel</Label>
               <Select
-                value={formData.hotel_id}
-                onValueChange={(value) => setFormData({ ...formData, hotel_id: value })}
-                required
+                value={formData.hotelid ? formData.hotelid.toString() : "ninguno"}
+                onValueChange={(value) =>
+                  updateField("hotelid", value === "ninguno" ? null : Number(value))
+                }
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Selecciona un hotel" />
                 </SelectTrigger>
                 <SelectContent>
-                  {hotels.map((hotel) => (
-                    <SelectItem key={hotel.id} value={hotel.id}>
-                      {hotel.name}
+                  <SelectItem value="ninguno">Todos los hoteles</SelectItem>
+                  {hoteles.map((hotel) => (
+                    <SelectItem key={hotel.value} value={hotel.value}>
+                      {hotel.text}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="aplica_a">Aplica a *</Label>
+              <Select
+                value={formData.aplica_a}
+                onValueChange={(value) => updateField("aplica_a", value as "habitaciones" | "salones" | "ambos")}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {APLICA_A_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -170,87 +227,142 @@ export function AgreementForm({ agreementId }: AgreementFormProps) {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="start_date">Fecha de Inicio *</Label>
-              <Input
-                id="start_date"
-                type="date"
-                value={formData.start_date}
-                onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
-                required
-              />
+              <Label htmlFor="tipo_descuento">Tipo de Descuento *</Label>
+              <Select
+                value={formData.tipo_descuento}
+                onValueChange={(value) => updateField("tipo_descuento", value as "porcentaje" | "monto_fijo")}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TIPOS_DESCUENTO.map((tipo) => (
+                    <SelectItem key={tipo.value} value={tipo.value}>
+                      {tipo.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-
             <div className="space-y-2">
-              <Label htmlFor="end_date">Fecha de Fin *</Label>
+              <Label htmlFor="descuento_valor">
+                Valor del Descuento *
+                {formData.tipo_descuento === "porcentaje" ? " (%)" : " ($ MXN)"}
+              </Label>
               <Input
-                id="end_date"
-                type="date"
-                value={formData.end_date}
-                onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
-                required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="discount_percentage">Descuento % *</Label>
-              <Input
-                id="discount_percentage"
+                id="descuento_valor"
                 type="number"
                 step="0.01"
                 min="0"
-                max="100"
-                value={formData.discount_percentage}
-                onChange={(e) => setFormData({ ...formData, discount_percentage: e.target.value })}
+                max={formData.tipo_descuento === "porcentaje" ? "100" : undefined}
+                value={formData.descuento_valor || ""}
+                onChange={(e) => updateField("descuento_valor", Number(e.target.value))}
+                placeholder={formData.tipo_descuento === "porcentaje" ? "15" : "500"}
                 required
               />
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="description">Descripción</Label>
-            <Textarea
-              id="description"
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              placeholder="Describe los beneficios del convenio..."
-              rows={3}
-            />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="vigencia_inicio">Vigencia Inicio *</Label>
+              <Input
+                id="vigencia_inicio"
+                type="date"
+                value={formData.vigencia_inicio}
+                onChange={(e) => updateField("vigencia_inicio", e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="vigencia_fin">Vigencia Fin *</Label>
+              <Input
+                id="vigencia_fin"
+                type="date"
+                value={formData.vigencia_fin}
+                onChange={(e) => updateField("vigencia_fin", e.target.value)}
+                required
+              />
+            </div>
           </div>
 
+          {isEditing && (
+            <div className="space-y-2">
+              <Label htmlFor="estado">Estado</Label>
+              <Select
+                value={formData.estado}
+                onValueChange={(value) => updateField("estado", value as "activo" | "vencido" | "cancelado")}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="activo">Activo</SelectItem>
+                  <SelectItem value="vencido">Vencido</SelectItem>
+                  <SelectItem value="cancelado">Cancelado</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Condiciones y notas */}
+      <Card className="rounded-xl border-border/50">
+        <CardHeader>
+          <CardTitle>Condiciones y Notas</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="terms_conditions">Términos y Condiciones</Label>
+            <Label htmlFor="condiciones">Condiciones del Convenio</Label>
             <Textarea
-              id="terms_conditions"
-              value={formData.terms_conditions}
-              onChange={(e) => setFormData({ ...formData, terms_conditions: e.target.value })}
-              placeholder="Términos y condiciones del convenio..."
+              id="condiciones"
+              value={formData.condiciones}
+              onChange={(e) => updateField("condiciones", e.target.value)}
+              placeholder="Detalla las condiciones especiales, restricciones, periodos de bloqueo, etc..."
               rows={4}
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="notes">Notas Internas</Label>
+            <Label htmlFor="notas">Notas Internas</Label>
             <Textarea
-              id="notes"
-              value={formData.notes}
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-              placeholder="Notas privadas para el equipo..."
+              id="notas"
+              value={formData.notas}
+              onChange={(e) => updateField("notas", e.target.value)}
+              placeholder="Notas privadas para el equipo de ventas..."
               rows={3}
             />
           </div>
-
-          <div className="flex gap-4">
-            <Button type="submit" disabled={loading}>
-              {loading ? "Guardando..." : agreementId ? "Actualizar" : "Crear"} Convenio
-            </Button>
-            <Button type="button" variant="outline" onClick={() => router.back()}>
-              Cancelar
-            </Button>
-          </div>
         </CardContent>
       </Card>
+
+      {/* Botones de accion */}
+      <div className="flex items-center gap-3">
+        <Button
+          type="submit"
+          disabled={loading}
+          className="bg-foreground text-background hover:bg-foreground/90"
+        >
+          {loading ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Guardando...
+            </>
+          ) : (
+            <>
+              <Save className="h-4 w-4 mr-2" />
+              {isEditing ? "Actualizar Convenio" : "Crear Convenio"}
+            </>
+          )}
+        </Button>
+        <Button type="button" variant="outline" onClick={() => router.back()}>
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Cancelar
+        </Button>
+      </div>
     </form>
   )
 }

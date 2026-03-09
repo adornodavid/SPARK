@@ -80,7 +80,6 @@ export async function objetoCliente(
     const { data, error } = await query.maybeSingle()
 
     if (error) {
-      console.error("Error en la funcion objetoCliente (Individual) de actions/clientes : ", error)
       return {
         success: false,
         error: "Error en la funcion objetoCliente de actions/clientes: " + error.message,
@@ -90,7 +89,6 @@ export async function objetoCliente(
 
     return { success: true, error: "", data: data as oClientes }
   } catch (error: unknown) {
-    console.error("Error en app/actions/clientes en objetoCliente (Individual): ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion objetoCliente: " + errorMessage, data: null }
   }
@@ -131,7 +129,6 @@ export async function objetoClientes(
     const { data, error } = await query
 
     if (error) {
-      console.error("Error en la funcion objetoClientes (Listado) de actions/clientes : ", error)
       return {
         success: false,
         error: "Error en la funcion objetoClientes de actions/clientes: " + error.message,
@@ -141,7 +138,6 @@ export async function objetoClientes(
 
     return { success: true, error: "", data: data as oClientes[] }
   } catch (error: unknown) {
-    console.error("Error en app/actions/clientes en objetoClientes (Listado): ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion objetoClientes: " + errorMessage, data: null }
   }
@@ -187,7 +183,6 @@ export async function crearCliente(formData: FormData) {
       .maybeSingle()
 
     if (errorValidacion) {
-      console.error("Error en validación de cliente existente de la funcion crearCliente: ", errorValidacion)
       return {
         success: false,
         error: "Error al validar cliente existente en la funcion crearCliente: " + errorValidacion.message,
@@ -230,7 +225,6 @@ export async function crearCliente(formData: FormData) {
       .single()
 
     if (error) {
-      console.error("Error en INSERT de crearCliente: ", error)
       return { success: false, error: "Error al crear cliente: " + error.message }
     }
 
@@ -243,7 +237,6 @@ export async function crearCliente(formData: FormData) {
     // Paso 4: Regresar resultado
     return { success: true, data: data.id }
   } catch (error: unknown) {
-    console.error("Error en actions/clientes en la funcion crearCliente: ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en actions/clientes en la funcion crearCliente: " + errorMessage }
   }
@@ -293,7 +286,6 @@ export async function obtenerClientes(
     const { data, error } = await query
 
     if (error) {
-      console.error("Error en la funcion obtenerClientes de actions/clientes: ", error)
       return {
         success: false,
         error: "Error en la funcion obtenerClientes de actions/clientes: " + error.message,
@@ -304,7 +296,6 @@ export async function obtenerClientes(
     // Regreso de data
     return { success: true, error: "", data: data }
   } catch (error: unknown) {
-    console.error("Error en app/actions/clientes en obtenerClientes: ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion obtenerClientes: " + errorMessage, data: null }
   }
@@ -353,7 +344,6 @@ export async function actualizarCliente(formData: FormData) {
       .maybeSingle()
 
     if (errorExistencia) {
-      console.error("Error validando existencia del cliente:", errorExistencia)
       return { success: false, error: "Error validando existencia del cliente: " + errorExistencia.message }
     }
 
@@ -369,7 +359,6 @@ export async function actualizarCliente(formData: FormData) {
       .maybeSingle()
 
     if (errorDuplicado) {
-      console.error("Error validando duplicados:", errorDuplicado)
       return { success: false, error: "Error al validar duplicados: " + errorDuplicado.message }
     }
 
@@ -406,7 +395,6 @@ export async function actualizarCliente(formData: FormData) {
 
     // Return error
     if (error) {
-      console.error("Error actualizando cliente en query en actualizarCliente de actions/clientes:", error)
       return { success: false, error: error.message }
     }
 
@@ -419,7 +407,6 @@ export async function actualizarCliente(formData: FormData) {
     // Retorno de datos
     return { success: true, data: data.id }
   } catch (error: unknown) {
-    console.error("Error en actualizarCliente de actions/clientes: ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return {
       success: false,
@@ -458,7 +445,6 @@ export async function listaDesplegableClientes(id = -1, descripcion = "") {
     const { data: clientes, error } = await query
 
     if (error) {
-      console.error("Error obteniendo la lista desplegable de clientes:", error)
       return { success: false, error: "Error obteniendo lista de clientes: " + error.message }
     }
 
@@ -473,7 +459,6 @@ export async function listaDesplegableClientes(id = -1, descripcion = "") {
 
     return { success: true, data }
   } catch (error: unknown) {
-    console.error("Error en listaDesplegableClientes:", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error obteniendo lista desplegable de clientes: " + errorMessage }
   }

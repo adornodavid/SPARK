@@ -20,7 +20,6 @@ export async function sendQuotationEmail(quotationId: string) {
     .single()
 
   if (!quotation || !quotation.client?.email) {
-    console.error("Quotation or client email not found")
     return { success: false }
   }
 
@@ -48,7 +47,6 @@ export async function sendBookingConfirmation(bookingId: string) {
     .single()
 
   if (!booking || !booking.client?.email) {
-    console.error("Booking or client email not found")
     return { success: false }
   }
 
@@ -74,7 +72,6 @@ export async function sendAgreementReminder(agreementId: string, daysUntilExpiry
     .single()
 
   if (!agreement || !agreement.client?.email) {
-    console.error("Agreement or client email not found")
     return { success: false }
   }
 

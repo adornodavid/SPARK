@@ -4,7 +4,7 @@
   Imports
 ================================================== */
 import { createClient } from "@supabase/supabase-js"
-import type { oUsuario } from "@/types/usuarios.types"
+import type { oUsuario } from "@/types/usuarios"
 import type { ddlItem } from "@/types/common"
 import { imagenSubir, HashData } from "@/app/actions/utilerias"
 import { revalidatePath } from "next/cache"
@@ -23,7 +23,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey) // Declare the su
   * Objetos
     - objetoUsuario / oUsuario (Individual)
     - objetoUsuarios / oUsuarios (Listado / Array)
-  
+
   --------------------
   Funciones
   --------------------
@@ -82,7 +82,6 @@ export async function objetoUsuario(
     const { data, error } = await query.maybeSingle()
 
     if (error) {
-      console.error("Error en la funcion objetoUsuario (Individual) de actions/usuarios : ", error)
       return {
         success: false,
         error: "Error en la funcion objetoUsuario de actions/usuarios: " + error.message,
@@ -92,7 +91,6 @@ export async function objetoUsuario(
 
     return { success: true, error: "", data: data as oUsuario }
   } catch (error: unknown) {
-    console.error("Error en app/actions/usuarios en objetoUsuario (Individual): ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion objetoUsuario: " + errorMessage, data: null }
   }
@@ -129,7 +127,6 @@ export async function objetoUsuarios(
     const { data, error } = await query
 
     if (error) {
-      console.error("Error en la funcion objetoUsuarios (Listado) de actions/usuarios : ", error)
       return {
         success: false,
         error: "Error en la funcion objetoUsuarios de actions/usuarios: " + error.message,
@@ -139,7 +136,6 @@ export async function objetoUsuarios(
 
     return { success: true, error: "", data: data as oUsuario[] }
   } catch (error: unknown) {
-    console.error("Error en app/actions/usuarios en objetoUsuarios (Listado): ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion objetoUsuarios: " + errorMessage, data: null }
   }
@@ -183,7 +179,6 @@ export async function crearUsuario(formData: FormData) {
       .maybeSingle()
 
     if (errorValidacion) {
-      console.error("Error en validación de usuario existente de la funcion crearUsuario: ", errorValidacion)
       return {
         success: false,
         error: "Error al validar usuario existente en la fubncion crearUsuario: " + errorValidacion.message,
@@ -232,7 +227,6 @@ export async function crearUsuario(formData: FormData) {
       .single()
 
     if (error) {
-      console.error("Error en INSERT de crearUsuario: ", error)
       return { success: false, error: "Error al crear usuario: " + error.message }
     }
 
@@ -243,7 +237,6 @@ export async function crearUsuario(formData: FormData) {
     // Paso 5: Regresar resultado
     return { success: true, data: data.id }
   } catch (error: unknown) {
-    console.error("Error en actions/usuarios en la funcion crearUsuario: ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en actions/usuarios en la funcion crearUsuario: " + errorMessage }
   }
@@ -296,7 +289,6 @@ export async function obtenerUsuarios(
     const { data, error } = await query
 
     if (error) {
-      console.error("Error en la funcion obtenerUsuarios de actions/usuarios: ", error)
       return {
         success: false,
         error: "Error en la funcion obtenerUsuarios de actions/usuarios: " + error.message,
@@ -307,7 +299,6 @@ export async function obtenerUsuarios(
     // Regreso de data
     return { success: true, error: "", data: data }
   } catch (error: unknown) {
-    console.error("Error en app/actions/usuarios en obtenerUsuarios: ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion obtenerUsuarios: " + errorMessage, data: null }
   }
@@ -351,7 +342,6 @@ export async function actualizarUsuario(formData: FormData) {
       .maybeSingle()
 
     if (errorExistencia) {
-      console.error("Error validando existencia del usuario:", errorExistencia)
       return { success: false, error: "Error validando existencia del usuario: " + errorExistencia.message }
     }
 
@@ -367,7 +357,6 @@ export async function actualizarUsuario(formData: FormData) {
       .maybeSingle()
 
     if (errorDuplicado) {
-      console.error("Error validando duplicados:", errorDuplicado)
       return { success: false, error: "Error al validar duplicados: " + errorDuplicado.message }
     }
 
@@ -410,7 +399,6 @@ export async function actualizarUsuario(formData: FormData) {
 
     // Return error
     if (error) {
-      console.error("Error actualizando usuario en query en actualizarUsuario de actions/usuarios:", error)
       return { success: false, error: error.message }
     }
 
@@ -423,7 +411,6 @@ export async function actualizarUsuario(formData: FormData) {
     // Retorno de datos
     return { success: true, data: data.id }
   } catch (error: unknown) {
-    console.error("Error en actualizarUsuario de actions/Usuario: ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return {
       success: false,
@@ -450,7 +437,6 @@ export async function estatusActivoUsuario(id: number, activo: boolean): Promise
       .maybeSingle()
 
     if (errorExistencia) {
-      console.error("Error validando existencia del usuario en estatusActivoUsuario:", errorExistencia)
       return { success: false, error: "Error validando existencia del usuario: " + errorExistencia.message }
     }
 
@@ -461,19 +447,12 @@ export async function estatusActivoUsuario(id: number, activo: boolean): Promise
     const { error } = await supabase.from("usuarios").update({ activo: activo }).eq("id", id)
 
     if (error) {
-      console.error(
-        "Error actualizando estatus activo del usuario en estatusActivoUsuario de app/actions/usuarios:",
-        error,
-      )
       return { success: false, error: error.message }
     }
-
-    console.log(`[v0] Usuario ${id} actualizado a activo: ${activo}`)
 
     revalidatePath("/usuarios")
     return { success: true, error: "" }
   } catch (error: unknown) {
-    console.error("Error en estatusActivoUsuario de app/actions/usuarios: ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error interno del servidor: " + errorMessage }
   }
@@ -499,7 +478,6 @@ export async function listaDesplegableUsuarios(id = -1, descripcion = "") {
     const { data: usuarios, error } = await query
 
     if (error) {
-      console.error("Error obteniendo la lista desplegable de usuarios:", error)
       return { success: false, error: "Error obteniendo lista de usuarios: " + error.message }
     }
 
@@ -514,7 +492,6 @@ export async function listaDesplegableUsuarios(id = -1, descripcion = "") {
 
     return { success: true, data }
   } catch (error: unknown) {
-    console.error("Error en listaDesplegableUsuarios:", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error obteniendo lista desplegable de usuarios: " + errorMessage }
   }

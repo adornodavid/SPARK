@@ -83,8 +83,8 @@ export default function SignUpPage() {
       <div className="w-full max-w-md">
         <div className="flex flex-col gap-6">
           <div className="flex flex-col items-center gap-2 text-center">
-            <h1 className="text-2xl font-semibold tracking-tight">Portal Milenium</h1>
-            <p className="text-sm text-muted-foreground">Sistema de Banquetes y Comercial</p>
+            <img src="/spark-black.svg" alt="SPARK" className="h-8 w-auto mb-1" />
+            <p className="text-sm text-muted-foreground">Portal Banquetes y Comercial</p>
           </div>
           <Card>
             <CardHeader>

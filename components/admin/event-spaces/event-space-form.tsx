@@ -127,7 +127,6 @@ export function EventSpaceForm({ eventSpace, hotels }: EventSpaceFormProps) {
       router.push("/salones")
       router.refresh()
     } catch (err: unknown) {
-      console.error("[v0] Error saving event space:", err)
       setError(err instanceof Error ? err.message : "Error al guardar el salón")
     } finally {
       setIsLoading(false)
@@ -291,7 +290,7 @@ export function EventSpaceForm({ eventSpace, hotels }: EventSpaceFormProps) {
                     id={amenity}
                     checked={amenitiesList.includes(amenity)}
                     onChange={() => toggleAmenity(amenity)}
-                    className="h-4 w-4 rounded border-gray-300"
+                    className="h-4 w-4 rounded border-border"
                   />
                   <Label htmlFor={amenity} className="font-normal cursor-pointer">
                     {amenity}
@@ -307,7 +306,7 @@ export function EventSpaceForm({ eventSpace, hotels }: EventSpaceFormProps) {
               id="is_available"
               checked={formData.is_available}
               onChange={(e) => setFormData({ ...formData, is_available: e.target.checked })}
-              className="h-4 w-4 rounded border-gray-300"
+              className="h-4 w-4 rounded border-border"
             />
             <Label htmlFor="is_available" className="font-normal cursor-pointer">
               Salón disponible para eventos

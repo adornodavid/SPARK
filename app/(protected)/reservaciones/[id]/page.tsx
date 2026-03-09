@@ -38,7 +38,6 @@ export default function ReservacionDetailPage({ params }: { params: Promise<{ id
       .single()
 
     if (error) {
-      console.error("Error loading booking:", error)
       router.push("/reservaciones")
       return
     }

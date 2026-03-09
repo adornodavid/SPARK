@@ -4,7 +4,7 @@
   Imports
 ================================================== */
 import { createClient } from "@supabase/supabase-js"
-import type { oHotel } from "@/types/hoteles.types"
+import type { oHotel } from "@/types/hoteles"
 import type { ddlItem } from "@/types/common"
 import { imagenSubir } from "@/app/actions/utilerias"
 import { revalidatePath } from "next/cache"
@@ -23,7 +23,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey) // Declare the su
   * Objetos
     - objetoHotel / oHotel (Individual)
     - objetoHoteles / oHoteles (Listado / Array)
-  
+
   --------------------
   Funciones
   --------------------
@@ -118,7 +118,6 @@ export async function objetoHotel(
     const { data, error } = await query.maybeSingle()
 
     if (error) {
-      console.error("Error en la funcion objetoHotel (Individual) de actions/hoteles : ", error)
       return {
         success: false,
         error: "Error en la funcion objetoHotel de actions/hoteles: " + error.message,
@@ -128,7 +127,6 @@ export async function objetoHotel(
 
     return { success: true, error: "", data: data as oHotel }
   } catch (error: unknown) {
-    console.error("Error en app/actions/hoteles en objetoHotel (Individual): ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion objetoHotel: " + errorMessage, data: null }
   }
@@ -200,7 +198,6 @@ export async function objetoHoteles(
     const { data, error } = await query
 
     if (error) {
-      console.error("Error en la funcion objetoHoteles (Listado) de actions/hoteles : ", error)
       return {
         success: false,
         error: "Error en la funcion objetoHoteles de actions/hoteles: " + error.message,
@@ -210,7 +207,6 @@ export async function objetoHoteles(
 
     return { success: true, error: "", data: data as oHotel[] }
   } catch (error: unknown) {
-    console.error("Error en app/actions/hoteles en objetoHoteles (Listado): ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion objetoHoteles: " + errorMessage, data: null }
   }
@@ -236,7 +232,7 @@ export async function obtenerHoteles(
   activoevento = "Todos",
   activocentroconsumo = "Todos",
   activo = "Todos",
-): Promise<{ success: boolean; error: string; data: unknown }> {
+): Promise<{ success: boolean; error: string; data: oHotel[] | null }> {
   try {
     // Query principal
     let query = supabase.from("vw_ohoteles").select("*")
@@ -297,7 +293,6 @@ export async function obtenerHoteles(
     const { data, error } = await query
 
     if (error) {
-      console.error("Error en la funcion obtenerHoteles de actions/hoteles: ", error)
       return {
         success: false,
         error: "Error en la funcion obtenerHoteles de actions/hoteles: " + error.message,
@@ -306,9 +301,8 @@ export async function obtenerHoteles(
     }
 
     // Regreso de data
-    return { success: true, error: "", data: data }
+    return { success: true, error: "", data: data as oHotel[] }
   } catch (error: unknown) {
-    console.error("Error en app/actions/hoteles en obtenerHoteles: ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion obtenerHoteles: " + errorMessage, data: null }
   }
@@ -356,7 +350,6 @@ export async function actualizarHotel(formData: FormData) {
       .maybeSingle()
 
     if (errorExistencia) {
-      console.error("Error validando existencia del hotel:", errorExistencia)
       return { success: false, error: "Error validando existencia del hotel: " + errorExistencia.message }
     }
 
@@ -412,7 +405,6 @@ export async function actualizarHotel(formData: FormData) {
 
     // Return error
     if (error) {
-      console.error("Error actualizando hotel en query en actualizarHotel de actions/hoteles:", error)
       return { success: false, error: error.message }
     }
 
@@ -425,7 +417,6 @@ export async function actualizarHotel(formData: FormData) {
     // Retorno de datos
     return { success: true, data: data.id }
   } catch (error: unknown) {
-    console.error("Error en actualizarHotel de actions/hoteles: ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return {
       success: false,
@@ -452,7 +443,6 @@ export async function estatusActivoHotel(id: number, activo: boolean): Promise<{
       .maybeSingle()
 
     if (errorExistencia) {
-      console.error("Error validando existencia del hotel en estatusActivoHotel:", errorExistencia)
       return { success: false, error: "Error validando existencia del hotel: " + errorExistencia.message }
     }
 
@@ -463,16 +453,12 @@ export async function estatusActivoHotel(id: number, activo: boolean): Promise<{
     const { error } = await supabase.from("hoteles").update({ activo: activo }).eq("id", id)
 
     if (error) {
-      console.error("Error actualizando estatus activo del hotel en estatusActivoHotel de app/actions/hoteles:", error)
       return { success: false, error: error.message }
     }
-
-    console.log(`[v0] Hotel ${id} actualizado a activo: ${activo}`)
 
     revalidatePath("/hoteles")
     return { success: true, error: "" }
   } catch (error: unknown) {
-    console.error("Error en estatusActivoHotel de app/actions/hoteles: ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error interno del servidor: " + errorMessage }
   }
@@ -481,8 +467,6 @@ export async function estatusActivoHotel(id: number, activo: boolean): Promise<{
 // Función: listaDesplegableHoteles / ddlHoteles: Función que se utiliza para los dropdownlist
 export async function listaDesplegableHoteles(id = -1, descripcion = "") {
   try {
-    console.log("[v0] listaDesplegableHoteles - Iniciando con params:", { id, descripcion })
-
     // Query principal
     let query = supabase.from("hoteles").select("id, nombre").eq("activo", true)
 
@@ -496,24 +480,14 @@ export async function listaDesplegableHoteles(id = -1, descripcion = "") {
 
     query = query.order("nombre", { ascending: true }).limit(100)
 
-    console.log("[v0] listaDesplegableHoteles - Ejecutando query...")
-
     // Varaibles y resultados del query
     const { data: hoteles, error } = await query
 
-    console.log("[v0] listaDesplegableHoteles - Resultados:", {
-      hotelCount: hoteles?.length || 0,
-      error: error?.message || "ninguno",
-      hoteles: hoteles,
-    })
-
     if (error) {
-      console.error("Error obteniendo la lista desplegable de hoteles:", error)
       return { success: false, error: "Error obteniendo lista de hoteles: " + error.message }
     }
 
     if (!hoteles || hoteles.length === 0) {
-      console.log("[v0] listaDesplegableHoteles - No se encontraron hoteles activos")
       return { success: true, data: [] }
     }
 
@@ -522,11 +496,8 @@ export async function listaDesplegableHoteles(id = -1, descripcion = "") {
       text: hotel.nombre,
     }))
 
-    console.log("[v0] listaDesplegableHoteles - Data final:", data)
-
     return { success: true, data }
   } catch (error: unknown) {
-    console.error("Error en listaDesplegableHoteles:", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error obteniendo lista desplegable de hoteles: " + errorMessage }
   }

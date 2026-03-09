@@ -19,7 +19,8 @@ export type Json =
   
 // oHotel
 export interface oHotel {
-  id: number | null 
+  id: number | null
+  hotelid: number | null
   acronimo: string | null
   nombre: string | null
   categoria: string | null

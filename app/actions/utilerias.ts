@@ -36,7 +36,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey)
   --------------------
   Funciones: Encryption
   --------------------
-  * 
+  *
     - Encrypt - (Crypto-js)
     - Desencrypt - (Crypto-js)
     - HashData - (Bcrypt-js)
@@ -77,7 +77,6 @@ export async function imagenSubir(imageFile: File, name: string, folder: string)
 
     // Si se presentó un error
     if (uploadError) {
-      console.error("Error subiendo imagen en actions/utilerias imagenSubir:", uploadError)
       return { success: false, error: "Error al subir la imagen: " + uploadError }
     }
 
@@ -90,7 +89,6 @@ export async function imagenSubir(imageFile: File, name: string, folder: string)
     // Retorno de resultado exitoso
     return { success: true, url: urlData.publicUrl }
   } catch (error) {
-    console.error("Error procesando subida de imagen en imagenSubir de actions/utilerias: ", error)
     return { success: false, error: "Error procesando subida de imagen en imagenSubir de actions/utilerias: " + error }
   }
 }
@@ -115,14 +113,12 @@ export async function imagenBorrar(imageUrl: string, folder: string) {
 
     // Si se presentó un error
     if (error) {
-      console.error("Error borrando imagen en actions/utilerias imagenBorrar:", error)
       return { success: false, error: "Error al borrar la imagen" }
     }
 
     // Retorno de resultado exitoso
     return { success: true, message: "Imagen eliminada correctamente" }
   } catch (error) {
-    console.error("Error procesando la eliminación de imagen:", error)
     return { success: false, error: "Error al procesar la eliminación de la imagen" }
   }
 }
@@ -189,7 +185,6 @@ export async function Encrypt(texto: string): Promise<string> {
   try {
     return encryptData(texto)
   } catch (error) {
-    console.error("Error encrypting text:", error)
     throw new Error("Failed to encrypt text")
   }
 }
@@ -199,7 +194,6 @@ export async function Desencrypt(textoEncriptado: string): Promise<string> {
   try {
     return decryptData(textoEncriptado)
   } catch (error) {
-    console.error("Error decrypting text:", error)
     throw new Error("Failed to decrypt text")
   }
 }
@@ -209,7 +203,6 @@ export async function HashData(texto: string): Promise<string> {
   try {
     return bcrypt.hash(texto, 10)
   } catch (error) {
-    console.error("Error en actions/utilerias en HashData, hashing text:", error)
     throw new Error("Failed to hash text")
   }
 }
@@ -218,10 +211,8 @@ export async function HashData(texto: string): Promise<string> {
 export async function CompareHash(texto: string, hash: string): Promise<boolean> {
   try {
     const result = await bcrypt.compare(texto, hash)
-    console.log("compare: " + result)
     return result
   } catch (error) {
-    console.error("Error en actions/utilerias en CompareHash:", error)
     throw new Error("Failed to compare hash")
   }
 }

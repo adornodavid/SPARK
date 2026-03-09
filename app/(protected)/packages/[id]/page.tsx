@@ -1,14 +1,28 @@
-import { PackageForm } from "@/components/admin/packages/package-form"
+import { obtenerPaquete } from "@/app/actions/paquetes"
+import { listaDesplegableHoteles } from "@/app/actions/hoteles"
+import { PaqueteDetalle } from "@/components/admin/packages/paquete-detalle"
+import { notFound } from "next/navigation"
 
-export default function EditPackagePage({ params }: { params: { id: string } }) {
+export default async function EditPackagePage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  const paqueteId = Number(id)
+
+  if (isNaN(paqueteId)) {
+    notFound()
+  }
+
+  const [paqueteResult, hotelesResult] = await Promise.all([
+    obtenerPaquete(paqueteId),
+    listaDesplegableHoteles(),
+  ])
+
+  if (!paqueteResult.success || !paqueteResult.data) {
+    notFound()
+  }
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Editar Paquete</h1>
-        <p className="text-muted-foreground mt-1">Modifica la información del paquete</p>
-      </div>
-
-      <PackageForm packageId={params.id} />
+    <div className="mx-auto max-w-4xl space-y-6">
+      <PaqueteDetalle paquete={paqueteResult.data} hoteles={hotelesResult.data || []} />
     </div>
   )
 }

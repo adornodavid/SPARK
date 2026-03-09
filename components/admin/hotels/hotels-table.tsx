@@ -18,6 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { toast } from "sonner"
 
 interface Hotel {
   id: string
@@ -49,8 +50,7 @@ export function HotelsTable({ hotels }: HotelsTableProps) {
     const { error } = await supabase.from("hotels").delete().eq("id", deleteId)
 
     if (error) {
-      console.error("[v0] Error deleting hotel:", error)
-      alert("Error al eliminar el hotel")
+      toast.error("Error al eliminar el hotel")
     } else {
       router.refresh()
     }
