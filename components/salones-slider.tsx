@@ -19,7 +19,6 @@ export function SalonesSlider({ hotelId }: SalonesSliderProps) {
     async function fetchSalones() {
       setIsLoading(true)
       const result = await objetoSalones("", -1, "Todos")
-      console.log("salon",result)
       if (result.success && result.data) {
         setSalones(result.data)
       }
@@ -53,11 +52,12 @@ export function SalonesSlider({ hotelId }: SalonesSliderProps) {
   }
 
   const currentSalon = salones[currentIndex]
+  const fotosArray = Array.isArray(currentSalon.fotos) ? currentSalon.fotos : []
   const mainImage =
-    currentSalon.fotos && currentSalon.fotos.length > 0
-      ? currentSalon.fotos[0]
+    fotosArray.length > 0
+      ? String(fotosArray[0])
       : "/placeholder.svg?height=800&width=1200"
-  const secondaryImage = currentSalon.fotos && currentSalon.fotos.length > 1 ? currentSalon.fotos[1] : mainImage
+  const secondaryImage = fotosArray.length > 1 ? String(fotosArray[1]) : mainImage
 
   return (
     <div className="relative h-[600px] bg-gray-900 overflow-hidden group">
@@ -77,7 +77,7 @@ export function SalonesSlider({ hotelId }: SalonesSliderProps) {
         <div className="col-span-9 relative overflow-hidden">
           <img
             src={mainImage || "/placeholder.svg"}
-            alt={currentSalon.nombre}
+            alt={currentSalon.nombre ?? undefined}
             className="absolute inset-0 w-full h-full object-cover"
           />
           <div className="absolute inset-0 bg-gradient-to-r from-black/40 to-transparent" />

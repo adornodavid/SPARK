@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { createBrowserClient } from "@/lib/supabase/client"
+import { toast } from "sonner"
 
 interface BookingFormProps {
   bookingId?: string
@@ -85,7 +86,6 @@ export function BookingForm({ bookingId }: BookingFormProps) {
     const { data, error } = await supabase.from("room_bookings").select("*").eq("id", bookingId).single()
 
     if (error) {
-      console.error("Error loading booking:", error)
       return
     }
 
@@ -152,8 +152,7 @@ export function BookingForm({ bookingId }: BookingFormProps) {
     setLoading(false)
 
     if (error) {
-      console.error("Error saving booking:", error)
-      alert("Error al guardar la reservación")
+      toast.error("Error al guardar la reservación")
       return
     }
 

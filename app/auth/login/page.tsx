@@ -40,17 +40,13 @@ export default function LoginPage() {
     setIsLoading(true)
 
     try {
-      console.log("login1")
-
       const result = await loginUser(email.trim(), password)
-
-      console.log("login2", result)
 
       if (!result.success) {
         if (result.error === "inactive") {
           setShowInactiveUserModal(true)
         } else {
-          setErrorMessage(result.message || "El correo electrónico o la contraseña son incorrectos.")
+          setErrorMessage(result.message || "El correo electronico o la contrasena son incorrectos.")
           setShowCredentialsErrorModal(true)
         }
         setIsLoading(false)
@@ -58,13 +54,12 @@ export default function LoginPage() {
       }
 
       if (result.role === "admin_principal" || result.role === "admin_general") {
-        console.log("push")
         router.push("/dashboard")
       } else {
         router.push("/dashboard")
       }
     } catch (error: unknown) {
-      setErrorMessage(error instanceof Error ? error.message : "Error al iniciar sesión")
+      setErrorMessage(error instanceof Error ? error.message : "Error al iniciar sesion")
       setShowCredentialsErrorModal(true)
     } finally {
       setIsLoading(false)
@@ -80,18 +75,16 @@ export default function LoginPage() {
 
         {/* Left Side - Login Form */}
         <div className="flex w-full items-center justify-center p-6 md:w-1/2 lg:p-10">
-        
-          
           <div className="w-full max-w-md">
             <div className="flex flex-col gap-8">
               {/* Header Section */}
               <div className="flex flex-col gap-3">
                 <h1 className="text-balance text-5xl font-bold leading-tight tracking-tight">
-                  SPARK
+                  Portal Banquetes y Comercial
                   <br />
                   <span className="text-primary"></span>
                 </h1>
-                <p className="text-lg text-muted-foreground">Portal Banquetes y Comercial</p>
+                <p className="text-lg text-muted-foreground">El sistema para los que hacen eventos memorables</p>
               </div>
 
               {/* Login Form Card */}
@@ -122,13 +115,13 @@ export default function LoginPage() {
                   <div className="group relative">
                     <div className="mb-2 flex items-center justify-between">
                       <Label htmlFor="password" className="text-sm font-medium">
-                        Contraseña
+                        Contrasena
                       </Label>
                       <Link
                         href="/auth/forgot-password"
                         className="text-sm font-medium text-primary transition-colors hover:text-primary/80 hover:underline"
                       >
-                        ¿Olvidaste tu contraseña?
+                        Olvidaste tu contrasena?
                       </Link>
                     </div>
                     <div className="relative">
@@ -138,7 +131,7 @@ export default function LoginPage() {
                       <Input
                         id="password"
                         type="password"
-                        placeholder="••••••••"
+                        placeholder="--------"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         autoComplete="current-password"
@@ -154,13 +147,13 @@ export default function LoginPage() {
                     disabled={isLoading}
                     className="h-12 rounded-xl bg-foreground text-base font-semibold text-background transition-all hover:scale-[1.02] hover:bg-foreground/90 active:scale-[0.98]"
                   >
-                    {isLoading ? "Iniciando sesión..." : "Iniciar Sesión"}
+                    {isLoading ? "Iniciando sesion..." : "Iniciar Sesion"}
                   </Button>
                 </form>
 
                 {/* Footer Note */}
                 <p className="mt-6 text-center text-xs text-muted-foreground">
-                  Al iniciar sesión, aceptas nuestros términos y condiciones
+                  Al iniciar sesion, aceptas nuestros terminos y condiciones
                 </p>
               </div>
             </div>
@@ -169,7 +162,7 @@ export default function LoginPage() {
 
         {/* Right Side - Event Image Section */}
         <div className="relative hidden items-center justify-center bg-[#fffcfa] p-10 md:flex md:w-1/2">
-          {/* Decorative Confetti Lines - positioned in background */}
+          {/* Decorative Confetti Lines */}
           <svg className="absolute left-16 top-24 h-32 w-32 opacity-40" viewBox="0 0 100 100">
             <path d="M10,50 Q30,20 50,40 T90,30" fill="none" stroke="#10b981" strokeWidth="2" strokeDasharray="5,5" />
             <path d="M20,30 Q40,60 60,40 T100,50" fill="none" stroke="#3b82f6" strokeWidth="2" strokeDasharray="5,5" />
@@ -182,7 +175,7 @@ export default function LoginPage() {
             <path d="M5,30 Q25,70 45,40 T85,30" fill="none" stroke="#14b8a6" strokeWidth="2" strokeDasharray="5,5" />
           </svg>
 
-          {/* Main Image Container with margins */}
+          {/* Main Image Container */}
           <div className="relative h-full w-full max-w-2xl overflow-hidden rounded-3xl shadow-2xl">
             <img
               src="/elegant-banquet-hall-setup-wedding-reception-luxur.jpg"
@@ -202,7 +195,7 @@ export default function LoginPage() {
             </div>
             <DialogTitle className="text-center">Campos Requeridos</DialogTitle>
             <DialogDescription className="text-center">
-              El usuario debe tener más de 1 carácter y la contraseña debe tener más de 3 caracteres. Por favor,
+              El usuario debe tener mas de 1 caracter y la contrasena debe tener mas de 3 caracteres. Por favor,
               completa los datos correctamente para poder ingresar.
             </DialogDescription>
           </DialogHeader>
@@ -215,12 +208,12 @@ export default function LoginPage() {
       <Dialog open={showInactiveUserModal} onOpenChange={setShowInactiveUserModal}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-100">
-              <UserX className="h-6 w-6 text-amber-600" />
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+              <UserX className="h-6 w-6 text-primary" />
             </div>
             <DialogTitle className="text-center">Usuario Inactivo</DialogTitle>
             <DialogDescription className="text-center">
-              Tu cuenta de usuario se encuentra inactiva. Por favor, comunícate con el administrador principal del
+              Tu cuenta de usuario se encuentra inactiva. Por favor, comunicate con el administrador principal del
               sistema para reactivar tu acceso.
             </DialogDescription>
           </DialogHeader>
@@ -238,7 +231,7 @@ export default function LoginPage() {
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
               <AlertCircle className="h-6 w-6 text-destructive" />
             </div>
-            <DialogTitle className="text-center">Error de Autenticación</DialogTitle>
+            <DialogTitle className="text-center">Error de Autenticacion</DialogTitle>
             <DialogDescription className="text-center">{errorMessage}</DialogDescription>
           </DialogHeader>
           <DialogFooter className="sm:justify-center">

@@ -35,6 +35,7 @@ export interface oUsuario {
 export interface oSession {
   UsuarioId: string
   Email: string
+  Usuario: string
   NombreCompleto: string
   RolId: string
   Rol: string

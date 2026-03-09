@@ -15,7 +15,7 @@ import {
   listaDesplegableCiudadesXHoteles,
 } from "@/app/actions/catalogos"
 import { listaDesplegableHoteles, obtenerHoteles } from "@/app/actions/hoteles"
-import type { ddlItem } from "@/types/common.types"
+import type { ddlItem } from "@/types/common"
 
 export default function HotelsPage() {
   const router = useRouter()
@@ -42,7 +42,6 @@ export default function HotelsPage() {
   useEffect(() => {
     async function loadHoteles() {
       const result = await listaDesplegableHoteles()
-      console.log("hoteles", result)
       if (result.success && result.data) {
         setHotelesList(result.data)
       }
@@ -53,7 +52,6 @@ export default function HotelsPage() {
   useEffect(() => {
     async function loadPaises() {
       const result = await listaDesplegablePaisesXHoteles()
-      console.log("pais", result)
       if (result.success && result.data) {
         setPaisesList(result.data)
       }
@@ -65,7 +63,6 @@ export default function HotelsPage() {
     async function loadEstados() {
       if (pais && pais !== "") {
         const result = await listDesplegableEstadosXHoteles(-1, "", Number(pais))
-        console.log("estados", result)
         if (result.success && result.data) {
           setEstadosList(result.data)
         }
@@ -124,8 +121,7 @@ export default function HotelsPage() {
         } else {
           setHotelesData([])
         }
-      } catch (error) {
-        console.error("Error cargando hoteles iniciales:", error)
+      } catch {
         setHotelesData([])
       } finally {
         setSearching(false)
@@ -157,8 +153,7 @@ export default function HotelsPage() {
       } else {
         setHotelesData([])
       }
-    } catch (error) {
-      console.error("Error en búsqueda:", error)
+    } catch {
       setHotelesData([])
     } finally {
       setSearching(false)
@@ -186,11 +181,11 @@ export default function HotelsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#FFFAF5] p-6">
+    <div className="min-h-screen bg-background p-6">
       <div className="mx-auto max-w-7xl space-y-6">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900">Hoteles</h1>
-          <p className="text-sm text-gray-600 mt-1">Gestión completa de Hoteles</p>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">Hoteles</h1>
+          <p className="text-sm text-muted-foreground mt-1">Gestión completa de Hoteles</p>
         </div>
 
         <Card className="shadow-sm">
@@ -260,7 +255,7 @@ export default function HotelsPage() {
 
             <button
               onClick={() => setShowAdvanced(!showAdvanced)}
-              className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 mb-4"
+              className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-4"
             >
               <ChevronDown className={`h-4 w-4 transition-transform ${showAdvanced ? "rotate-180" : ""}`} />
               Avanzada
@@ -351,7 +346,7 @@ export default function HotelsPage() {
           {hotelesData.length > 0 ? (
             hotelesData.map((hotel) => (
               <Card key={hotel.hotelid} className="overflow-hidden hover:shadow-lg transition-shadow">
-                <div className="relative h-64 bg-gray-200">
+                <div className="relative h-64 bg-muted">
                   <img
                     src={hotel.imgurl || "/placeholder.svg?height=200&width=400&query=hotel"}
                     alt={hotel.nombre}
@@ -360,33 +355,33 @@ export default function HotelsPage() {
                 </div>
 
                 <CardContent className="p-4 space-y-3">
-                  <h3 className="font-semibold text-blue-600 text-base leading-tight">{hotel.nombre}</h3>
+                  <h3 className="font-semibold text-primary text-base leading-tight">{hotel.nombre}</h3>
 
-                  <div className="flex items-start gap-2 text-sm text-gray-600">
+                  <div className="flex items-start gap-2 text-sm text-muted-foreground">
                     <MapPin className="h-4 w-4 mt-0.5 flex-shrink-0" />
                     <p className="text-xs leading-relaxed">{hotel.direccion}</p>
                   </div>
 
                   <div className="space-y-1.5 text-sm">
                     <div className="flex items-center gap-2">
-                      <Building2 className="h-4 w-4 text-gray-500" />
+                      <Building2 className="h-4 w-4 text-muted-foreground" />
                       <span className="font-medium">Habitaciones:</span>
-                      <span className="text-gray-700">{hotel.totalcuartos || "N/A"}</span>
+                      <span className="text-foreground">{hotel.totalcuartos || "N/A"}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Users className="h-4 w-4 text-gray-500" />
+                      <Users className="h-4 w-4 text-muted-foreground" />
                       <span className="font-medium">Capacidad máxima Auditorio:</span>
-                      <span className="text-gray-700">{hotel.capacidadmaxauditorio || "N/A"}</span>
+                      <span className="text-foreground">{hotel.capacidadmaxauditorio || "N/A"}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Star className="h-4 w-4 text-gray-500" />
+                      <Star className="h-4 w-4 text-muted-foreground" />
                       <span className="font-medium">Espacio total:</span>
-                      <span className="text-gray-700">{hotel.espaciototal || "N/A"}</span>
+                      <span className="text-foreground">{hotel.espaciototal || "N/A"}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Star className="h-4 w-4 text-gray-500" />
+                      <Star className="h-4 w-4 text-muted-foreground" />
                       <span className="font-medium">Estrellas:</span>
-                      <span className="text-gray-700">{hotel.estrellas || "N/A"}</span>
+                      <span className="text-foreground">{hotel.estrellas || "N/A"}</span>
                     </div>
                   </div>
 
@@ -395,7 +390,7 @@ export default function HotelsPage() {
                       <Button
                         size="icon"
                         variant="outline"
-                        className="hover:bg-blue-50 hover:text-blue-600 bg-transparent"
+                        className="hover:bg-blue-50 hover:text-primary bg-transparent"
                         title="Editar hotel"
                       >
                         <Edit className="h-4 w-4" />
@@ -414,7 +409,7 @@ export default function HotelsPage() {
               </Card>
             ))
           ) : (
-            <div className="col-span-full text-center py-12 text-gray-500">
+            <div className="col-span-full text-center py-12 text-muted-foreground">
               {searching ? "Buscando hoteles..." : "No hay resultados. Use los filtros y haga clic en Buscar."}
             </div>
           )}

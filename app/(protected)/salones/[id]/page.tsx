@@ -1,32 +1,50 @@
-import { createClient } from "@/lib/supabase/server"
-import { EventSpaceForm } from "@/components/admin/event-spaces/event-space-form"
+import { objetoSalon, obtenerMontajesXSalon } from "@/app/actions/salones"
+import { SalonDetail } from "@/components/admin/salones/salon-detail"
 import { notFound } from "next/navigation"
+import { Button } from "@/components/ui/button"
+import { ArrowLeft } from "lucide-react"
+import Link from "next/link"
 
-export default async function EditEventSpacePage({
+export default async function SalonDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const supabase = await createClient()
+  const salonId = Number(id)
 
-  const [{ data: eventSpace }, { data: hotels }] = await Promise.all([
-    supabase.from("event_spaces").select("*").eq("id", id).single(),
-    supabase.from("hotels").select("id, code, name").eq("status", "activo").order("name", { ascending: true }),
+  if (isNaN(salonId) || salonId <= 0) {
+    notFound()
+  }
+
+  // Fetch salon and montajes in parallel
+  const [salonResult, montajesResult] = await Promise.all([
+    objetoSalon(salonId),
+    obtenerMontajesXSalon(salonId),
   ])
 
-  if (!eventSpace) {
+  if (!salonResult.success || !salonResult.data) {
     notFound()
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Editar Salón de Eventos</h1>
-        <p className="text-sm text-muted-foreground">Modifica la información del salón</p>
+    <div className="mx-auto max-w-5xl space-y-6">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Button variant="ghost" size="sm" asChild className="gap-1 px-2">
+          <Link href="/salones">
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Salones
+          </Link>
+        </Button>
+        <span>/</span>
+        <span className="text-foreground font-medium">{salonResult.data.nombre}</span>
       </div>
 
-      <EventSpaceForm eventSpace={eventSpace} hotels={hotels || []} />
+      <SalonDetail
+        salon={salonResult.data}
+        montajes={montajesResult.data || []}
+      />
     </div>
   )
 }

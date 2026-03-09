@@ -223,7 +223,7 @@ export function QuotationForm() {
         loadSalones(c.hotelid.toString()).then(() => {
           if (salonId) setFormData(prev => ({ ...prev, salon: salonId }))
           if (c.salonid) {
-            loadMontajes(c.salonid.toString()).then(() => {
+            loadMontajes(c.salonid.toString(), true).then(() => {
               if (mid) setFormData(prev => ({ ...prev, montaje: mid }))
             })
           }
@@ -501,10 +501,15 @@ export function QuotationForm() {
     }
   }
 
-  async function loadMontajes(salonId: string) {
+  async function loadMontajes(salonId: string, esModoEdicion = false) {
     const result = await objetoSalon(Number(salonId))
 
     if (result.success && result.data) {
+      // En creación, pre-llenar No. Invitados con capacidadminima del salón
+      if (!esModoEdicion && result.data.capacidadminima != null) {
+        setFormData(prev => ({ ...prev, numeroInvitados: result.data!.capacidadminima!.toString() }))
+      }
+
       // Cargar montajes
       if (result.data.montajes) {
         const montajesOptions = result.data.montajes

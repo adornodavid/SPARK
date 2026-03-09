@@ -1,14 +1,13 @@
-import { PackageForm } from "@/components/admin/packages/package-form"
+import { listaDesplegableHoteles } from "@/app/actions/hoteles"
+import { PaqueteFormNuevo } from "@/components/admin/packages/paquete-form-nuevo"
 
-export default function NewPackagePage() {
+export default async function NewPackagePage() {
+  const hotelesResult = await listaDesplegableHoteles()
+  const hoteles = hotelesResult.data || []
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Nuevo Paquete</h1>
-        <p className="text-muted-foreground mt-1">Crea un nuevo paquete de banquetes</p>
-      </div>
-
-      <PackageForm />
+    <div className="mx-auto max-w-4xl space-y-6">
+      <PaqueteFormNuevo hoteles={hoteles} />
     </div>
   )
 }

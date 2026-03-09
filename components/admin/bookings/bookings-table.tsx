@@ -6,6 +6,7 @@ import { Eye, Pencil, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { createBrowserClient } from "@/lib/supabase/client"
 import { Badge } from "@/components/ui/badge"
+import { toast } from "sonner"
 
 interface BookingsTableProps {
   bookings: any[]
@@ -26,14 +27,14 @@ export function BookingsTable({ bookings, loading, onUpdate }: BookingsTableProp
   const supabase = createBrowserClient()
 
   async function handleDelete(id: string) {
-    if (!confirm("¿Estás seguro de eliminar esta reservación?")) return
+    if (!window.confirm("¿Estás seguro de eliminar esta reservación?")) return
 
     const { error } = await supabase.from("room_bookings").delete().eq("id", id)
 
     if (error) {
-      console.error("Error deleting booking:", error)
-      alert("Error al eliminar la reservación")
+      toast.error("Error al eliminar la reservación")
     } else {
+      toast.success("Reservación eliminada correctamente")
       onUpdate()
     }
   }

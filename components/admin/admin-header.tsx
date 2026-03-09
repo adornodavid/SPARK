@@ -10,11 +10,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { LogOut, User, FileText, X, MapPin, Send } from "lucide-react"
+import { LogOut, User, FileText, X, MapPin, Send, Moon, Sun, Search, Command } from "lucide-react"
 import { useRouter } from "next/navigation"
+import { useTheme } from "next-themes"
 import { eliminarSesionCookies } from "@/app/actions/session"
 import { useQuotations } from "@/contexts/quotations-context"
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { CommandPalette } from "@/components/admin/crm/command-palette"
 
 interface AdminHeaderProps {
   user: {
@@ -28,8 +30,22 @@ interface AdminHeaderProps {
 
 export function AdminHeader({ user }: AdminHeaderProps) {
   const router = useRouter()
+  const { theme, setTheme } = useTheme()
   const { quotations, removeQuotation, clearQuotations } = useQuotations()
   const [showQuotationsPanel, setShowQuotationsPanel] = useState(false)
+  const [showCommandPalette, setShowCommandPalette] = useState(false)
+
+  // Cmd+K keyboard shortcut for command palette
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault()
+        setShowCommandPalette(prev => !prev)
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown)
+    return () => document.removeEventListener("keydown", handleKeyDown)
+  }, [])
 
   const handleSignOut = async () => {
     await eliminarSesionCookies()
@@ -47,8 +63,22 @@ export function AdminHeader({ user }: AdminHeaderProps) {
   const initials = getInitials(user.NombreCompleto)
 
   return (
-    <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b bg-background px-6">
-      <div className="flex-1" />
+    <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-border/50 backdrop-blur-md bg-background/80 px-6">
+      <div className="flex-1 flex items-center gap-4">
+        <img src="/logo-milenium.png" alt="Milenium" className="h-7 w-auto hover:scale-105 transition-transform duration-200" />
+
+        {/* Global Search / Command Palette trigger */}
+        <button
+          onClick={() => setShowCommandPalette(true)}
+          className="hidden md:flex items-center gap-2 h-9 w-64 rounded-lg border border-border/50 bg-muted/30 px-3 text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
+        >
+          <Search className="h-4 w-4" />
+          <span className="flex-1 text-left">Buscar...</span>
+          <kbd className="inline-flex h-5 items-center gap-0.5 rounded border border-border/50 bg-card px-1.5 text-[10px] font-medium">
+            <Command className="h-3 w-3" />K
+          </kbd>
+        </button>
+      </div>
 
       <div className="relative mr-4">
         <Button
@@ -59,7 +89,7 @@ export function AdminHeader({ user }: AdminHeaderProps) {
         >
           <FileText className="h-5 w-5 text-foreground" />
           {quotations.length > 0 && (
-            <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-orange-500 text-white text-xs flex items-center justify-center font-semibold animate-pulse">
+            <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-semibold animate-pulse">
               {quotations.length}
             </span>
           )}
@@ -68,7 +98,7 @@ export function AdminHeader({ user }: AdminHeaderProps) {
         {/* Quotations Panel */}
         {showQuotationsPanel && (
           <div className="absolute right-0 top-14 w-96 bg-background border rounded-lg shadow-2xl z-50 max-h-[500px] overflow-hidden animate-in slide-in-from-top-2 duration-300">
-            <div className="sticky top-0 bg-gradient-to-r from-orange-500 to-pink-500 text-white p-4 flex items-center justify-between">
+            <div className="sticky top-0 bg-gradient-to-r from-lime-500 to-green-500 text-black p-4 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <FileText className="h-5 w-5" />
                 <h3 className="font-semibold">Cotizaciones ({quotations.length})</h3>
@@ -78,7 +108,7 @@ export function AdminHeader({ user }: AdminHeaderProps) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-7 text-xs text-white hover:bg-white/20"
+                    className="h-7 text-xs text-black hover:bg-black/10"
                     onClick={clearQuotations}
                   >
                     Limpiar Todo
@@ -87,7 +117,7 @@ export function AdminHeader({ user }: AdminHeaderProps) {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-white hover:bg-white/20"
+                  className="h-7 w-7 text-black hover:bg-black/10"
                   onClick={() => setShowQuotationsPanel(false)}
                 >
                   <X className="h-4 w-4" />
@@ -107,7 +137,7 @@ export function AdminHeader({ user }: AdminHeaderProps) {
                   {quotations.map((quotation) => (
                     <div
                       key={quotation.id}
-                      className="group bg-muted/50 hover:bg-muted rounded-lg p-3 transition-all border border-transparent hover:border-orange-200"
+                      className="group bg-muted/50 hover:bg-muted rounded-lg p-3 transition-all border border-transparent hover:border-primary/30"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
@@ -145,7 +175,7 @@ export function AdminHeader({ user }: AdminHeaderProps) {
             {quotations.length > 0 && (
               <div className="sticky bottom-0 p-3 bg-background border-t">
                 <Button
-                  className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white"
+                  className="w-full bg-foreground hover:bg-foreground/90 text-background"
                   onClick={() => {
                     // Get the first quotation to prefill form
                     const firstQuotation = quotations[0]
@@ -162,11 +192,23 @@ export function AdminHeader({ user }: AdminHeaderProps) {
         )}
       </div>
 
+      <Button
+        variant="ghost"
+        size="icon"
+        className="mr-2 h-9 w-9 rounded-full"
+        onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+        suppressHydrationWarning
+      >
+        <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+        <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+        <span className="sr-only">Cambiar tema</span>
+      </Button>
+
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="relative h-10 w-10 rounded-full">
-            <Avatar>
-              <AvatarFallback>{initials}</AvatarFallback>
+          <Button variant="ghost" className="relative h-10 w-10 rounded-full" suppressHydrationWarning>
+            <Avatar className="border-2 border-primary/30">
+              <AvatarFallback className="bg-primary text-primary-foreground font-semibold text-sm">{initials}</AvatarFallback>
             </Avatar>
           </Button>
         </DropdownMenuTrigger>
@@ -190,6 +232,8 @@ export function AdminHeader({ user }: AdminHeaderProps) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      {/* Command Palette / Global Search */}
+      <CommandPalette open={showCommandPalette} onOpenChange={setShowCommandPalette} />
     </header>
   )
 }

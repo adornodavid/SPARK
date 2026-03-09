@@ -3,7 +3,7 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Edit, Trash2 } from "lucide-react"
+import { Eye, Edit, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
@@ -18,6 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { toast } from "sonner"
 
 interface EventSpace {
   id: string
@@ -49,8 +50,7 @@ export function EventSpacesTable({ eventSpaces }: EventSpacesTableProps) {
     const { error } = await supabase.from("event_spaces").delete().eq("id", deleteId)
 
     if (error) {
-      console.error("[v0] Error deleting event space:", error)
-      alert("Error al eliminar el salón")
+      toast.error("Error al eliminar el salón")
     } else {
       router.refresh()
     }
@@ -94,8 +94,13 @@ export function EventSpacesTable({ eventSpaces }: EventSpacesTableProps) {
                   <TableCell>{space.aream2 ? `${space.aream2} m²` : "—"}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
-                      <Button asChild variant="ghost" size="sm">
+                      <Button asChild variant="ghost" size="sm" title="Ver detalle">
                         <Link href={`/salones/${space.id}`}>
+                          <Eye className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                      <Button asChild variant="ghost" size="sm" title="Editar">
+                        <Link href={`/salones/${space.id}/editar`}>
                           <Edit className="h-4 w-4" />
                         </Link>
                       </Button>

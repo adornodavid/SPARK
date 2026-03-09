@@ -14,6 +14,7 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 // oMontajeXSalon
 export interface oMontajeXSalon {
   id: number | null
+  montajeid: number | null
   montaje: string | null
   descripcion: string | null
   costo: number | null

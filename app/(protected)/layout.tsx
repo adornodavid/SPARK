@@ -23,7 +23,7 @@ export default async function ProtectedLayout({
         <AdminSidebar />
         <div className="ml-[100px] flex flex-1 flex-col">
           <AdminHeader user={session} />
-          <main className="flex-1 overflow-y-auto bg-[#fffdfb] p-6">{children}</main>
+          <main className="flex-1 overflow-y-auto bg-background p-6">{children}</main>
         </div>
       </div>
     </QuotationsProvider>

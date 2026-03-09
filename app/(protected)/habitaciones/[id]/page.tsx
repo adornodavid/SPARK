@@ -1,52 +1,54 @@
-"use client"
-
-import { useEffect, useState } from "react"
-import { use } from "react"
-import { useRouter } from "next/navigation"
+import { Suspense } from "react"
+import { notFound } from "next/navigation"
 import { RoomForm } from "@/components/admin/rooms/room-form"
-import { createBrowserClient } from "@/lib/supabase/client"
+import {
+  obtenerHabitacion,
+  ddlHotelesHabitaciones,
+  ddlCategoriasHabitacion,
+} from "@/app/actions/habitaciones"
 
-export default function EditHabitacionPage({ params }: { params: Promise<{ id: string }> }) {
-  const resolvedParams = use(params)
-  const router = useRouter()
-  const [loading, setLoading] = useState(true)
-  const [room, setRoom] = useState<any>(null)
-  const [hotels, setHotels] = useState<any[]>([])
-  const [categories, setCategories] = useState<any[]>([])
+function LoadingState() {
+  return (
+    <div className="mx-auto max-w-4xl space-y-6">
+      <div className="h-7 w-48 animate-pulse rounded bg-muted" />
+      <div className="h-4 w-72 animate-pulse rounded bg-muted" />
+      <div className="h-[600px] animate-pulse rounded-xl bg-muted" />
+    </div>
+  )
+}
 
-  useEffect(() => {
-    async function loadData() {
-      const supabase = createBrowserClient()
-      const [{ data: roomData }, { data: hotelsData }, { data: categoriesData }] = await Promise.all([
-        supabase.from("rooms").select("*").eq("id", resolvedParams.id).single(),
-        supabase.from("hotels").select("id,code,name").eq("status", "active").order("name"),
-        supabase.from("room_categories").select("id,name").order("name"),
-      ])
+async function EditRoomContent({ id }: { id: string }) {
+  const [roomResult, hotelsResult, categoriesResult] = await Promise.all([
+    obtenerHabitacion(id),
+    ddlHotelesHabitaciones(),
+    ddlCategoriasHabitacion(),
+  ])
 
-      if (!roomData) {
-        router.push("/habitaciones")
-        return
-      }
-
-      setRoom(roomData)
-      if (hotelsData) setHotels(hotelsData)
-      if (categoriesData) setCategories(categoriesData)
-      setLoading(false)
-    }
-    loadData()
-  }, [resolvedParams.id, router])
-
-  if (loading) {
-    return <div>Cargando...</div>
+  if (!roomResult.success || !roomResult.data) {
+    notFound()
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Editar Habitación</h1>
-        <p className="text-sm text-muted-foreground">Modifica los datos de la habitación</p>
-      </div>
-      <RoomForm room={room} hotels={hotels} categories={categories} />
+    <div className="mx-auto max-w-4xl">
+      <RoomForm
+        room={roomResult.data}
+        hotels={hotelsResult.data || []}
+        categories={categoriesResult.data || []}
+      />
     </div>
+  )
+}
+
+export default async function EditHabitacionPage({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}) {
+  const { id } = await params
+
+  return (
+    <Suspense fallback={<LoadingState />}>
+      <EditRoomContent id={id} />
+    </Suspense>
   )
 }

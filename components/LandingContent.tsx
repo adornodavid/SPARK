@@ -36,13 +36,8 @@ export default function LandingContent() {
 
   const allPhotos = hotelData?.fotos
     ? (() => {
-        console.log("[v0] Landing - Columna fotos raw:", hotelData.fotos)
-        console.log("[v0] Landing - Tipo de fotos:", typeof hotelData.fotos)
-        console.log("[v0] Landing - Es array?:", Array.isArray(hotelData.fotos))
-
         // Si ya es un array, usarlo directamente
         if (Array.isArray(hotelData.fotos)) {
-          console.log("[v0] Landing - Es array, usando directamente:", hotelData.fotos)
           return hotelData.fotos
         }
 
@@ -50,10 +45,9 @@ export default function LandingContent() {
         if (typeof hotelData.fotos === "string") {
           try {
             const parsed = JSON.parse(hotelData.fotos)
-            console.log("[v0] Landing - Fotos parseadas:", parsed)
             return Array.isArray(parsed) ? parsed : [hotelData.fotos]
-          } catch (error) {
-            console.log("[v0] Landing - Error parseando JSON, usando como string simple")
+          } catch {
+            // Error silenciado intencionalmente
             return [hotelData.fotos]
           }
         }
@@ -72,10 +66,6 @@ export default function LandingContent() {
 
   // Resto de fotos para la galería (desde la segunda en adelante)
   const galleryImages = allPhotos.length > 1 ? allPhotos.slice(1) : []
-
-  console.log("[v0] Landing - Banner image:", bannerImage)
-  console.log("[v0] Landing - Gallery images:", galleryImages)
-  console.log("[v0] Landing - Total all photos:", allPhotos.length)
 
   const benefits = [
     { icon: Users, title: "Amplios espacios", description: "" },
@@ -106,18 +96,12 @@ export default function LandingContent() {
 
   useEffect(() => {
     const fetchHotelData = async () => {
-      console.log("[v0] Landing - Iniciando carga de hotel...")
-      console.log("[v0] Landing - Hotel ID from URL:", hotelIdFromUrl)
       setIsLoadingHotel(true)
 
       const resultado = hotelIdFromUrl ? await obtenerHoteles(Number(hotelIdFromUrl)) : await obtenerHoteles()
 
-      console.log("[v0] Landing - Resultado obtenerHoteles:", resultado)
       if (resultado.success && resultado.data && resultado.data.length > 0) {
-        console.log("[v0] Landing - Hotel obtenido:", resultado.data[0])
         setHotelData(resultado.data[0])
-      } else {
-        console.log("[v0] Landing - No se obtuvo hotel o error")
       }
       setIsLoadingHotel(false)
     }
@@ -125,7 +109,7 @@ export default function LandingContent() {
   }, [hotelIdFromUrl])
 
   return (
-    <div className="min-h-screen bg-[#fffdfb]">
+    <div className="min-h-screen bg-background">
       {/* Banner Section */}
       <section className="relative h-[400px] w-full overflow-hidden">
         <img src={bannerImage || "/placeholder.svg"} alt="Hotel Banner" className="h-full w-full object-cover" />
@@ -169,8 +153,8 @@ export default function LandingContent() {
               </div>
 
               <div className="flex items-center gap-4 p-6">
-                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-orange-100">
-                  <Building2 className="h-7 w-7 text-orange-600" />
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+                  <Building2 className="h-7 w-7 text-primary" />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-600">Habitaciones</p>
@@ -359,7 +343,7 @@ export default function LandingContent() {
             </Button>
 
             <div className="mt-6 flex justify-center gap-2">
-              {galleryImages.map((_, index) => (
+              {galleryImages.map((_: unknown, index: number) => (
                 <button
                   key={index}
                   onClick={() => setCurrentGalleryImage(index)}
@@ -409,7 +393,7 @@ export default function LandingContent() {
       )}
 
       {/* Salones y Montajes Section */}
-      <section id="salones" className="relative py-20 bg-[#fffdfb]">
+      <section id="salones" className="relative py-20 bg-background">
         <div className="container mx-auto px-4">
           <div className="text-center mb-12">
             <h2 className="text-4xl font-bold text-gray-900 mb-4">Salones y Montajes</h2>

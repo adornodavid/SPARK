@@ -6,6 +6,7 @@ import { Pencil, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { createBrowserClient } from "@/lib/supabase/client"
 import { Badge } from "@/components/ui/badge"
+import { toast } from "sonner"
 
 interface PackagesTableProps {
   packages: any[]
@@ -17,14 +18,14 @@ export function PackagesTable({ packages, loading, onUpdate }: PackagesTableProp
   const supabase = createBrowserClient()
 
   async function handleDelete(id: string) {
-    if (!confirm("¿Estás seguro de eliminar este paquete?")) return
+    if (!window.confirm("¿Estás seguro de eliminar este paquete?")) return
 
     const { error } = await supabase.from("banquet_packages").delete().eq("id", id)
 
     if (error) {
-      console.error("Error deleting package:", error)
-      alert("Error al eliminar el paquete")
+      toast.error("Error al eliminar el paquete")
     } else {
+      toast.success("Paquete eliminado correctamente")
       onUpdate()
     }
   }

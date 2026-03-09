@@ -82,7 +82,6 @@ export function HotelForm({ hotel }: HotelFormProps) {
       router.push("/hoteles")
       router.refresh()
     } catch (err: unknown) {
-      console.error("[v0] Error saving hotel:", err)
       setError(err instanceof Error ? err.message : "Error al guardar el hotel")
     } finally {
       setIsLoading(false)

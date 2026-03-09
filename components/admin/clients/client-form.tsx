@@ -108,7 +108,6 @@ export function ClientForm({ client, users, currentUserId }: ClientFormProps) {
       router.push("/clientes")
       router.refresh()
     } catch (err: unknown) {
-      console.error("[v0] Error saving client:", err)
       setError(err instanceof Error ? err.message : "Error al guardar el cliente")
     } finally {
       setIsLoading(false)

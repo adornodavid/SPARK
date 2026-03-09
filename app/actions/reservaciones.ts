@@ -21,7 +21,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey)
   * Objetos
     - objetoReservacion / oReservacion (Individual)
     - objetoReservaciones / oReservaciones (Listado / Array)
-  
+
   --------------------
   Funciones
   --------------------
@@ -92,7 +92,6 @@ export async function objetoReservacion(
     const { data, error } = await query.maybeSingle()
 
     if (error) {
-      console.error("Error en la funcion objetoReservacion (Individual) de actions/reservaciones : ", error)
       return {
         success: false,
         error: "Error en la funcion objetoReservacion de actions/reservaciones: " + error.message,
@@ -102,7 +101,6 @@ export async function objetoReservacion(
 
     return { success: true, error: "", data: data }
   } catch (error: unknown) {
-    console.error("Error en app/actions/reservaciones en objetoReservacion (Individual): ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion objetoReservacion: " + errorMessage, data: null }
   }
@@ -150,7 +148,6 @@ export async function objetoReservaciones(
     const { data, error } = await query
 
     if (error) {
-      console.error("Error en la funcion objetoReservaciones (Listado) de actions/reservaciones : ", error)
       return {
         success: false,
         error: "Error en la funcion objetoReservaciones de actions/reservaciones: " + error.message,
@@ -160,7 +157,6 @@ export async function objetoReservaciones(
 
     return { success: true, error: "", data: data }
   } catch (error: unknown) {
-    console.error("Error en app/actions/reservaciones en objetoReservaciones (Listado): ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion objetoReservaciones: " + errorMessage, data: null }
   }
@@ -222,7 +218,6 @@ export async function obtenerReservaciones(
     const { data, error } = await query
 
     if (error) {
-      console.error("Error en la funcion obtenerReservaciones de actions/reservaciones: ", error)
       return {
         success: false,
         error: "Error en la funcion obtenerReservaciones de actions/reservaciones: " + error.message,
@@ -233,7 +228,6 @@ export async function obtenerReservaciones(
     // Regreso de data
     return { success: true, error: "", data: data }
   } catch (error: unknown) {
-    console.error("Error en app/actions/reservaciones en obtenerReservaciones: ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion obtenerReservaciones: " + errorMessage, data: null }
   }
@@ -284,7 +278,6 @@ export async function actualizarReservacion(formData: FormData) {
       .maybeSingle()
 
     if (errorExistencia) {
-      console.error("Error validando existencia de la reservacion:", errorExistencia)
       return { success: false, error: "Error validando existencia de la reservacion: " + errorExistencia.message }
     }
 
@@ -324,7 +317,6 @@ export async function actualizarReservacion(formData: FormData) {
 
     // Return error
     if (error) {
-      console.error("Error actualizando reservacion en query en actualizarReservacion de actions/reservaciones:", error)
       return { success: false, error: error.message }
     }
 
@@ -337,7 +329,6 @@ export async function actualizarReservacion(formData: FormData) {
     // Retorno de datos
     return { success: true, data: data.id }
   } catch (error: unknown) {
-    console.error("Error en actualizarReservacion de actions/reservaciones: ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return {
       success: false,
@@ -367,7 +358,6 @@ export async function estatusActivoReservacion(
       .maybeSingle()
 
     if (errorExistencia) {
-      console.error("Error validando existencia de la reservacion en estatusActivoReservacion:", errorExistencia)
       return { success: false, error: "Error validando existencia de la reservacion: " + errorExistencia.message }
     }
 
@@ -378,19 +368,61 @@ export async function estatusActivoReservacion(
     const { error } = await supabase.from("reservaciones").update({ activo: activo }).eq("id", id)
 
     if (error) {
-      console.error(
-        "Error actualizando estatus activo de la reservacion en estatusActivoReservacion de app/actions/reservaciones:",
-        error,
-      )
       return { success: false, error: error.message }
     }
 
     revalidatePath("/reservaciones")
     return { success: true, error: "" }
   } catch (error: unknown) {
-    console.error("Error en estatusActivoReservacion de app/actions/reservaciones: ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error interno del servidor: " + errorMessage }
+  }
+}
+
+// Función: obtenerDisponibilidadSalon: Obtiene las reservaciones activas de un salón para validar disponibilidad
+export async function obtenerDisponibilidadSalon(
+  salonId: number,
+): Promise<{ success: boolean; error: string; data: any[] | null }> {
+  try {
+    const { data, error } = await supabase
+      .from("vw_oreservaciones")
+      .select("*")
+      .eq("salonid", salonId)
+      .eq("activo", true)
+
+    if (error) {
+      return { success: false, error: "Error en obtenerDisponibilidadSalon: " + error.message, data: null }
+    }
+
+    return { success: true, error: "", data: data ?? [] }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error en obtenerDisponibilidadSalon: " + errorMessage, data: null }
+  }
+}
+
+// Función: obtenerReservacionesPorDia: Obtiene las reservaciones de un salón en una fecha específica
+export async function obtenerReservacionesPorDia(
+  fecha: string,
+  salonId: number,
+): Promise<{ success: boolean; error: string; data: any[] | null }> {
+  try {
+    const { data, error } = await supabase
+      .from("vw_oreservaciones")
+      .select("*")
+      .eq("salonid", salonId)
+      .eq("activo", true)
+      .lte("fechainicio", fecha)
+      .gte("fechafin", fecha)
+
+    if (error) {
+      return { success: false, error: "Error en obtenerReservacionesPorDia: " + error.message, data: null }
+    }
+
+    return { success: true, error: "", data: data ?? [] }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error en obtenerReservacionesPorDia: " + errorMessage, data: null }
   }
 }
 
@@ -414,7 +446,6 @@ export async function listaDesplegableReservaciones(id = -1, nombreevento = "") 
     const { data: reservaciones, error } = await query
 
     if (error) {
-      console.error("Error obteniendo la lista desplegable de reservaciones:", error)
       return { success: false, error: "Error obteniendo lista de reservaciones: " + error.message }
     }
 
@@ -429,59 +460,7 @@ export async function listaDesplegableReservaciones(id = -1, nombreevento = "") 
 
     return { success: true, data }
   } catch (error: unknown) {
-    console.error("Error en listaDesplegableReservaciones:", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error obteniendo lista desplegable de reservaciones: " + errorMessage }
-  }
-}
-
-// Función: obtenerReservacionesPorDia — reservaciones activas para un día y salón específico
-export async function obtenerReservacionesPorDia(fecha: string, salonId: number): Promise<{
-  success: boolean
-  error: string
-  data: { salon: string; fechainicio: string; fechafin: string; horainicio: string; horafin: string; estatus: string }[] | null
-}> {
-  try {
-    const { data, error } = await supabase
-      .from("vw_oreservaciones")
-      .select("salon, fechainicio, fechafin, horainicio, horafin, estatus")
-      .lte("fechainicio", fecha)
-      .gte("fechafin", fecha)
-      .eq("salonid", salonId)
-      .order("horainicio", { ascending: true })
-
-    if (error) {
-      console.error("Error en obtenerReservacionesPorDia:", error)
-      return { success: false, error: error.message, data: null }
-    }
-
-    return { success: true, error: "", data: data ?? [] }
-  } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : "Error desconocido"
-    return { success: false, error: msg, data: null }
-  }
-}
-
-// Función: obtenerDisponibilidadSalon — devuelve fechas y horarios ocupados para un salón
-export async function obtenerDisponibilidadSalon(salonId: number): Promise<{
-  success: boolean
-  error: string
-  data: { fechainicio: string; fechafin: string; horainicio: string; horafin: string }[] | null
-}> {
-  try {
-    const { data, error } = await supabase
-      .from("reservaciones")
-      .select("fechainicio, fechafin, horainicio, horafin")
-      .eq("salonid", salonId)
-
-    if (error) {
-      console.error("Error en obtenerDisponibilidadSalon:", error)
-      return { success: false, error: error.message, data: null }
-    }
-
-    return { success: true, error: "", data: data ?? [] }
-  } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : "Error desconocido"
-    return { success: false, error: msg, data: null }
   }
 }

@@ -7,6 +7,7 @@ import { objetoSalones } from "@/app/actions/salones"
 import type { oSalon } from "@/types/salones"
 import { createPortal } from "react-dom"
 import { useQuotations } from "@/contexts/quotations-context"
+import { toast } from "sonner"
 
 export default function LandingSalonesPage() {
   const [salones, setSalones] = useState<oSalon[]>([])
@@ -19,7 +20,7 @@ export default function LandingSalonesPage() {
   const [animationKey, setAnimationKey] = useState(0)
   const sectionRefs = useRef<(HTMLDivElement | null)[]>([])
   const uniqueMontajes = Array.from(
-    new Set(salones.flatMap((salon) => salon.montajes?.map((montaje) => montaje.montaje) || [])),
+    new Set(salones.flatMap((salon) => salon.montajes?.map((montaje) => montaje.montaje).filter((m): m is string => m !== null) || [])),
   )
   const [mounted, setMounted] = useState(false)
   const { addQuotation } = useQuotations()
@@ -32,12 +33,11 @@ export default function LandingSalonesPage() {
     async function fetchSalones() {
       try {
         const result = await objetoSalones("", -1, "Activo")
-        console.log("salones", result)
         if (result.success && result.data) {
           setSalones(result.data)
         }
-      } catch (error) {
-        console.error("Error cargando salones:", error)
+      } catch {
+        // Error silenciado intencionalmente
       } finally {
         setIsLoading(false)
       }
@@ -92,15 +92,14 @@ export default function LandingSalonesPage() {
   const currentMontajesTab = montajesTableTab[currentSalon?.id || 0] || "individual"
 
   const handleCotizarSalon = (salon: oSalon) => {
-    console.log("[v0] Adding quotation for salon:", salon.nombre)
     addQuotation({
-      salonNombre: salon.nombre,
+      salonNombre: salon.nombre || "",
       hotelNombre: salon.hotel || "Hotel",
       direccion: "Dirección del hotel", // Note: direccion is not available in salon object
       hotelId: salon.hotelid?.toString() || "",
       salonId: salon.id?.toString() || "",
     })
-    alert(`¡Cotización agregada! ${salon.nombre}`)
+    toast.success(`¡Cotización agregada! ${salon.nombre}`)
   }
 
   const MontajesModal = () => {
@@ -113,7 +112,7 @@ export default function LandingSalonesPage() {
       >
         <div
           onClick={(e) => e.stopPropagation()}
-          className="relative rounded-2xl border border-white/20 bg-white/95 shadow-2xl backdrop-blur-md w-[95vw] max-w-[1200px] max-h-[85vh] animate-in fade-in zoom-in-95 duration-300"
+          className="relative rounded-2xl border border-border/20 bg-card/95 shadow-2xl backdrop-blur-md w-[95vw] max-w-[1200px] max-h-[85vh] animate-in fade-in zoom-in-95 duration-300"
         >
           <div className="h-full p-6 flex flex-col">
             <div className="mb-4 flex items-center justify-between flex-shrink-0">
@@ -125,8 +124,8 @@ export default function LandingSalonesPage() {
                   }}
                   className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
                     currentMontajesTab === "individual"
-                      ? "bg-teal-600 text-white"
-                      : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                      ? "bg-foreground text-background"
+                      : "bg-muted text-foreground hover:bg-muted/80"
                   }`}
                 >
                   Por Montaje
@@ -138,8 +137,8 @@ export default function LandingSalonesPage() {
                   }}
                   className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
                     currentMontajesTab === "comparison"
-                      ? "bg-teal-600 text-white"
-                      : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                      ? "bg-foreground text-background"
+                      : "bg-muted text-foreground hover:bg-muted/80"
                   }`}
                 >
                   Comparativa
@@ -152,7 +151,7 @@ export default function LandingSalonesPage() {
                   e.stopPropagation()
                   toggleTable(currentSalon?.id || 0)
                 }}
-                className="text-xs hover:bg-gray-200"
+                className="text-xs hover:bg-muted"
               >
                 ✕ Cerrar
               </Button>
@@ -161,23 +160,23 @@ export default function LandingSalonesPage() {
             <div className="overflow-auto flex-1">
               {currentMontajesTab === "individual" ? (
                 <table className="w-full border-collapse text-xs">
-                  <thead className="sticky top-0 bg-teal-700 text-white">
+                  <thead className="sticky top-0 bg-foreground text-background">
                     <tr>
-                      <th className="border border-teal-600 p-2">Montaje</th>
-                      <th className="border border-teal-600 p-2">Capacidad Máxima</th>
+                      <th className="border border-foreground/70 p-2">Montaje</th>
+                      <th className="border border-foreground/70 p-2">Capacidad Máxima</th>
                     </tr>
                   </thead>
                   <tbody>
                     {currentSalon?.montajes && currentSalon.montajes.length > 0 ? (
                       currentSalon.montajes.map((montaje: any, idx: number) => (
-                        <tr key={idx} className="hover:bg-teal-50">
-                          <td className="border border-gray-300 p-2 font-semibold">{montaje.montaje}</td>
-                          <td className="border border-gray-300 p-2 text-center">{montaje.capacidadmaxima}</td>
+                        <tr key={idx} className="hover:bg-muted">
+                          <td className="border border-border p-2 font-semibold">{montaje.montaje}</td>
+                          <td className="border border-border p-2 text-center">{montaje.capacidadmaxima}</td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={2} className="border border-gray-300 p-4 text-center text-gray-500">
+                        <td colSpan={2} className="border border-border p-4 text-center text-muted-foreground">
                           No hay montajes disponibles
                         </td>
                       </tr>
@@ -186,18 +185,18 @@ export default function LandingSalonesPage() {
                 </table>
               ) : (
                 <table className="w-full border-collapse text-xs">
-                  <thead className="sticky top-0 bg-teal-700 text-white">
+                  <thead className="sticky top-0 bg-foreground text-background">
                     <tr>
-                      <th className="border border-teal-600 p-2 whitespace-nowrap">SALÓN</th>
+                      <th className="border border-foreground/70 p-2 whitespace-nowrap">SALÓN</th>
                       {uniqueMontajes.map((montaje) => (
-                        <th key={montaje} className="border border-teal-600 p-2 whitespace-nowrap">
+                        <th key={montaje} className="border border-foreground/70 p-2 whitespace-nowrap">
                           {montaje}
                         </th>
                       ))}
-                      <th className="border border-teal-600 p-2 whitespace-nowrap">Largo</th>
-                      <th className="border border-teal-600 p-2 whitespace-nowrap">Ancho</th>
-                      <th className="border border-teal-600 p-2 whitespace-nowrap">Alto</th>
-                      <th className="border border-teal-600 p-2 whitespace-nowrap">M2</th>
+                      <th className="border border-foreground/70 p-2 whitespace-nowrap">Largo</th>
+                      <th className="border border-foreground/70 p-2 whitespace-nowrap">Ancho</th>
+                      <th className="border border-foreground/70 p-2 whitespace-nowrap">Alto</th>
+                      <th className="border border-foreground/70 p-2 whitespace-nowrap">M2</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -208,19 +207,19 @@ export default function LandingSalonesPage() {
                       })
 
                       return (
-                        <tr key={salonIdx} className="hover:bg-teal-50">
-                          <td className="border border-gray-300 p-2 font-semibold whitespace-nowrap">
+                        <tr key={salonIdx} className="hover:bg-muted">
+                          <td className="border border-border p-2 font-semibold whitespace-nowrap">
                             {salonItem.nombre}
                           </td>
                           {uniqueMontajes.map((montaje) => (
-                            <td key={montaje} className="border border-gray-300 p-2 text-center">
+                            <td key={montaje} className="border border-border p-2 text-center">
                               {montajesMap[montaje] || "N/A"}
                             </td>
                           ))}
-                          <td className="border border-gray-300 p-2 text-center">{salonItem.largo || "-"}</td>
-                          <td className="border border-gray-300 p-2 text-center">{salonItem.ancho || "-"}</td>
-                          <td className="border border-gray-300 p-2 text-center">{salonItem.alto || "-"}</td>
-                          <td className="border border-gray-300 p-2 text-center">{salonItem.aream2 || "-"}</td>
+                          <td className="border border-border p-2 text-center">{salonItem.largo || "-"}</td>
+                          <td className="border border-border p-2 text-center">{salonItem.ancho || "-"}</td>
+                          <td className="border border-border p-2 text-center">{salonItem.alto || "-"}</td>
+                          <td className="border border-border p-2 text-center">{salonItem.aream2 || "-"}</td>
                         </tr>
                       )
                     })}
@@ -262,7 +261,7 @@ export default function LandingSalonesPage() {
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <div className="text-2xl font-semibold text-gray-600">Cargando salones...</div>
+        <div className="text-2xl font-semibold text-muted-foreground">Cargando salones...</div>
       </div>
     )
   }
@@ -270,7 +269,7 @@ export default function LandingSalonesPage() {
   if (salones.length === 0) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <div className="text-2xl font-semibold text-gray-600">No hay salones disponibles</div>
+        <div className="text-2xl font-semibold text-muted-foreground">No hay salones disponibles</div>
       </div>
     )
   }
@@ -349,8 +348,8 @@ export default function LandingSalonesPage() {
               onClick={() => scrollToSection(index)}
               className={`rounded-lg px-4 py-2 text-sm font-medium shadow-lg transition-all whitespace-nowrap ${
                 currentSection === index
-                  ? "bg-blue-600 text-white"
-                  : "bg-white/95 text-gray-700 backdrop-blur-sm hover:bg-white"
+                  ? "bg-foreground text-background"
+                  : "bg-card/95 text-foreground backdrop-blur-sm hover:bg-card"
               }`}
             >
               {salon.nombre}
@@ -366,7 +365,7 @@ export default function LandingSalonesPage() {
             variant="outline"
             onClick={() => handleScroll("up")}
             disabled={currentSection === 0}
-            className="bg-white/95 shadow-lg backdrop-blur-sm hover:bg-white disabled:opacity-30"
+            className="bg-card/95 shadow-lg backdrop-blur-sm hover:bg-card disabled:opacity-30"
           >
             <ChevronUp className="h-5 w-5" />
           </Button>
@@ -375,7 +374,7 @@ export default function LandingSalonesPage() {
             variant="outline"
             onClick={() => handleScroll("down")}
             disabled={currentSection === salones.length - 1}
-            className="bg-white/95 shadow-lg backdrop-blur-sm hover:bg-white disabled:opacity-30"
+            className="bg-card/95 shadow-lg backdrop-blur-sm hover:bg-card disabled:opacity-30"
           >
             <ChevronDown className="h-5 w-5" />
           </Button>
@@ -428,7 +427,7 @@ export default function LandingSalonesPage() {
                         className="gallery-animation mt-4 inline-flex items-center gap-2 cursor-pointer rounded-lg border border-white/30 bg-white/55 px-4 py-2 shadow-lg backdrop-blur-md transition-all duration-300 hover:scale-105 hover:bg-white hover:shadow-2xl hover:border-white/50"
                       >
                         <div className="text-2xl">🖼️</div>
-                        <p className="text-sm font-bold text-gray-800">Galería</p>
+                        <p className="text-sm font-bold text-foreground">Galería</p>
                       </div>
                     </div>
 
@@ -439,7 +438,7 @@ export default function LandingSalonesPage() {
                       <div className="flex flex-col items-center gap-2">
                         <p className="text-ms font-semibold uppercase tracking-wider text-white">Capacidad Máxima</p>
                         <div className="flex items-baseline gap-2">
-                          <p className="text-5xl font-bold text-teal-300">{salon.capacidadmaxima || 0}</p>
+                          <p className="text-5xl font-bold text-primary">{salon.capacidadmaxima || 0}</p>
                           <span className="text-sm font-medium text-white">personas</span>
                         </div>
                       </div>
@@ -451,10 +450,10 @@ export default function LandingSalonesPage() {
                       <div key={`button-${animationKey}-${index}`} className="button-animation flex items-center">
                         <button
                           onClick={() => handleCotizarSalon(salon)}
-                          className="group/btn relative z-10 px-8 py-3 bg-[#fffdfb] text-gray-800 border-2 border-gray-300 font-medium tracking-wider overflow-hidden transition-all duration-500 hover:text-white hover:scale-105 hover:shadow-xl"
+                          className="group/btn relative z-10 px-8 py-3 bg-background text-foreground border-2 border-border font-medium tracking-wider overflow-hidden transition-all duration-500 hover:text-white hover:scale-105 hover:shadow-xl"
                         >
                           <span className="relative z-10 flex items-center gap-2">Cotizar Salón</span>
-                          <div className="absolute inset-0 bg-gray-500 transform scale-x-0 group-hover/btn:scale-x-100 transition-transform duration-500 origin-left -z-0" />
+                          <div className="absolute inset-0 bg-foreground transform scale-x-0 group-hover/btn:scale-x-100 transition-transform duration-500 origin-left -z-0" />
                         </button>
                       </div>
 
@@ -475,9 +474,9 @@ export default function LandingSalonesPage() {
 
                   {isGalleryModalOpen && (
                     <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center">
-                      <div className="relative w-full max-w-4xl h-[80vh] bg-white/95 backdrop-blur-md rounded-xl shadow-2xl p-6">
+                      <div className="relative w-full max-w-4xl h-[80vh] bg-card/95 backdrop-blur-md rounded-xl shadow-2xl p-6">
                         <div className="flex items-center justify-between mb-4">
-                          <h3 className="text-2xl font-bold text-gray-900">Galería del Salón</h3>
+                          <h3 className="text-2xl font-bold text-foreground">Galería del Salón</h3>
                           <Button size="sm" variant="ghost" onClick={() => toggleGallery(salon.id || 0)}>
                             <X className="h-6 w-6" />
                           </Button>
@@ -496,7 +495,7 @@ export default function LandingSalonesPage() {
                                 size="icon"
                                 variant="outline"
                                 onClick={() => prevImage(salon.id || 0, galleryImages.length)}
-                                className="absolute left-4 top-1/2 -translate-y-1/2 bg-white/90 backdrop-blur-sm"
+                                className="absolute left-4 top-1/2 -translate-y-1/2 bg-card/90 backdrop-blur-sm"
                               >
                                 <ChevronLeft className="h-6 w-6" />
                               </Button>
@@ -504,7 +503,7 @@ export default function LandingSalonesPage() {
                                 size="icon"
                                 variant="outline"
                                 onClick={() => nextImage(salon.id || 0, galleryImages.length)}
-                                className="absolute right-4 top-1/2 -translate-y-1/2 bg-white/90 backdrop-blur-sm"
+                                className="absolute right-4 top-1/2 -translate-y-1/2 bg-card/90 backdrop-blur-sm"
                               >
                                 <ChevronRight className="h-6 w-6" />
                               </Button>
@@ -518,7 +517,7 @@ export default function LandingSalonesPage() {
                                       setCurrentImageIndex((prev) => ({ ...prev, [salon.id || 0]: idx }))
                                     }}
                                     className={`h-3 w-3 rounded-full transition-all ${
-                                      idx === currentImgIndex ? "w-10 bg-gray-900" : "bg-gray-400"
+                                      idx === currentImgIndex ? "w-10 bg-gray-900" : "bg-muted-foreground"
                                     }`}
                                   />
                                 ))}

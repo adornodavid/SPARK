@@ -103,8 +103,36 @@ export default function ReservacionesPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      <div className="mx-auto max-w-7xl space-y-6">
+        {/* Header skeleton */}
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="h-7 w-48 rounded-lg bg-muted animate-pulse" />
+            <div className="h-4 w-72 rounded bg-muted animate-pulse mt-2" />
+          </div>
+          <div className="h-10 w-48 rounded-lg bg-muted animate-pulse" />
+        </div>
+        {/* Filter skeleton */}
+        <div className="rounded-xl border border-border/50 bg-card p-4">
+          <div className="flex items-center gap-4">
+            <div className="h-9 w-40 rounded-md bg-muted animate-pulse" />
+            <div className="h-9 w-40 rounded-md bg-muted animate-pulse" />
+            <div className="h-9 flex-1 rounded-md bg-muted animate-pulse" />
+          </div>
+        </div>
+        {/* Table skeleton */}
+        <div className="border rounded-lg bg-card">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="border-b px-4 py-4 flex items-center gap-4">
+              <div className="h-4 w-16 rounded bg-muted animate-pulse" />
+              <div className="h-4 w-20 rounded bg-muted animate-pulse" />
+              <div className="h-4 w-36 rounded bg-muted animate-pulse flex-1" />
+              <div className="h-4 w-28 rounded bg-muted animate-pulse" />
+              <div className="h-6 w-20 rounded-full bg-muted animate-pulse" />
+              <div className="h-8 w-8 rounded bg-muted animate-pulse" />
+            </div>
+          ))}
+        </div>
       </div>
     )
   }
