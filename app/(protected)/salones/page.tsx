@@ -111,12 +111,20 @@ export default function SalonesPage() {
     }
   }
 
-  const handleClear = () => {
+  const handleClear = async () => {
     setNombre("")
     setHotel("")
     setSalon("")
     setCapacidad("")
-    setSalonesData([])
+    setSearching(true)
+    try {
+      const result = await obtenerSalones(-1, "", -1, "Todos", -1)
+      if (result.success && result.data) {
+        setSalonesData(Array.isArray(result.data) ? result.data : [])
+      }
+    } finally {
+      setSearching(false)
+    }
   }
 
   // Obtener la primera imagen del JSON fotos

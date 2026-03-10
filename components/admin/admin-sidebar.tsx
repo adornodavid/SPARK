@@ -17,7 +17,6 @@ import {
   Home,
   Utensils,
   Package,
-  Layers,
   Menu,
   LogOut,
   X,
@@ -40,11 +39,6 @@ const navItems = [
     title: "Hoteles",
     href: "/hoteles",
     icon: Building2,
-  },
-  {
-    title: "Categorias",
-    href: "/room-categories",
-    icon: Layers,
   },
   {
     title: "Habitaciones",
@@ -132,6 +126,11 @@ const quickAccessItems = [
     title: "Salones",
     href: "/salones",
     icon: Building2,
+  },
+  {
+    title: "Cotizaciones",
+    href: "/cotizaciones",
+    icon: FileText,
   },
 ]
 

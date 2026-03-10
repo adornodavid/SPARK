@@ -6,9 +6,9 @@ import { listaDesplegableHoteles } from "@/app/actions/hoteles"
 import { listaDesplegableSalones, objetoSalon, objetoSalones } from "@/app/actions/salones"
 import { crearCotizacion, actualizarCotizacion, objetoCotizacion } from "@/app/actions/cotizaciones"
 import { obtenerDisponibilidadSalon, obtenerReservacionesPorDia } from "@/app/actions/reservaciones"
-import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, agregarElementoACotizacion, buscarLugaresPorHotel, modificarLugarCotizacion, listaEstatusCotizacion, obtenerDocumentoPDF, obtenerPlatillosCotizacion, buscarPlatillosItems } from "@/app/actions/catalogos"
+import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, agregarElementoACotizacion, buscarLugaresPorHotel, modificarLugarCotizacion, listaEstatusCotizacion, obtenerDocumentoPDF, obtenerPlatillosCotizacion, buscarPlatillosItems, obtenerFormatoCotizacion, obtenerUsuarioSesionActual, obtenerEmpresaPorCliente, obtenerGrupoEmpresa, obtenerComplementosPorHotel, obtenerPlatilloItemPorId, obtenerAudiovisualPorHotel } from "@/app/actions/catalogos"
 import { listaCategoriaEvento } from "@/app/actions/cotizaciones"
-import { Users, MapPin, DollarSign, User, Mail, Phone, Building2, Check, X, CalendarIcon } from "lucide-react"
+import { Users, MapPin, DollarSign, User, Mail, Phone, Building2, Check, X, CalendarIcon, FileText } from "lucide-react"
 import { Calendar } from "@/components/ui/calendar"
 import type { DateRange } from "react-day-picker"
 
@@ -39,6 +39,42 @@ const TIPO_A_SECCION: Record<string, string> = {
 function normalizarSeccion(tipo: string): string {
   const lower = tipo.toLowerCase().trim()
   return TIPO_A_SECCION[lower] ?? lower
+}
+
+function calcularDiasEvento(fechaInicial: string, fechaFinal: string): number {
+  if (!fechaInicial) return 1
+  const inicio = new Date(fechaInicial + "T12:00:00")
+  const fin = fechaFinal ? new Date(fechaFinal + "T12:00:00") : inicio
+  const diff = Math.round((fin.getTime() - inicio.getTime()) / (1000 * 60 * 60 * 24))
+  return Math.max(diff + 1, 1)
+}
+
+async function loadImageAsBase64(url: string): Promise<string> {
+  const response = await fetch(url)
+  const blob = await response.blob()
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onloadend = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(blob)
+  })
+}
+
+async function getImageDimensions(base64: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight })
+    img.onerror = reject
+    img.src = base64
+  })
+}
+
+function crearPresupuestoItem(concepto: string, tipo: string, costo: number, dias: number, servicio = 0, cantidad = 0) {
+  const subtotal = costo
+  const precio = subtotal > 0 ? subtotal / 1.16 : 0
+  const iva = precio * 0.16
+  const total = subtotal * (cantidad || 1)
+  return { concepto, tipo, precio, iva, servicio, subtotal, cantidad, dias, total }
 }
 
 // Horarios permitidos: 8:00 AM a 1:00 AM (intervalos de 30 min)
@@ -118,6 +154,20 @@ export function QuotationForm() {
   const [diaSeleccionado, setDiaSeleccionado] = useState<string | null>(null)
   const [reservacionesDia, setReservacionesDia] = useState<{ salon: string; fechainicio: string; fechafin: string; horainicio: string; horafin: string; estatus: string }[]>([])
   const [loadingResDia, setLoadingResDia] = useState(false)
+  const [presupuestoItems, setPresupuestoItems] = useState<{ concepto: string; tipo: string; precio: number; iva: number; servicio: number; subtotal: number; cantidad: number; dias: number; total: number }[]>([])
+  const [audiovisualItems, setAudiovisualItems] = useState<any[]>([])
+  const [showAudiovisualModal, setShowAudiovisualModal] = useState(false)
+  const [audiovisualTabla, setAudiovisualTabla] = useState<any[]>([])
+  const [loadingAudiovisual, setLoadingAudiovisual] = useState(false)
+  const [selectedAudiovisualId, setSelectedAudiovisualId] = useState("")
+  const [savingAudiovisual, setSavingAudiovisual] = useState(false)
+  const [complementoItems, setComplementoItems] = useState<any[]>([])
+  const [showComplementoModal, setShowComplementoModal] = useState(false)
+  const [complementoTabla, setComplementoTabla] = useState<any[]>([])
+  const [loadingComplemento, setLoadingComplemento] = useState(false)
+  const [selectedComplementoId, setSelectedComplementoId] = useState("")
+  const [savingComplemento, setSavingComplemento] = useState(false)
+  const [generatingPDF, setGeneratingPDF] = useState(false)
 
   const [formData, setFormData] = useState({
     // Venue Selection
@@ -140,6 +190,8 @@ export function QuotationForm() {
     hospedajeFechaFin: "",
     // Client Information
     nombreCliente: "",
+    empresa: "",
+    grupo: "",
     email: "",
     telefono: "",
     subtotal: "",
@@ -196,6 +248,8 @@ export function QuotationForm() {
         hospedajeFechaInicio: c.hospedajefechainicio?.slice(0, 10) ?? "",
         hospedajeFechaFin:    c.hospedajefechafin?.slice(0, 10)   ?? "",
         nombreCliente:       c.cliente                  ?? "",
+        empresa:             "",
+        grupo:               "",
         email:               c.email                    ?? "",
         telefono:            c.telefono                 ?? "",
         subtotal:            c.subtotal?.toString()     ?? "",
@@ -233,6 +287,8 @@ export function QuotationForm() {
       // En modo edición: mostrar sección de paquete y cargar datos existentes
       setCotizacionId(Number(editId))
       setShowPackageSection(true)
+      cargarAudiovisualItems(Number(editId))
+      cargarComplementoItems(Number(editId))
 
       // Cargar paquetes del tipo de evento SIN llamar handleTipoEventoChange
       if (tid) {
@@ -266,12 +322,74 @@ export function QuotationForm() {
                 })
               }
             }
+            // Construir presupuesto con elementos existentes
+            if (elemRes.success && elemRes.data) {
+              const dias = calcularDiasEvento(fi, ff)
+              const numInvitados = Number(c.numeroinvitados) || 0
+              const presItems: { concepto: string; tipo: string; precio: number; iva: number; servicio: number; subtotal: number; cantidad: number; dias: number; total: number }[] = []
+              // Platillos
+              obtenerPlatillosCotizacion(Number(editId)).then(async (platPresRes) => {
+                if (platPresRes.success && platPresRes.data) {
+                  for (const pl of platPresRes.data) {
+                    const plTotal = pl.costo ? Number(pl.costo) : 0
+                    presItems.push(crearPresupuestoItem(pl.descripcion || pl.nombre || pl.elemento || "", "Platillo", plTotal, dias, 0, numInvitados))
+                  }
+                }
+                // Audiovisual
+                const supaCli = (await import("@/lib/supabase/client")).createClient()
+                const { data: avElems } = await supaCli.from("elementosxcotizacion").select("*").eq("cotizacionid", Number(editId)).eq("tipoelemento", "AudioVisual")
+                if (avElems && avElems.length > 0) {
+                  const avIds = avElems.map((e: any) => e.elementoid)
+                  const { data: avData } = await supaCli.from("audiovisual").select("id, nombre, costo").in("id", avIds)
+                  const avMap = new Map((avData || []).map((a: any) => [a.id, a]))
+                  for (const e of avElems) {
+                    const av = avMap.get(e.elementoid)
+                    const avTotal = av?.costo ? Number(av.costo) : 0
+                    presItems.push(crearPresupuestoItem(av?.nombre || "Audiovisual", "Audiovisual", avTotal, dias, 0, 1))
+                  }
+                }
+                // Complementos
+                const { data: compElems } = await supaCli.from("elementosxcotizacion").select("*").eq("cotizacionid", Number(editId)).eq("tipoelemento", "Complemento")
+                if (compElems && compElems.length > 0) {
+                  const compIds = compElems.map((e: any) => e.elementoid)
+                  const { data: compData } = await supaCli.from("complementos").select("id, nombre, costo").in("id", compIds)
+                  const compMap = new Map((compData || []).map((c: any) => [c.id, c]))
+                  for (const e of compElems) {
+                    const comp = compMap.get(e.elementoid)
+                    const compTotal = comp?.costo ? Number(comp.costo) : 0
+                    presItems.push(crearPresupuestoItem(comp?.nombre || "Complemento", "Complemento", compTotal, dias, 0, numInvitados))
+                  }
+                }
+                // Agregar salón al inicio
+                if (salonId) {
+                  objetoSalon(Number(salonId)).then((salonRes) => {
+                    if (salonRes.success && salonRes.data) {
+                      const precioSalon = salonRes.data.preciopordia ? Number(salonRes.data.preciopordia) : 0
+                      presItems.unshift(crearPresupuestoItem(salonRes.data.nombre || "Salón", "Salón", precioSalon, dias, 0, 1))
+                    }
+                    setPresupuestoItems(presItems)
+                  })
+                } else {
+                  setPresupuestoItems(presItems)
+                }
+              })
+            }
             setLoadingElementos(false)
           })
         })
       }
 
-      if (c.clienteid) setSelectedClienteId(c.clienteid.toString())
+      if (c.clienteid) {
+        setSelectedClienteId(c.clienteid.toString())
+        const cid = Number(c.clienteid)
+        Promise.all([obtenerEmpresaPorCliente(cid), obtenerGrupoEmpresa(cid)]).then(([empresaRes, grupoRes]) => {
+          setFormData(prev => ({
+            ...prev,
+            empresa: empresaRes.success ? empresaRes.nombre : "",
+            grupo: grupoRes.success ? grupoRes.nombre : "",
+          }))
+        })
+      }
     }
 
     cargarCotizacion()
@@ -383,14 +501,187 @@ export function QuotationForm() {
     if (!cotizacionId) return
     const result = await eliminarElementoCotizacion(cotizacionId, tipoelemento, id)
     if (result.success) {
+      // Si se elimina un Alimento, también eliminar todos los Platillos de esta cotización
+      if (tipoelemento === "Alimento") {
+        for (const platillo of platillosItems) {
+          await eliminarElementoCotizacion(cotizacionId, "Platillo", Number(platillo.elementoid ?? platillo.id))
+        }
+      }
       const [elementosResult, platRes] = await Promise.all([
         obtenerElementosCotizacion(cotizacionId),
         obtenerPlatillosCotizacion(cotizacionId),
       ])
       if (elementosResult.success && elementosResult.data) setElementosPaquete(elementosResult.data)
       if (platRes.success && platRes.data) setPlatillosItems(platRes.data)
+      // Remover del presupuesto: si se elimina Alimento, quitar sus Platillos
+      if (tipoelemento === "Alimento") {
+        setPresupuestoItems(prev => prev.filter(p => p.tipo !== "Platillo"))
+      } else if (tipoelemento === "Platillo") {
+        // Remover solo el platillo eliminado (por nombre, ya que puede haber varios)
+        const elementoEliminado = [...elementosPaquete, ...platillosItems].find(
+          el => Number(el.elementoid ?? el.id) === id
+        )
+        if (elementoEliminado) {
+          const nombreEl = elementoEliminado.descripcion || elementoEliminado.nombre || elementoEliminado.elemento || ""
+          setPresupuestoItems(prev => {
+            const idx = prev.findIndex(p => p.tipo === "Platillo" && p.concepto === nombreEl)
+            if (idx >= 0) return [...prev.slice(0, idx), ...prev.slice(idx + 1)]
+            return prev
+          })
+        }
+      }
     } else {
       alert(`Error al eliminar: ${result.error}`)
+    }
+  }
+
+  async function handleAbrirAudiovisual() {
+    setShowAudiovisualModal(true)
+    setSelectedAudiovisualId("")
+    setLoadingAudiovisual(true)
+    const supabase = (await import("@/lib/supabase/client")).createClient()
+    const { data } = await supabase.from("audiovisual").select("*").eq("hotelid", Number(formData.hotel)).eq("activo", true).order("nombre")
+    if (data) {
+      const yaAsignados = new Set(audiovisualItems.map((el: any) => Number(el.elementoid)))
+      setAudiovisualTabla(data.filter((el: any) => !yaAsignados.has(Number(el.id))))
+    }
+    setLoadingAudiovisual(false)
+  }
+
+  async function handleAgregarAudiovisual() {
+    if (!selectedAudiovisualId || !cotizacionId) return
+    setSavingAudiovisual(true)
+    const supabase = (await import("@/lib/supabase/client")).createClient()
+    const { error } = await supabase.from("elementosxcotizacion").insert({
+      cotizacionid: cotizacionId,
+      tipoelemento: "AudioVisual",
+      elementoid: Number(selectedAudiovisualId),
+      hotelid: Number(formData.hotel),
+    })
+    if (!error) {
+      await cargarAudiovisualItems(cotizacionId)
+      // Agregar al presupuesto
+      const avSeleccionado = audiovisualTabla.find((el: any) => String(el.id) === selectedAudiovisualId)
+      if (avSeleccionado) {
+        const dias = calcularDiasEvento(formData.fechaInicial, formData.fechaFinal)
+        const avTotal = avSeleccionado.costo ? Number(avSeleccionado.costo) : 0
+        setPresupuestoItems(prev => [...prev, crearPresupuestoItem(avSeleccionado.nombre || "Audiovisual", "Audiovisual", avTotal, dias, 0, 1)])
+      }
+      setShowAudiovisualModal(false)
+      setSelectedAudiovisualId("")
+    } else {
+      alert(`Error al agregar audiovisual: ${error.message}`)
+    }
+    setSavingAudiovisual(false)
+  }
+
+  async function handleEliminarAudiovisual(elementoid: number) {
+    if (!cotizacionId) return
+    // Obtener nombre antes de eliminar para remover del presupuesto
+    const avItem = audiovisualItems.find((el: any) => Number(el.audiovisual?.id || el.elementoid) === elementoid)
+    const nombreAv = avItem?.audiovisual?.nombre || ""
+    const supabase = (await import("@/lib/supabase/client")).createClient()
+    await supabase.from("elementosxcotizacion").delete().eq("cotizacionid", cotizacionId).eq("tipoelemento", "AudioVisual").eq("elementoid", elementoid)
+    await cargarAudiovisualItems(cotizacionId)
+    // Remover del presupuesto
+    if (nombreAv) {
+      setPresupuestoItems(prev => {
+        const idx = prev.findIndex(p => p.tipo === "Audiovisual" && p.concepto === nombreAv)
+        if (idx >= 0) return [...prev.slice(0, idx), ...prev.slice(idx + 1)]
+        return prev
+      })
+    }
+  }
+
+  async function cargarAudiovisualItems(cotId: number) {
+    const supabase = (await import("@/lib/supabase/client")).createClient()
+    const { data: elems } = await supabase.from("elementosxcotizacion").select("*").eq("cotizacionid", cotId).eq("tipoelemento", "AudioVisual")
+    if (elems && elems.length > 0) {
+      const ids = elems.map((e: any) => e.elementoid)
+      const { data: avData } = await supabase.from("audiovisual").select("*").in("id", ids)
+      const avMap = new Map((avData || []).map((a: any) => [a.id, a]))
+      setAudiovisualItems(elems.map((e: any) => ({ ...e, audiovisual: avMap.get(e.elementoid) || null })))
+    } else {
+      setAudiovisualItems([])
+    }
+  }
+
+  async function handleAbrirComplemento() {
+    setShowComplementoModal(true)
+    setSelectedComplementoId("")
+    setLoadingComplemento(true)
+    const supabase = (await import("@/lib/supabase/client")).createClient()
+    // Obtener el ID del alimento seleccionado en la cotización
+    const alimentoEl = elementosPaquete.find((el: any) => normalizarSeccion(el.tipoelemento || el.tipo || "") === "alimentos")
+    const alimentoId = alimentoEl ? Number(alimentoEl.elementoid ?? alimentoEl.id) : null
+    let query = supabase.from("complementos").select("id, nombre, costo").eq("hotelid", Number(formData.hotel)).eq("activo", true)
+    if (alimentoId) {
+      query = query.eq("platilloid", alimentoId)
+    }
+    const { data } = await query.order("nombre")
+    if (data) {
+      const yaAsignados = new Set(complementoItems.map((el: any) => Number(el.elementoid)))
+      setComplementoTabla(data.filter((el: any) => !yaAsignados.has(Number(el.id))))
+    }
+    setLoadingComplemento(false)
+  }
+
+  async function handleAgregarComplemento() {
+    if (!selectedComplementoId || !cotizacionId) return
+    setSavingComplemento(true)
+    const supabase = (await import("@/lib/supabase/client")).createClient()
+    const { error } = await supabase.from("elementosxcotizacion").insert({
+      cotizacionid: cotizacionId,
+      tipoelemento: "Complemento",
+      elementoid: Number(selectedComplementoId),
+      hotelid: Number(formData.hotel),
+    })
+    if (!error) {
+      await cargarComplementoItems(cotizacionId)
+      // Agregar al presupuesto
+      const compSeleccionado = complementoTabla.find((el: any) => String(el.id) === selectedComplementoId)
+      if (compSeleccionado) {
+        const dias = calcularDiasEvento(formData.fechaInicial, formData.fechaFinal)
+        const compTotal = compSeleccionado.costo ? Number(compSeleccionado.costo) : 0
+        const numInvitados = Number(formData.numeroInvitados) || 0
+        setPresupuestoItems(prev => [...prev, crearPresupuestoItem(compSeleccionado.nombre || "Complemento", "Complemento", compTotal, dias, 0, numInvitados)])
+      }
+      setShowComplementoModal(false)
+      setSelectedComplementoId("")
+    } else {
+      alert(`Error al agregar complemento: ${error.message}`)
+    }
+    setSavingComplemento(false)
+  }
+
+  async function handleEliminarComplemento(elementoid: number) {
+    if (!cotizacionId) return
+    // Obtener nombre antes de eliminar para remover del presupuesto
+    const compItem = complementoItems.find((el: any) => Number(el.complemento?.id || el.elementoid) === elementoid)
+    const nombreComp = compItem?.complemento?.nombre || ""
+    const supabase = (await import("@/lib/supabase/client")).createClient()
+    await supabase.from("elementosxcotizacion").delete().eq("cotizacionid", cotizacionId).eq("tipoelemento", "Complemento").eq("elementoid", elementoid)
+    await cargarComplementoItems(cotizacionId)
+    // Remover del presupuesto
+    if (nombreComp) {
+      setPresupuestoItems(prev => {
+        const idx = prev.findIndex(p => p.tipo === "Complemento" && p.concepto === nombreComp)
+        if (idx >= 0) return [...prev.slice(0, idx), ...prev.slice(idx + 1)]
+        return prev
+      })
+    }
+  }
+
+  async function cargarComplementoItems(cotId: number) {
+    const supabase = (await import("@/lib/supabase/client")).createClient()
+    const { data: elems } = await supabase.from("elementosxcotizacion").select("*").eq("cotizacionid", cotId).eq("tipoelemento", "Complemento")
+    if (elems && elems.length > 0) {
+      const ids = elems.map((e: any) => e.elementoid)
+      const { data: compData } = await supabase.from("complementos").select("id, nombre, costo").in("id", ids)
+      const compMap = new Map((compData || []).map((c: any) => [c.id, c]))
+      setComplementoItems(elems.map((e: any) => ({ ...e, complemento: compMap.get(e.elementoid) || null })))
+    } else {
+      setComplementoItems([])
     }
   }
 
@@ -401,6 +692,713 @@ export function QuotationForm() {
     const result = await obtenerDocumentoPDF(elementoid, tipo)
     if (result.success && result.pdf) setPdfModalUrl(result.pdf)
     setLoadingPDF(false)
+  }
+
+  async function handleGenerarPDF() {
+    if (!formData.hotel) {
+      alert("Seleccione un hotel antes de generar el PDF.")
+      return
+    }
+    setGeneratingPDF(true)
+    try {
+      // Obtener formato de cotización del hotel y datos del usuario en paralelo
+      const [formatoRes, usuarioRes] = await Promise.all([
+        obtenerFormatoCotizacion(Number(formData.hotel)),
+        obtenerUsuarioSesionActual(),
+      ])
+      if (!formatoRes.success || !formatoRes.data) {
+        alert("No se encontró formato de cotización para este hotel.")
+        setGeneratingPDF(false)
+        return
+      }
+      const formato = formatoRes.data
+      const usuarioData = usuarioRes.success && usuarioRes.data ? usuarioRes.data : null
+
+      const empresaCliente = formData.empresa
+
+      // Obtener nombres de dropdowns
+      const salonNombre = salones.find(s => s.value === formData.salon)?.text || ""
+      const montajeNombre = montajes.find(m => m.value === formData.montaje)?.text || ""
+      const tipoEventoNombre = tiposEvento.find(t => t.value === formData.tipoEvento)?.text || ""
+      // Renta del salón desde presupuesto
+      const salonPresupuesto = presupuestoItems.find(p => p.tipo === "Salón")
+      const rentaSalon = salonPresupuesto ? `$${salonPresupuesto.subtotal.toLocaleString("es-MX", { minimumFractionDigits: 2 })}` : "$0.00"
+
+      // Obtener datos del platillo seleccionado y complementos del hotel
+      let platilloData: { nombre: string; descripcion: string; costo: number } | null = null
+      if (platillosItems.length > 0) {
+        const platilloId = Number(platillosItems[0].elementoid ?? platillosItems[0].id)
+        const platilloRes = await obtenerPlatilloItemPorId(platilloId)
+        if (platilloRes.success && platilloRes.data) platilloData = platilloRes.data as any
+      }
+      const [complementosRes, audiovisualRes] = await Promise.all([
+        obtenerComplementosPorHotel(Number(formData.hotel)),
+        obtenerAudiovisualPorHotel(Number(formData.hotel)),
+      ])
+      const complementosData = complementosRes.success ? complementosRes.data : []
+      const audiovisualData = audiovisualRes.success ? audiovisualRes.data : []
+
+      // Formatear fechas
+      const formatearFecha = (fecha: string) => {
+        if (!fecha) return ""
+        const d = new Date(fecha + "T12:00:00")
+        const dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"]
+        const meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+        return `${dias[d.getDay()]} ${d.getDate()} de ${meses[d.getMonth()]} del ${d.getFullYear()}`
+      }
+      const fechaTexto = formData.fechaFinal && formData.fechaFinal !== formData.fechaInicial
+        ? `${formatearFecha(formData.fechaInicial)} al ${formatearFecha(formData.fechaFinal)}`
+        : formatearFecha(formData.fechaInicial)
+
+      // Formatear hora
+      const formatearHora = (hora: string) => {
+        if (!hora) return ""
+        return `${hora} hrs.`
+      }
+      const horarioTexto = `${formatearHora(formData.horaInicio)} a ${formatearHora(formData.horaFin)}`
+
+      // Fecha actual para encabezado
+      const hoy = new Date()
+      const mesesCorto = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+      const fechaHoy = `Monterrey, Nuevo León, a ${hoy.getDate()} de ${mesesCorto[hoy.getMonth()]} del ${hoy.getFullYear()}`
+
+      // Generar PDF con jsPDF
+      const { default: jsPDF } = await import("jspdf")
+      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
+      const pageWidth = doc.internal.pageSize.getWidth()
+      const pageHeight = doc.internal.pageSize.getHeight()
+      const marginLeft = 20
+      const contentWidth = pageWidth - marginLeft - 20
+      const headerHeight = 50
+      let y = 0
+
+      // Pre-cargar imágenes de encabezado y footer
+      let imgHeaderBase64: string | null = null
+      let imgFooterBase64: string | null = null
+      if (formato.imgencabezado) {
+        try { imgHeaderBase64 = await loadImageAsBase64(formato.imgencabezado) } catch { /* sin header */ }
+      }
+      if (formato.imgfooter) {
+        try { imgFooterBase64 = await loadImageAsBase64(formato.imgfooter) } catch { /* sin footer */ }
+      }
+
+      // Calcular altura del footer proporcionalmente a la imagen
+      let footerHeight = 30 // fallback mínimo si no hay imagen
+      if (imgFooterBase64) {
+        try {
+          const dims = await getImageDimensions(imgFooterBase64)
+          footerHeight = (dims.height / dims.width) * pageWidth
+        } catch {
+          footerHeight = 30
+        }
+      }
+
+      // Zona segura de contenido (entre encabezado y footer)
+      const contentTopY = imgHeaderBase64 ? headerHeight : 20
+      const contentBottomY = pageHeight - footerHeight - 5
+
+      // Helper: pintar encabezado en la página actual
+      function pintarEncabezado() {
+        if (imgHeaderBase64) {
+          doc.addImage(imgHeaderBase64, "PNG", 0, 0, pageWidth, 40)
+        }
+      }
+
+      // Helper: pintar footer en la página actual
+      function pintarFooter() {
+        const footerY = pageHeight - footerHeight
+        if (imgFooterBase64) {
+          doc.addImage(imgFooterBase64, "PNG", 0, footerY, pageWidth, footerHeight)
+        }
+        if (usuarioData) {
+          const userY = footerY + 8
+          doc.setFontSize(9)
+          doc.setFont("helvetica", "bold")
+          doc.setTextColor(255, 255, 255)
+          const nombrePuesto = [usuarioData.nombrecompleto, usuarioData.puesto].filter(Boolean).join("  |  ")
+          doc.text(nombrePuesto, marginLeft, userY)
+          doc.setFont("helvetica", "normal")
+          doc.setFontSize(8)
+          const contactoLinea = [
+            usuarioData.telefono ? `Tel: ${usuarioData.telefono}` : "",
+            usuarioData.email || "",
+          ].filter(Boolean).join("  |  ")
+          doc.text(contactoLinea, marginLeft, userY + 5)
+        }
+      }
+
+      // Helper: verificar si cabe contenido, si no crear nueva página
+      function checkNewPage(needed: number): void {
+        if (y + needed > contentBottomY) {
+          pintarFooter()
+          doc.addPage()
+          pintarEncabezado()
+          y = contentTopY
+        }
+      }
+
+      // ====== PÁGINA 1 ======
+      pintarEncabezado()
+      y = contentTopY
+
+      // --- Título "Cotización" ---
+      doc.setFont("helvetica", "bold")
+      doc.setFontSize(22)
+      doc.setTextColor(50, 50, 50)
+      doc.text("Cotización", pageWidth / 2, y, { align: "center" })
+      y += 6
+
+      // Línea decorativa bajo título
+      doc.setDrawColor(50, 50, 50)
+      doc.setLineWidth(0.5)
+      const tituloWidth = doc.getTextWidth("Cotización")
+      doc.line((pageWidth - tituloWidth) / 2, y, (pageWidth + tituloWidth) / 2, y)
+      y += 12
+
+      // --- Fecha actual (alineada a la derecha) ---
+      doc.setFont("helvetica", "normal")
+      doc.setFontSize(10)
+      doc.setTextColor(60, 60, 60)
+      doc.text(fechaHoy, pageWidth - 20, y, { align: "right" })
+      y += 14
+
+      // --- Datos del cliente ---
+      doc.setFontSize(10)
+      const clienteFields = [
+        { label: "Nombre:", value: formData.nombreCliente },
+        { label: "Empresa:", value: empresaCliente },
+        { label: "Teléfono:", value: formData.telefono },
+        { label: "Email:", value: formData.email },
+      ]
+      for (const field of clienteFields) {
+        checkNewPage(6)
+        doc.setFont("helvetica", "bold")
+        doc.setTextColor(50, 50, 50)
+        doc.text(field.label, marginLeft, y)
+        doc.setFont("helvetica", "normal")
+        doc.setTextColor(40, 40, 40)
+        doc.text(field.value || "", marginLeft + 22, y)
+        y += 5.5
+      }
+      y += 8
+
+      // --- Información preferencial ---
+      if (formato.informacionpreferencial) {
+        doc.setFont("helvetica", "normal")
+        doc.setFontSize(9.5)
+        doc.setTextColor(40, 40, 40)
+        const infoLines = doc.splitTextToSize(formato.informacionpreferencial, contentWidth)
+        const infoHeight = infoLines.length * 4.5 + 8
+        checkNewPage(infoHeight)
+        doc.text(infoLines, marginLeft, y)
+        y += infoHeight
+      }
+
+      // --- Tabla de evento ---
+      const tableData = [
+        { label: "Fecha:", value: `${fechaTexto}\n(Sujeto a disponibilidad)` },
+        { label: "Evento:", value: tipoEventoNombre },
+        { label: "Salón:", value: `${salonNombre}\n(Los espacios no han sido reservados) espacios sujetos a disponibilidad, Para garantizar el servicio se requiere la firma de contrato y pago por concepto de anticipo.` },
+        { label: "Garantía:", value: `${formData.numeroInvitados} personas` },
+        { label: "Renta:", value: `${rentaSalon} incluyendo el 16% de I.V.A\nLa renta del salón será en cortesía por el consumo equivalente a la renta de salón en alimentos y bebidas programadas en banquetes.` },
+        { label: "Horario:", value: horarioTexto },
+        { label: "Montaje:", value: montajeNombre },
+      ]
+
+      const colLabelWidth = 35
+      const colValueWidth = contentWidth - colLabelWidth
+      const tableX = marginLeft
+
+      // Borde superior de la tabla
+      checkNewPage(10)
+      doc.setDrawColor(160, 160, 160)
+      doc.setLineWidth(0.3)
+      doc.line(tableX, y, tableX + contentWidth, y)
+
+      for (const row of tableData) {
+        doc.setFontSize(9.5)
+        const valueLines = doc.splitTextToSize(row.value || "", colValueWidth - 6)
+        const rowHeight = Math.max(valueLines.length * 4.5 + 4, 8)
+
+        checkNewPage(rowHeight)
+        // Borde superior si es inicio de nueva página
+        if (y === contentTopY) {
+          doc.setDrawColor(160, 160, 160)
+          doc.setLineWidth(0.3)
+          doc.line(tableX, y, tableX + contentWidth, y)
+        }
+
+        doc.setDrawColor(160, 160, 160)
+        doc.setLineWidth(0.3)
+        doc.line(tableX, y, tableX, y + rowHeight)
+        doc.line(tableX + colLabelWidth, y, tableX + colLabelWidth, y + rowHeight)
+        doc.line(tableX + contentWidth, y, tableX + contentWidth, y + rowHeight)
+
+        doc.setFont("helvetica", "bold")
+        doc.setFontSize(9.5)
+        doc.setTextColor(50, 50, 50)
+        doc.text(row.label, tableX + 3, y + 5.5)
+
+        doc.setFont("helvetica", "normal")
+        doc.setTextColor(40, 40, 40)
+        doc.text(valueLines, tableX + colLabelWidth + 3, y + 5.5)
+
+        y += rowHeight
+        doc.line(tableX, y, tableX + contentWidth, y)
+      }
+
+      // --- Fila de Servicio (platillo + complementos) con soporte multi-página ---
+      if (platilloData) {
+        const valueX = tableX + colLabelWidth + 3
+        const maxValueWidth = colValueWidth - 6
+
+        // Recopilar bloques de contenido para la fila de Servicio
+        type PdfBlock = { type: "text"; font: string; size: number; color: [number, number, number]; text: string; lineHeight: number; extraSpacing?: number }
+        const blocks: PdfBlock[] = []
+
+        // Nombre del alimento + horas del platillo (de la sección Alimentos, fuente más grande)
+        const alimentoEl = elementosPaquete.find((el: any) => normalizarSeccion(el.tipoelemento || el.tipo || "") === "alimentos")
+        const alimentoNombre = alimentoEl ? (alimentoEl.descripcion || alimentoEl.nombre || alimentoEl.elemento || "") : ""
+        const horasPlatillo = (platilloData as any).horas
+        const horasTxt = horasPlatillo ? ` (${horasPlatillo} horas)` : ""
+        if (alimentoNombre) {
+          blocks.push({ type: "text", font: "bold", size: 12, color: [40, 40, 40], text: `${alimentoNombre}${horasTxt}`, lineHeight: 5.5, extraSpacing: 4 })
+        }
+
+        // Nombre del platillo
+        blocks.push({ type: "text", font: "bold", size: 10, color: [40, 40, 40], text: platilloData.nombre || "", lineHeight: 4.5, extraSpacing: 2 })
+
+        // Descripción del platillo
+        if (platilloData.descripcion) {
+          blocks.push({ type: "text", font: "normal", size: 9, color: [60, 60, 60], text: platilloData.descripcion, lineHeight: 4, extraSpacing: 4 })
+        }
+
+        // Precio por persona
+        const precioTexto = `Precio por persona $${platilloData.costo?.toLocaleString("es-MX", { minimumFractionDigits: 2 }) || "0.00"}`
+        blocks.push({ type: "text", font: "bold", size: 9.5, color: [50, 50, 50], text: precioTexto, lineHeight: 4.5, extraSpacing: 1 })
+        blocks.push({ type: "text", font: "bold", size: 9.5, color: [50, 50, 50], text: "Incluye 16% IVA y 15% de servicio.", lineHeight: 4.5, extraSpacing: 7 })
+
+        // Complementos
+        if (complementosData.length > 0) {
+          blocks.push({ type: "text", font: "bold", size: 9.5, color: [40, 40, 40], text: "COMPLEMENTOS:", lineHeight: 4.5, extraSpacing: 2 })
+
+          for (const comp of complementosData) {
+            const cantUnidad = comp.cantidad && comp.unidad ? ` (${comp.cantidad} ${comp.unidad})` : comp.cantidad ? ` (${comp.cantidad})` : ""
+            blocks.push({ type: "text", font: "normal", size: 9, color: [40, 40, 40], text: `•  ${comp.nombre || ""}${cantUnidad}`, lineHeight: 4, extraSpacing: 0 })
+            if (comp.descripcion) {
+              blocks.push({ type: "text", font: "normal", size: 8.5, color: [80, 80, 80], text: `   ${comp.descripcion}`, lineHeight: 3.5, extraSpacing: 0 })
+            }
+            if (comp.costo) {
+              blocks.push({ type: "text", font: "bold", size: 9, color: [50, 50, 50], text: `   Promoción $${comp.costo.toLocaleString("es-MX", { minimumFractionDigits: 2 })}`, lineHeight: 4, extraSpacing: 1 })
+            }
+          }
+
+          // Pie de complementos
+          blocks.push({ type: "text", font: "bold", size: 9.5, color: [50, 50, 50], text: "Precio por persona", lineHeight: 4.5, extraSpacing: 1 })
+          blocks.push({ type: "text", font: "bold", size: 9.5, color: [50, 50, 50], text: "Incluye 16% IVA y 15% de servicio.", lineHeight: 4.5, extraSpacing: 3 })
+        }
+
+        // Renderizar bloques con paginación — dentro de celdas con bordes
+        let servicioLabelDrawn = false
+        let cellStartY = y
+
+        // Borde superior de fila Servicio
+        if (y === contentTopY) {
+          doc.setDrawColor(160, 160, 160)
+          doc.setLineWidth(0.3)
+          doc.line(tableX, y, tableX + contentWidth, y)
+        }
+        cellStartY = y
+        let cursorY = y + 5.5
+
+        function closeCellBorders() {
+          doc.setDrawColor(160, 160, 160)
+          doc.setLineWidth(0.3)
+          doc.line(tableX, cellStartY, tableX, y)
+          doc.line(tableX + colLabelWidth, cellStartY, tableX + colLabelWidth, y)
+          doc.line(tableX + contentWidth, cellStartY, tableX + contentWidth, y)
+        }
+
+        for (const block of blocks) {
+          doc.setFont("helvetica", block.font)
+          doc.setFontSize(block.size)
+          const lines = doc.splitTextToSize(block.text, maxValueWidth)
+          const blockHeight = lines.length * block.lineHeight + (block.extraSpacing || 0)
+
+          // ¿Cabe en la página actual?
+          if (cursorY + blockHeight > contentBottomY) {
+            // Cerrar celda hasta el fondo de la zona segura
+            y = contentBottomY
+            closeCellBorders()
+            doc.line(tableX, y, tableX + contentWidth, y)
+
+            pintarFooter()
+            doc.addPage()
+            pintarEncabezado()
+            y = contentTopY
+            cellStartY = y
+            cursorY = y + 5.5
+            servicioLabelDrawn = false
+
+            // Borde superior en nueva página
+            doc.setDrawColor(160, 160, 160)
+            doc.setLineWidth(0.3)
+            doc.line(tableX, y, tableX + contentWidth, y)
+          }
+
+          // Dibujar label "Servicio:" solo una vez por página
+          if (!servicioLabelDrawn) {
+            doc.setFont("helvetica", "bold")
+            doc.setFontSize(9.5)
+            doc.setTextColor(50, 50, 50)
+            doc.text("Servicio:", tableX + 3, cellStartY + 5.5)
+            servicioLabelDrawn = true
+          }
+
+          // Dibujar el bloque
+          doc.setFont("helvetica", block.font)
+          doc.setFontSize(block.size)
+          doc.setTextColor(block.color[0], block.color[1], block.color[2])
+          doc.text(lines, valueX, cursorY)
+          cursorY += blockHeight
+        }
+
+        // Cerrar última celda
+        y = cursorY + 3
+        closeCellBorders()
+        doc.line(tableX, y, tableX + contentWidth, y)
+      }
+
+      // --- Fila de Equipo Audiovisual (opcional) ---
+      if (audiovisualData.length > 0) {
+        const valueX = tableX + colLabelWidth + 3
+        const maxValueWidth = colValueWidth - 6
+
+        type PdfBlock = { type: "text"; font: string; size: number; color: [number, number, number]; text: string; lineHeight: number; extraSpacing?: number }
+        const avBlocks: PdfBlock[] = []
+
+        for (const av of audiovisualData) {
+          const costoTxt = av.costosiniva ? ` $${av.costosiniva.toLocaleString("es-MX", { minimumFractionDigits: 2 })} más IVA` : ""
+          const descTxt = av.descripcion ? ` ${av.descripcion}` : ""
+          avBlocks.push({ type: "text", font: "normal", size: 9, color: [40, 40, 40], text: `*${av.nombre || ""}${descTxt}${costoTxt}`, lineHeight: 4, extraSpacing: 2 })
+        }
+
+        let avLabelDrawn = false
+        let avCellStartY = y
+
+        // Borde superior
+        if (y === contentTopY) {
+          doc.setDrawColor(160, 160, 160)
+          doc.setLineWidth(0.3)
+          doc.line(tableX, y, tableX + contentWidth, y)
+        }
+        avCellStartY = y
+        let avCursorY = y + 5.5
+
+        function closeAvCellBorders() {
+          doc.setDrawColor(160, 160, 160)
+          doc.setLineWidth(0.3)
+          doc.line(tableX, avCellStartY, tableX, y)
+          doc.line(tableX + colLabelWidth, avCellStartY, tableX + colLabelWidth, y)
+          doc.line(tableX + contentWidth, avCellStartY, tableX + contentWidth, y)
+        }
+
+        for (const block of avBlocks) {
+          doc.setFont("helvetica", block.font)
+          doc.setFontSize(block.size)
+          const lines = doc.splitTextToSize(block.text, maxValueWidth)
+          const blockHeight = lines.length * block.lineHeight + (block.extraSpacing || 0)
+
+          if (avCursorY + blockHeight > contentBottomY) {
+            y = contentBottomY
+            closeAvCellBorders()
+            doc.line(tableX, y, tableX + contentWidth, y)
+
+            pintarFooter()
+            doc.addPage()
+            pintarEncabezado()
+            y = contentTopY
+            avCellStartY = y
+            avCursorY = y + 5.5
+            avLabelDrawn = false
+
+            doc.setDrawColor(160, 160, 160)
+            doc.setLineWidth(0.3)
+            doc.line(tableX, y, tableX + contentWidth, y)
+          }
+
+          if (!avLabelDrawn) {
+            doc.setFont("helvetica", "bold")
+            doc.setFontSize(8.5)
+            doc.setTextColor(50, 50, 50)
+            doc.text("Equipo", tableX + 3, avCellStartY + 5)
+            doc.text("audiovisual:", tableX + 3, avCellStartY + 9)
+            doc.setFontSize(7.5)
+            doc.text("(opcional)", tableX + 3, avCellStartY + 13.5)
+            avLabelDrawn = true
+          }
+
+          doc.setFont("helvetica", block.font)
+          doc.setFontSize(block.size)
+          doc.setTextColor(block.color[0], block.color[1], block.color[2])
+          doc.text(lines, valueX, avCursorY)
+          avCursorY += blockHeight
+        }
+
+        y = avCursorY + 3
+        closeAvCellBorders()
+        doc.line(tableX, y, tableX + contentWidth, y)
+      }
+
+      // --- Sección Presupuesto ---
+      if (presupuestoItems.length > 0) {
+        y += 10
+        checkNewPage(30)
+
+        // Título "Presupuesto"
+        doc.setFont("helvetica", "bold")
+        doc.setFontSize(14)
+        doc.setTextColor(50, 50, 50)
+        doc.text("Presupuesto", marginLeft, y)
+        y += 6
+
+        // Línea decorativa
+        doc.setDrawColor(50, 50, 50)
+        doc.setLineWidth(0.5)
+        const presTitleW = doc.getTextWidth("Presupuesto")
+        doc.line(marginLeft, y, marginLeft + presTitleW, y)
+        y += 6
+
+        // Texto introductorio
+        doc.setFont("helvetica", "normal")
+        doc.setFontSize(9)
+        doc.setTextColor(60, 60, 60)
+        const presIntro = "Presentamos un total estimado de su evento. Sujeto a cambios por solicitud del Cliente antes o durante la ejecución del mismo."
+        const introLines = doc.splitTextToSize(presIntro, contentWidth)
+        doc.text(introLines, marginLeft, y)
+        y += introLines.length * 4 + 6
+
+        // Tabla de presupuesto
+        const fmt = (n: number) => n > 0 ? `$${n.toLocaleString("es-MX", { minimumFractionDigits: 2 })}` : "-"
+        const colWidths = [8, 32, 20, 22, 20, 18, 22, 16, 12, 24] // total ~194 ≈ contentWidth(170) — ajustamos
+        const totalColW = colWidths.reduce((a, b) => a + b, 0)
+        const scale = contentWidth / totalColW
+        const cols = colWidths.map(w => w * scale)
+        const headers = ["#", "Concepto", "Tipo", "Precio", "IVA", "Servicio", "Subtotal", "Cant.", "Días", "Total"]
+        const headerAligns: ("left" | "right" | "center")[] = ["center", "left", "left", "right", "right", "right", "right", "center", "center", "right"]
+
+        // Header row
+        checkNewPage(14)
+        const headerH = 7
+        doc.setFillColor(50, 50, 50)
+        doc.rect(tableX, y, contentWidth, headerH, "F")
+        doc.setFont("helvetica", "bold")
+        doc.setFontSize(7)
+        doc.setTextColor(255, 255, 255)
+        let colX = tableX
+        for (let i = 0; i < headers.length; i++) {
+          const align = headerAligns[i]
+          const textX = align === "right" ? colX + cols[i] - 2 : align === "center" ? colX + cols[i] / 2 : colX + 2
+          doc.text(headers[i], textX, y + 5, { align })
+          colX += cols[i]
+        }
+        y += headerH
+
+        // Data rows
+        for (let idx = 0; idx < presupuestoItems.length; idx++) {
+          const item = presupuestoItems[idx]
+          const rowH = 6.5
+          checkNewPage(rowH + 2)
+
+          // Si es nueva página, re-dibujar header
+          if (y === contentTopY) {
+            doc.setFillColor(50, 50, 50)
+            doc.rect(tableX, y, contentWidth, headerH, "F")
+            doc.setFont("helvetica", "bold")
+            doc.setFontSize(7)
+            doc.setTextColor(255, 255, 255)
+            let hx = tableX
+            for (let i = 0; i < headers.length; i++) {
+              const align = headerAligns[i]
+              const textX = align === "right" ? hx + cols[i] - 2 : align === "center" ? hx + cols[i] / 2 : hx + 2
+              doc.text(headers[i], textX, y + 5, { align })
+              hx += cols[i]
+            }
+            y += headerH
+          }
+
+          // Fondo alternado
+          if (idx % 2 === 1) {
+            doc.setFillColor(245, 245, 245)
+            doc.rect(tableX, y, contentWidth, rowH, "F")
+          }
+
+          doc.setFontSize(7)
+          doc.setTextColor(40, 40, 40)
+          const rowData = [
+            String(idx + 1),
+            item.concepto,
+            item.tipo,
+            item.precio > 0 ? fmt(item.precio) : "Por definir",
+            item.iva > 0 ? fmt(item.iva) : "-",
+            item.servicio > 0 ? fmt(item.servicio) : "-",
+            item.subtotal > 0 ? fmt(item.subtotal) : "Por definir",
+            item.cantidad ? String(item.cantidad) : "-",
+            String(item.dias),
+            item.total > 0 ? fmt(item.total) : "Por definir",
+          ]
+
+          colX = tableX
+          for (let i = 0; i < rowData.length; i++) {
+            const align = headerAligns[i]
+            doc.setFont("helvetica", i === 1 || i === 9 ? "bold" : "normal")
+            const textX = align === "right" ? colX + cols[i] - 2 : align === "center" ? colX + cols[i] / 2 : colX + 2
+            // Truncar concepto si es muy largo
+            let cellText = rowData[i]
+            if (i === 1) {
+              const maxW = cols[i] - 4
+              while (doc.getTextWidth(cellText) > maxW && cellText.length > 3) {
+                cellText = cellText.slice(0, -1)
+              }
+              if (cellText !== rowData[i]) cellText += "…"
+            }
+            doc.text(cellText, textX, y + 4.5, { align })
+            colX += cols[i]
+          }
+
+          // Línea separadora
+          doc.setDrawColor(200, 200, 200)
+          doc.setLineWidth(0.2)
+          doc.line(tableX, y + rowH, tableX + contentWidth, y + rowH)
+          y += rowH
+        }
+
+        // Fila Total
+        const totalRowH = 7
+        checkNewPage(totalRowH)
+        doc.setFillColor(50, 50, 50, 0.05)
+        doc.setDrawColor(50, 50, 50)
+        doc.setLineWidth(0.5)
+        doc.line(tableX, y, tableX + contentWidth, y)
+        doc.setFillColor(235, 235, 235)
+        doc.rect(tableX, y, contentWidth, totalRowH, "F")
+
+        doc.setFont("helvetica", "bold")
+        doc.setFontSize(8)
+        doc.setTextColor(40, 40, 40)
+        // "Total" alineado a la derecha en la penúltima col
+        const totalLabelX = tableX + cols.slice(0, 9).reduce((a, b) => a + b, 0) - 2
+        doc.text("Total", totalLabelX, y + 5, { align: "right" })
+
+        // Valor total
+        const grandTotal = presupuestoItems.reduce((sum, i) => sum + i.total, 0)
+        doc.setFontSize(8.5)
+        doc.setTextColor(50, 50, 50)
+        const totalValX = tableX + contentWidth - 2
+        doc.text(grandTotal > 0 ? fmt(grandTotal) : "Por definir", totalValX, y + 5, { align: "right" })
+        y += totalRowH + 2
+
+        // Línea inferior tabla
+        doc.setDrawColor(50, 50, 50)
+        doc.setLineWidth(0.5)
+        doc.line(tableX, y - 2, tableX + contentWidth, y - 2)
+
+        // --- Texto precios (formatocotizacion.textoprecios) alineado a la derecha ---
+        if (formato.textoprecios) {
+          y += 4
+          checkNewPage(20)
+          doc.setFont("helvetica", "normal")
+          doc.setFontSize(8.5)
+          doc.setTextColor(60, 60, 60)
+          const preciosLines = doc.splitTextToSize(formato.textoprecios, contentWidth)
+          for (const line of preciosLines) {
+            checkNewPage(5)
+            doc.text(line, pageWidth - 20, y, { align: "right" })
+            y += 4
+          }
+          y += 4
+        }
+
+        // --- Cortesías ---
+        const cortesiasItems = elementosPaquete.filter((el: any) => normalizarSeccion(el.tipoelemento || el.tipo || "") === "cortesias")
+        if (cortesiasItems.length > 0) {
+          checkNewPage(15)
+          doc.setFont("helvetica", "bold")
+          doc.setFontSize(11)
+          doc.setTextColor(50, 50, 50)
+          doc.text("Cortesías", marginLeft, y)
+          y += 3
+
+          // Línea decorativa
+          doc.setDrawColor(50, 50, 50)
+          doc.setLineWidth(0.4)
+          const cortW = doc.getTextWidth("Cortesías")
+          doc.line(marginLeft, y, marginLeft + cortW, y)
+          y += 6
+
+          for (const cort of cortesiasItems) {
+            checkNewPage(6)
+            const cortNombre = cort.descripcion || cort.nombre || cort.elemento || ""
+            doc.setFont("helvetica", "normal")
+            doc.setFontSize(9.5)
+            doc.setTextColor(40, 40, 40)
+            doc.text(`•  ${cortNombre}`, marginLeft + 3, y)
+            y += 5.5
+          }
+          y += 4
+        }
+      }
+
+      // --- Texto adicional (formatocotizacion.textoadicional) ---
+      if (formato.textoadicional) {
+        y += 6
+        checkNewPage(15)
+        doc.setFont("helvetica", "normal")
+        doc.setFontSize(9)
+        doc.setTextColor(40, 40, 40)
+        // Respetar saltos de línea del campo
+        const parrafos = formato.textoadicional.split(/\r?\n/)
+        for (const parrafo of parrafos) {
+          if (parrafo.trim() === "") {
+            y += 4
+            continue
+          }
+          const pLines = doc.splitTextToSize(parrafo, contentWidth)
+          const pHeight = pLines.length * 4
+          checkNewPage(pHeight)
+          doc.text(pLines, marginLeft, y)
+          y += pHeight + 1.5
+        }
+        y += 4
+      }
+
+      // --- Mensaje de cierre con nombre del cliente ---
+      {
+        y += 4
+        checkNewPage(25)
+        doc.setFont("helvetica", "normal")
+        doc.setFontSize(9.5)
+        doc.setTextColor(40, 40, 40)
+        const mensajeCierre = `Estimado(a) ${formData.nombreCliente || "Cliente"}, reiteramos nuestro agradecimiento por su preferencia y confiamos que la presente cotización cumpla con sus expectativas. Quedo a sus órdenes y en espera de su favorable respuesta para proceder a elaborar el contrato correspondiente, la cual detallará las políticas aplicables de su evento.`
+        const cierreLines = doc.splitTextToSize(mensajeCierre, contentWidth)
+        const cierreHeight = cierreLines.length * 4.5
+        checkNewPage(cierreHeight)
+        doc.text(cierreLines, marginLeft, y)
+        y += cierreHeight + 6
+      }
+
+      // --- Footer de la última página ---
+      pintarFooter()
+
+      // Abrir PDF en nueva pestaña
+      const pdfBlob = doc.output("blob")
+      const pdfUrl = URL.createObjectURL(pdfBlob)
+      window.open(pdfUrl, "_blank")
+    } catch (error) {
+      console.error("Error generando PDF:", error)
+      alert("Error al generar el PDF de cotización.")
+    }
+    setGeneratingPDF(false)
   }
 
   async function handleAbrirAgregar(tipo: string) {
@@ -444,6 +1442,17 @@ export function QuotationForm() {
       ])
       if (elementosResult.success && elementosResult.data) setElementosPaquete(elementosResult.data)
       if (platRes.success && platRes.data) setPlatillosItems(platRes.data)
+      // Agregar al presupuesto si es platillo (alimentos no van al presupuesto)
+      if (agregarTipo === "platillos") {
+        const elementoSeleccionado = elementosTabla.find((el: any) => String(el.id) === selectedElementoId)
+        if (elementoSeleccionado) {
+          const nombreElemento = elementoSeleccionado.descripcion || elementoSeleccionado.nombre || elementoSeleccionado.elemento || ""
+          const dias = calcularDiasEvento(formData.fechaInicial, formData.fechaFinal)
+          const elTotal = elementoSeleccionado.costo ? Number(elementoSeleccionado.costo) : 0
+          const numInvitados = Number(formData.numeroInvitados) || 0
+          setPresupuestoItems(prev => [...prev, crearPresupuestoItem(nombreElemento, "Platillo", elTotal, dias, 0, numInvitados)])
+        }
+      }
       setShowAgregarModal(false)
       setSelectedElementoId("")
     } else {
@@ -558,7 +1567,7 @@ export function QuotationForm() {
   const handleClienteInputChange = (value: string) => {
     setSelectedClienteId("") // invalidar selección al tipear manualmente
     if (value.trim() === "") {
-      setFormData(prev => ({ ...prev, nombreCliente: "", email: "", telefono: "" }))
+      setFormData(prev => ({ ...prev, nombreCliente: "", empresa: "", grupo: "", email: "", telefono: "" }))
       setFilteredClientes(clientes)
       setShowClienteDropdown(false)
       setSelectedClienteId("")
@@ -580,11 +1589,18 @@ export function QuotationForm() {
 
     // Fetch client details to autofill email and telefono
     try {
-      const result = await objetoCliente(Number.parseInt(cliente.value))
+      const clienteId = Number.parseInt(cliente.value)
+      const [result, empresaResult, grupoResult] = await Promise.all([
+        objetoCliente(clienteId),
+        obtenerEmpresaPorCliente(clienteId),
+        obtenerGrupoEmpresa(clienteId),
+      ])
       if (result.success && result.data) {
         setFormData((prev) => ({
           ...prev,
           nombreCliente: cliente.text,
+          empresa: empresaResult.success ? empresaResult.nombre : "",
+          grupo: grupoResult.success ? grupoResult.nombre : "",
           email: result.data.email || "",
           telefono: result.data.telefono || "",
         }))
@@ -649,6 +1665,16 @@ export function QuotationForm() {
         if (result.success) {
           setCotizacionId(result.data)
           setShowPackageSection(true)
+          cargarAudiovisualItems(result.data)
+          cargarComplementoItems(result.data)
+          // Agregar salón al presupuesto
+          if (formData.salon) {
+            const salonItem = salones.find((s) => s.value === formData.salon)
+            const salonResult = await objetoSalon(Number(formData.salon))
+            const precioSalon = salonResult.success && salonResult.data?.preciopordia ? Number(salonResult.data.preciopordia) : 0
+            const dias = calcularDiasEvento(formData.fechaInicial, formData.fechaFinal)
+            setPresupuestoItems([crearPresupuestoItem(salonItem?.text || "Salón", "Salón", precioSalon, dias, 0, 1)])
+          }
         } else {
           alert(`Error al crear cotización: ${result.error}`)
         }
@@ -798,6 +1824,36 @@ export function QuotationForm() {
                   readOnly
                 />
               </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="empresa" className="text-sm font-medium flex items-center gap-2">
+                  <Building2 className="h-4 w-4" />
+                  Empresa
+                </Label>
+                <Input
+                  id="empresa"
+                  value={formData.empresa}
+                  placeholder="Se completa al seleccionar cliente"
+                  className="border-blue-200 bg-gray-50 text-gray-500 cursor-not-allowed"
+                  disabled
+                  readOnly
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="grupo" className="text-sm font-medium flex items-center gap-2">
+                  <Building2 className="h-4 w-4" />
+                  Grupo (Empresa Principal)
+                </Label>
+                <Input
+                  id="grupo"
+                  value={formData.grupo}
+                  placeholder="Se completa al seleccionar cliente"
+                  className="border-blue-200 bg-gray-50 text-gray-500 cursor-not-allowed"
+                  disabled
+                  readOnly
+                />
+              </div>
             </div>
           </div>
 
@@ -841,10 +1897,20 @@ export function QuotationForm() {
                     <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Salón <span className="text-red-500">*</span></Label>
                     <Select
                       value={formData.salon}
-                      onValueChange={(value) => {
+                      onValueChange={async (value) => {
                         setFormData(prev => ({ ...prev, salon: value, montaje: "" }))
                         setMontajes([])
                         loadMontajes(value)
+                        // Actualizar salón en presupuesto
+                        const salonItem = salones.find((s) => s.value === value)
+                        const salonResult = await objetoSalon(Number(value))
+                        const precioSalon = salonResult.success && salonResult.data?.preciopordia ? Number(salonResult.data.preciopordia) : 0
+                        const dias = calcularDiasEvento(formData.fechaInicial, formData.fechaFinal)
+                        const nombreSalon = salonResult.success && salonResult.data?.nombre ? salonResult.data.nombre : salonItem?.text || "Salón"
+                        setPresupuestoItems(prev => {
+                          const sinSalon = prev.filter(p => p.tipo !== "Salón")
+                          return [crearPresupuestoItem(nombreSalon, "Salón", precioSalon, dias, 0, 1), ...sinSalon]
+                        })
                       }}
                       disabled={!formData.hotel}
                       required
@@ -1242,6 +2308,12 @@ export function QuotationForm() {
                   onChange={(e) => {
                     const val = e.target.value.slice(0, 3)
                     setFormData(prev => ({ ...prev, numeroInvitados: val }))
+                    const numVal = Number(val) || 0
+                    setPresupuestoItems(prev => prev.map(p =>
+                      p.tipo === "Platillo" || p.tipo === "Complemento"
+                        ? { ...p, cantidad: numVal, total: p.subtotal * numVal }
+                        : p
+                    ))
                   }}
                   placeholder="Ej: 150"
                   className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
@@ -1617,12 +2689,260 @@ export function QuotationForm() {
             {loadingElementos && (
               <p className="text-sm text-gray-500 text-center py-6">Cargando elementos...</p>
             )}
+
+            {/* Separador y Secciones Audiovisual + Complementos */}
+            <div className="bg-[#f7f5f0] rounded-xl p-8 mt-8 border-t-2 border-[#1a3d2e]/20">
+              <div className="grid grid-cols-2 gap-x-12">
+                {/* Audiovisual */}
+                <div>
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-8 h-8 flex items-center justify-center text-[#1a3d2e]">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-7 h-7">
+                        <rect x="2" y="7" width="20" height="15" rx="2" ry="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        <polyline points="17 2 12 7 7 2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </div>
+                    <h3 className="text-sm font-bold tracking-widest text-[#1a3d2e] uppercase">Audiovisual</h3>
+                  </div>
+                  <div className="pl-11 space-y-1">
+                    {audiovisualItems.length > 0 ? (
+                      audiovisualItems.map((item: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between gap-2 group">
+                          <p className="text-sm text-gray-600">{item.audiovisual?.nombre || item.audiovisual?.descripcion || "Elemento"}</p>
+                          <button type="button" onClick={() => handleEliminarAudiovisual(Number(item.audiovisual?.id || item.elementoid))} className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600 p-0.5 rounded flex-shrink-0" title="Eliminar">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-gray-400 italic">No hay elementos audiovisuales asignados</p>
+                    )}
+                    <button type="button" onClick={handleAbrirAudiovisual} className="mt-2 flex items-center gap-1 text-xs text-[#1a3d2e] hover:text-[#1a3d2e]/70 border border-[#1a3d2e]/30 hover:border-[#1a3d2e]/60 rounded px-2 py-1 transition-colors">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                      Agregar
+                    </button>
+                  </div>
+                </div>
+                {/* Complementos */}
+                <div>
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-8 h-8 flex items-center justify-center text-[#1a3d2e]">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-7 h-7">
+                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </div>
+                    <h3 className="text-sm font-bold tracking-widest text-[#1a3d2e] uppercase">Complementos</h3>
+                  </div>
+                  <div className="pl-11 space-y-1">
+                    {complementoItems.length > 0 ? (
+                      complementoItems.map((item: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between gap-2 group">
+                          <p className="text-sm text-gray-600">{item.complemento?.nombre || "Elemento"}</p>
+                          <button type="button" onClick={() => handleEliminarComplemento(Number(item.complemento?.id || item.elementoid))} className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600 p-0.5 rounded flex-shrink-0" title="Eliminar">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-gray-400 italic">No hay complementos asignados</p>
+                    )}
+                    {(() => {
+                      const tieneAlimento = elementosPaquete.some((el: any) => normalizarSeccion(el.tipoelemento || el.tipo || "") === "alimentos")
+                      return tieneAlimento ? (
+                        <button type="button" onClick={handleAbrirComplemento} className="mt-2 flex items-center gap-1 text-xs text-[#1a3d2e] hover:text-[#1a3d2e]/70 border border-[#1a3d2e]/30 hover:border-[#1a3d2e]/60 rounded px-2 py-1 transition-colors">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                          Agregar
+                        </button>
+                      ) : (
+                        <p className="mt-2 text-xs text-gray-400 italic">Seleccione un alimento primero</p>
+                      )
+                    })()}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Modal Agregar Audiovisual */}
+      {showAudiovisualModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">Agregar Audiovisual</h2>
+              <button type="button" onClick={() => setShowAudiovisualModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {loadingAudiovisual ? (
+              <p className="text-sm text-gray-500 text-center py-4">Cargando...</p>
+            ) : (
+              <div className="space-y-3">
+                <Label>Elemento Audiovisual</Label>
+                <Select value={selectedAudiovisualId} onValueChange={setSelectedAudiovisualId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccione un elemento" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {audiovisualTabla.map((el: any) => (
+                      <SelectItem key={el.id} value={el.id.toString()}>
+                        {el.nombre || el.descripcion}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="flex justify-end gap-3 pt-2">
+              <Button type="button" variant="outline" onClick={() => setShowAudiovisualModal(false)}>Cancelar</Button>
+              <Button type="button" disabled={!selectedAudiovisualId || savingAudiovisual} onClick={handleAgregarAudiovisual} className="bg-[#1a3d2e] hover:bg-[#1a3d2e]/90 text-white">
+                {savingAudiovisual ? "Agregando..." : "Agregar"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Agregar Complemento */}
+      {showComplementoModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">Agregar Complemento</h2>
+              <button type="button" onClick={() => setShowComplementoModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {loadingComplemento ? (
+              <p className="text-sm text-gray-500 text-center py-4">Cargando...</p>
+            ) : (
+              <div className="space-y-3">
+                <Label>Complemento</Label>
+                <Select value={selectedComplementoId} onValueChange={setSelectedComplementoId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccione un complemento" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {complementoTabla.map((el: any) => (
+                      <SelectItem key={el.id} value={el.id.toString()}>
+                        {el.nombre}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="flex justify-end gap-3 pt-2">
+              <Button type="button" variant="outline" onClick={() => setShowComplementoModal(false)}>Cancelar</Button>
+              <Button type="button" disabled={!selectedComplementoId || savingComplemento} onClick={handleAgregarComplemento} className="bg-[#1a3d2e] hover:bg-[#1a3d2e]/90 text-white">
+                {savingComplemento ? "Agregando..." : "Agregar"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sección Presupuesto */}
+      {cotizacionId && presupuestoItems.length > 0 && (
+        <Card className="border border-gray-200 shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-gray-900 text-lg font-semibold flex items-center gap-2">
+              <DollarSign className="h-5 w-5 text-[#1a3d2e]" />
+              Presupuesto
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-[#1a3d2e] text-white">
+                    <th className="text-left px-3 py-3 font-medium w-10">#</th>
+                    <th className="text-left px-3 py-3 font-medium">Concepto</th>
+                    <th className="text-left px-3 py-3 font-medium w-28">Tipo</th>
+                    <th className="text-right px-3 py-3 font-medium w-28">Precio</th>
+                    <th className="text-right px-3 py-3 font-medium w-24">IVA</th>
+                    <th className="text-right px-3 py-3 font-medium w-24">Servicio</th>
+                    <th className="text-right px-3 py-3 font-medium w-28">Subtotal</th>
+                    <th className="text-center px-3 py-3 font-medium w-20">Cantidad</th>
+                    <th className="text-center px-3 py-3 font-medium w-16">Días</th>
+                    <th className="text-right px-3 py-3 font-medium w-32">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {presupuestoItems.map((item, index) => (
+                    <tr key={index} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                      <td className="px-3 py-3 text-gray-500">{index + 1}</td>
+                      <td className="px-3 py-3 text-gray-900 font-medium">{item.concepto}</td>
+                      <td className="px-3 py-3">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                          item.tipo === "Salón" ? "bg-blue-100 text-blue-700" :
+                          item.tipo === "Platillo" ? "bg-orange-100 text-orange-700" :
+                          item.tipo === "Audiovisual" ? "bg-purple-100 text-purple-700" :
+                          item.tipo === "Complemento" ? "bg-teal-100 text-teal-700" :
+                          "bg-gray-100 text-gray-700"
+                        }`}>
+                          {item.tipo}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-right text-gray-900">
+                        {item.precio > 0 ? `$${item.precio.toLocaleString("es-MX", { minimumFractionDigits: 2 })}` : "Por definir"}
+                      </td>
+                      <td className="px-3 py-3 text-right text-gray-500">
+                        {item.iva > 0 ? `$${item.iva.toLocaleString("es-MX", { minimumFractionDigits: 2 })}` : "-"}
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={item.servicio || ""}
+                          placeholder="-"
+                          onChange={(e) => {
+                            const val = e.target.value ? Number(e.target.value) : 0
+                            setPresupuestoItems(prev => prev.map((p, i) => i === index ? { ...p, servicio: val } : p))
+                          }}
+                          className="w-24 text-right border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[#1a3d2e] focus:border-[#1a3d2e]"
+                        />
+                      </td>
+                      <td className="px-3 py-3 text-right text-gray-900">
+                        {item.subtotal > 0 ? `$${item.subtotal.toLocaleString("es-MX", { minimumFractionDigits: 2 })}` : "Por definir"}
+                      </td>
+                      <td className="px-3 py-3 text-center text-gray-900">{item.cantidad || "-"}</td>
+                      <td className="px-3 py-3 text-center text-gray-900">{item.dias}</td>
+                      <td className="px-3 py-3 text-right text-gray-900 font-medium">
+                        {item.total > 0 ? `$${item.total.toLocaleString("es-MX", { minimumFractionDigits: 2 })}` : "Por definir"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-[#1a3d2e]/5 border-t-2 border-[#1a3d2e]/20">
+                    <td colSpan={9} className="px-3 py-3 text-right font-semibold text-gray-900">Total</td>
+                    <td className="px-3 py-3 text-right font-bold text-[#1a3d2e] text-base">
+                      {presupuestoItems.reduce((sum, i) => sum + i.total, 0) > 0
+                        ? `$${presupuestoItems.reduce((sum, i) => sum + i.total, 0).toLocaleString("es-MX", { minimumFractionDigits: 2 })}`
+                        : "Por definir"}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           </CardContent>
         </Card>
       )}
 
       {cotizacionId && (
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-3">
+          <Button
+            type="button"
+            onClick={handleGenerarPDF}
+            disabled={generatingPDF}
+            className="min-w-[160px] bg-[#8B0000] hover:bg-[#8B0000]/90 text-white"
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            {generatingPDF ? "Generando..." : "Generar PDF"}
+          </Button>
           <Button
             type="button"
             onClick={() => router.push(`/cotizaciones/resumen?id=${cotizacionId}`)}

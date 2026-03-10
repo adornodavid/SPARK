@@ -708,6 +708,7 @@ export async function obtenerPlatillosCotizacion(cotizacionid: number) {
         ...e,
         nombre: item.nombre || item.descripcion || item.name || "",
         documentopdf: item.documentopdf || null,
+        costo: item.costo ?? 0,
       }
     })
 
@@ -734,6 +735,167 @@ export async function buscarPlatillosItems() {
     return { success: true, data: data || [] }
   } catch (error) {
     console.error("Error en buscarPlatillosItems:", error)
+    return { success: false, error: "Error interno del servidor" }
+  }
+}
+
+// Función: obtenerFormatoCotizacion: obtiene el formato de cotización por hotelid
+export async function obtenerFormatoCotizacion(hotelid: number) {
+  try {
+    const { data, error } = await supabase
+      .from("formatocotizaciones")
+      .select("*")
+      .eq("hotelid", hotelid)
+      .single()
+
+    if (error) {
+      console.error("Error obteniendo formato cotización:", error)
+      return { success: false, error: error.message }
+    }
+
+    return { success: true, data }
+  } catch (error) {
+    console.error("Error en obtenerFormatoCotizacion:", error)
+    return { success: false, error: "Error interno del servidor" }
+  }
+}
+
+// Función: obtenerEmpresaPorCliente: busca en tabla empresas por contactoclienteid y devuelve el nombre
+export async function obtenerEmpresaPorCliente(clienteid: number) {
+  try {
+    const { data, error } = await supabase
+      .from("empresas")
+      .select("nombre")
+      .eq("contactoclienteid", clienteid)
+      .maybeSingle()
+
+    if (error) {
+      console.error("Error obteniendo empresa por cliente:", error)
+      return { success: false, error: error.message, nombre: "" }
+    }
+
+    return { success: true, error: "", nombre: data?.nombre || "" }
+  } catch (error) {
+    console.error("Error en obtenerEmpresaPorCliente:", error)
+    return { success: false, error: "Error interno del servidor", nombre: "" }
+  }
+}
+
+// Función: obtenerGrupoEmpresa: busca la empresa padre (grupo) a partir del id de la empresa
+// 1. Busca empresapadreid en empresas donde id = empresaId
+// 2. Con ese empresapadreid busca el nombre en empresas
+export async function obtenerGrupoEmpresa(clienteid: number) {
+  try {
+    // Primero obtener el id de la empresa del cliente
+    const { data: empresa, error: errorEmpresa } = await supabase
+      .from("empresas")
+      .select("id, empresapadreid")
+      .eq("contactoclienteid", clienteid)
+      .maybeSingle()
+
+    if (errorEmpresa || !empresa || !empresa.empresapadreid) {
+      return { success: false, error: errorEmpresa?.message || "Sin empresa padre", nombre: "" }
+    }
+
+    // Buscar el nombre de la empresa padre
+    const { data: empresaPadre, error: errorPadre } = await supabase
+      .from("empresas")
+      .select("nombre")
+      .eq("id", empresa.empresapadreid)
+      .maybeSingle()
+
+    if (errorPadre || !empresaPadre) {
+      return { success: false, error: errorPadre?.message || "Empresa padre no encontrada", nombre: "" }
+    }
+
+    return { success: true, error: "", nombre: empresaPadre.nombre || "" }
+  } catch (error) {
+    console.error("Error en obtenerGrupoEmpresa:", error)
+    return { success: false, error: "Error interno del servidor", nombre: "" }
+  }
+}
+
+// Función: obtenerAudiovisualPorHotel: obtiene equipos audiovisuales de un hotel con nombre, descripcion, costosiniva
+export async function obtenerAudiovisualPorHotel(hotelid: number) {
+  try {
+    const { data, error } = await supabase
+      .from("audiovisual")
+      .select("id, nombre, descripcion, costosiniva")
+      .eq("hotelid", hotelid)
+      .order("nombre", { ascending: true })
+
+    if (error) {
+      console.error("Error obteniendo audiovisual por hotel:", error)
+      return { success: false, error: error.message, data: [] }
+    }
+
+    return { success: true, error: "", data: data || [] }
+  } catch (error) {
+    console.error("Error en obtenerAudiovisualPorHotel:", error)
+    return { success: false, error: "Error interno del servidor", data: [] }
+  }
+}
+
+// Función: obtenerComplementosPorHotel: obtiene complementos de un hotel con nombre, descripcion, costo, cantidad y unidad
+export async function obtenerComplementosPorHotel(hotelid: number) {
+  try {
+    const { data, error } = await supabase
+      .from("complementos")
+      .select("id, nombre, descripcion, costo, cantidad, unidad")
+      .eq("hotelid", hotelid)
+      .eq("activo", true)
+      .order("nombre", { ascending: true })
+
+    if (error) {
+      console.error("Error obteniendo complementos por hotel:", error)
+      return { success: false, error: error.message, data: [] }
+    }
+
+    return { success: true, error: "", data: data || [] }
+  } catch (error) {
+    console.error("Error en obtenerComplementosPorHotel:", error)
+    return { success: false, error: "Error interno del servidor", data: [] }
+  }
+}
+
+// Función: obtenerPlatilloItemPorId: obtiene nombre, descripcion y costo de un platillositems por id
+export async function obtenerPlatilloItemPorId(id: number) {
+  try {
+    const { data, error } = await supabase
+      .from("platillositems")
+      .select("id, nombre, descripcion, costo, horas")
+      .eq("id", id)
+      .maybeSingle()
+
+    if (error) {
+      console.error("Error obteniendo platillo item:", error)
+      return { success: false, error: error.message, data: null }
+    }
+
+    return { success: true, error: "", data }
+  } catch (error) {
+    console.error("Error en obtenerPlatilloItemPorId:", error)
+    return { success: false, error: "Error interno del servidor", data: null }
+  }
+}
+
+// Función: obtenerUsuarioSesionActual: obtiene datos del usuario logueado para el PDF
+export async function obtenerUsuarioSesionActual() {
+  try {
+    const { obtenerSesion } = await import("@/app/actions/session")
+    const sesion = await obtenerSesion()
+    if (!sesion || !sesion.UsuarioId) return { success: false, error: "No hay sesión activa" }
+
+    const { data, error } = await supabase
+      .from("usuarios")
+      .select("nombrecompleto, email, telefono, puesto")
+      .eq("id", Number(sesion.UsuarioId))
+      .single()
+
+    if (error) return { success: false, error: error.message }
+    return { success: true, data }
+  } catch (error) {
+    console.error("Error en obtenerUsuarioSesionActual:", error)
     return { success: false, error: "Error interno del servidor" }
   }
 }
