@@ -2817,7 +2817,7 @@ export function QuotationForm() {
       {/* Modal Agregar Complemento */}
       {showComplementoModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-5">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 space-y-5 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900">Agregar Complemento</h2>
               <button type="button" onClick={() => setShowComplementoModal(false)} className="text-gray-400 hover:text-gray-600">
@@ -2854,8 +2854,8 @@ export function QuotationForm() {
                   </SelectContent>
                 </Select>
                 {compPdfUrl && (
-                  <div className="border border-gray-200 rounded-lg overflow-hidden mt-2">
-                    <img src={compPdfUrl} alt="Complemento" className="w-full h-auto object-contain max-h-[300px]" />
+                  <div className="border border-gray-200 rounded-lg overflow-hidden mt-2" style={{ height: "600px" }}>
+                    <iframe src={`${compPdfUrl}#navpanes=0`} className="w-full h-full" title="Vista previa PDF" />
                   </div>
                 )}
               </div>
