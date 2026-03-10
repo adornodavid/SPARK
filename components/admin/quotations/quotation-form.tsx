@@ -2831,10 +2831,12 @@ export function QuotationForm() {
                 <Label>Complemento</Label>
                 <Select value={selectedComplementoId} onValueChange={(val) => {
                   setSelectedComplementoId(val)
-                  // Cargar PDF del complemento seleccionado
+                  // Cargar imagen del complemento seleccionado (columna imgurl)
                   if (val) {
-                    obtenerDocumentoPDF(Number(val), "complementos").then(res => {
-                      setCompPdfUrl(res.success && res.pdf ? res.pdf : "")
+                    import("@/lib/supabase/client").then(async ({ createClient }) => {
+                      const supabase = createClient()
+                      const { data } = await supabase.from("complementos").select("imgurl").eq("id", Number(val)).maybeSingle()
+                      setCompPdfUrl(data?.imgurl || "")
                     })
                   } else {
                     setCompPdfUrl("")
@@ -2852,8 +2854,8 @@ export function QuotationForm() {
                   </SelectContent>
                 </Select>
                 {compPdfUrl && (
-                  <div className="border border-gray-200 rounded-lg overflow-hidden mt-2" style={{ height: "300px" }}>
-                    <iframe src={compPdfUrl} className="w-full h-full" title="PDF Complemento" />
+                  <div className="border border-gray-200 rounded-lg overflow-hidden mt-2">
+                    <img src={compPdfUrl} alt="Complemento" className="w-full h-auto object-contain max-h-[300px]" />
                   </div>
                 )}
               </div>
