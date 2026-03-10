@@ -168,6 +168,7 @@ export function QuotationForm() {
   const [loadingComplemento, setLoadingComplemento] = useState(false)
   const [selectedComplementoId, setSelectedComplementoId] = useState("")
   const [savingComplemento, setSavingComplemento] = useState(false)
+  const [compPdfUrl, setCompPdfUrl] = useState("")
   const [generatingPDF, setGeneratingPDF] = useState(false)
 
   const [formData, setFormData] = useState({
@@ -610,6 +611,7 @@ export function QuotationForm() {
   async function handleAbrirComplemento() {
     setShowComplementoModal(true)
     setSelectedComplementoId("")
+    setCompPdfUrl("")
     setLoadingComplemento(true)
     const supabase = (await import("@/lib/supabase/client")).createClient()
     // Obtener el ID del alimento seleccionado en la cotización
@@ -2827,7 +2829,17 @@ export function QuotationForm() {
             ) : (
               <div className="space-y-3">
                 <Label>Complemento</Label>
-                <Select value={selectedComplementoId} onValueChange={setSelectedComplementoId}>
+                <Select value={selectedComplementoId} onValueChange={(val) => {
+                  setSelectedComplementoId(val)
+                  // Cargar PDF del complemento seleccionado
+                  if (val) {
+                    obtenerDocumentoPDF(Number(val), "complementos").then(res => {
+                      setCompPdfUrl(res.success && res.pdf ? res.pdf : "")
+                    })
+                  } else {
+                    setCompPdfUrl("")
+                  }
+                }}>
                   <SelectTrigger>
                     <SelectValue placeholder="Seleccione un complemento" />
                   </SelectTrigger>
@@ -2839,6 +2851,11 @@ export function QuotationForm() {
                     ))}
                   </SelectContent>
                 </Select>
+                {compPdfUrl && (
+                  <div className="border border-gray-200 rounded-lg overflow-hidden mt-2" style={{ height: "300px" }}>
+                    <iframe src={compPdfUrl} className="w-full h-full" title="PDF Complemento" />
+                  </div>
+                )}
               </div>
             )}
             <div className="flex justify-end gap-3 pt-2">
