@@ -34,6 +34,7 @@ const TIPO_A_SECCION: Record<string, string> = {
   platillos: "platillos",
   bebida: "bebidas",
   cortesia: "cortesias",
+  cortesias: "cortesias",
   servicio: "servicio",
 }
 function normalizarSeccion(tipo: string): string {
@@ -2737,7 +2738,14 @@ export function QuotationForm() {
                     {complementoItems.length > 0 ? (
                       complementoItems.map((item: any, i: number) => (
                         <div key={i} className="flex items-center justify-between gap-2 group">
-                          <p className="text-sm text-gray-600">{item.complemento?.nombre || "Elemento"}</p>
+                          <button
+                            type="button"
+                            onClick={() => handleVerPDF(Number(item.complemento?.id || item.elementoid), "complementos")}
+                            className="text-sm text-left underline decoration-dotted cursor-pointer text-[#1a3d2e] hover:text-[#1a3d2e]/70"
+                            title="Ver documento PDF"
+                          >
+                            {item.complemento?.nombre || "Elemento"}
+                          </button>
                           <button type="button" onClick={() => handleEliminarComplemento(Number(item.complemento?.id || item.elementoid))} className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600 p-0.5 rounded flex-shrink-0" title="Eliminar">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
                           </button>

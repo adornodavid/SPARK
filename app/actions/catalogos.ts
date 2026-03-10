@@ -185,6 +185,8 @@ const TABLA_POR_TIPO: Record<string, string> = {
   "beneficios adicionales": "beneficiosadicionales",
   beneficiosadicionales: "beneficiosadicionales",
   audiovisual: "audiovisual",
+  complemento: "complementos",
+  complementos: "complementos",
 }
 
 function resolverTabla(tipo: string): string {
@@ -200,8 +202,8 @@ const TIPO_CANONICO: Record<string, string> = {
   platillos: "Platillo",
   bebidas: "Bebida",
   bebida: "Bebida",
-  cortesias: "Cortesia",
-  cortesia: "Cortesia",
+  cortesias: "Cortesias",
+  cortesia: "Cortesias",
   servicios: "Servicio",
   servicio: "Servicio",
   mobiliario: "Mobiliario",
