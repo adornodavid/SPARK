@@ -2742,7 +2742,16 @@ export function QuotationForm() {
                         <div key={i} className="flex items-center justify-between gap-2 group">
                           <button
                             type="button"
-                            onClick={() => handleVerPDF(Number(item.complemento?.id || item.elementoid), "complementos")}
+                            onClick={async () => {
+                              setShowPDFModal(true)
+                              setPdfModalUrl("")
+                              setLoadingPDF(true)
+                              const { createClient } = await import("@/lib/supabase/client")
+                              const supabase = createClient()
+                              const { data } = await supabase.from("complementos").select("imgurl").eq("id", Number(item.complemento?.id || item.elementoid)).maybeSingle()
+                              if (data?.imgurl) setPdfModalUrl(data.imgurl)
+                              setLoadingPDF(false)
+                            }}
                             className="text-sm text-left underline decoration-dotted cursor-pointer text-[#1a3d2e] hover:text-[#1a3d2e]/70"
                             title="Ver documento PDF"
                           >
