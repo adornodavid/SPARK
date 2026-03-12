@@ -78,13 +78,16 @@ export default function LoginPage() {
           <div className="w-full max-w-md">
             <div className="flex flex-col gap-8">
               {/* Header Section */}
-              <div className="flex flex-col gap-3">
-                <h1 className="text-balance text-5xl font-bold leading-tight tracking-tight">
-                  Portal Banquetes y Comercial
-                  <br />
-                  <span className="text-primary"></span>
-                </h1>
-                <p className="text-lg text-muted-foreground">El sistema para los que hacen eventos memorables</p>
+              <div className="flex flex-col items-center gap-4 text-center">
+                <img src="/spark-black.svg" alt="SPARK" className="h-16 w-auto" />
+                <div className="flex flex-col gap-2">
+                  <h1 className="whitespace-nowrap text-5xl font-bold leading-tight tracking-tight">Bienvenido a SPARK</h1>
+                  <p className="text-lg text-muted-foreground">
+                    Portal Banquetes y Comercial
+                    <br />
+                    El sistema para los que hacen eventos memorables
+                  </p>
+                </div>
               </div>
 
               {/* Login Form Card */}

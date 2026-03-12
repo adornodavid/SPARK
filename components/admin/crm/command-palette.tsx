@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import {
   Dialog,
   DialogContent,
+  DialogTitle,
 } from "@/components/ui/dialog"
 import {
   Search,
@@ -14,9 +15,38 @@ import {
   ArrowRight,
   Clock,
   Command,
+  Home,
+  Building2,
+  BedDouble,
+  Package,
+  Utensils,
+  Handshake,
+  BarChart3,
+  Settings,
+  Target,
+  Kanban,
+  ClipboardList,
 } from "lucide-react"
 import { busquedaGlobal } from "@/app/actions/crm"
 import type { oCommandResult } from "@/types/crm"
+
+const navModules = [
+  { title: "Inicio", href: "/dashboard", icon: Home },
+  { title: "Hoteles", href: "/hoteles", icon: Building2 },
+  { title: "Habitaciones", href: "/habitaciones", icon: BedDouble },
+  { title: "Salones", href: "/salones", icon: Building2 },
+  { title: "Paquetes", href: "/packages", icon: Package },
+  { title: "Menus", href: "/menus", icon: Utensils },
+  { title: "Clientes", href: "/clientes", icon: Users },
+  { title: "Cotizaciones", href: "/cotizaciones", icon: FileText },
+  { title: "Reservaciones", href: "/reservaciones", icon: Calendar },
+  { title: "Convenios", href: "/agreements", icon: Handshake },
+  { title: "Reportes", href: "/reportes", icon: BarChart3 },
+  { title: "Configuracion", href: "/configuraciones", icon: Settings },
+  { title: "Dashboard CRM", href: "/crm", icon: Target },
+  { title: "Pipeline", href: "/crm/pipeline", icon: Kanban },
+  { title: "Actividades", href: "/crm/actividades", icon: ClipboardList },
+]
 
 const resultIcons: Record<string, any> = {
   Users,
@@ -94,8 +124,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   // Keyboard navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const currentFilteredModules = query.length >= 1
+      ? navModules.filter(m => m.title.toLowerCase().includes(query.toLowerCase()))
+      : navModules
     const displayResults = query.length >= 2 ? results : recentSearches
-    const maxIndex = displayResults.length - 1
+    const totalItems = currentFilteredModules.length + displayResults.length
+    const maxIndex = totalItems - 1
 
     if (e.key === "ArrowDown") {
       e.preventDefault()
@@ -105,13 +139,20 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       setSelectedIndex(prev => Math.max(prev - 1, 0))
     } else if (e.key === "Enter") {
       e.preventDefault()
-      if (displayResults[selectedIndex]) {
-        navigateToResult(displayResults[selectedIndex])
+      const idx = selectedIndex
+      if (idx < currentFilteredModules.length) {
+        router.push(currentFilteredModules[idx].href)
+        onOpenChange(false)
+      } else {
+        const resultIdx = idx - currentFilteredModules.length
+        if (displayResults[resultIdx]) {
+          navigateToResult(displayResults[resultIdx])
+        }
       }
     } else if (e.key === "Escape") {
       onOpenChange(false)
     }
-  }, [results, recentSearches, selectedIndex, query])
+  }, [results, recentSearches, selectedIndex, query, router, onOpenChange])
 
   function navigateToResult(result: oCommandResult) {
     // Save to recent searches
@@ -126,6 +167,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     router.push(result.url)
     onOpenChange(false)
   }
+
+  // Filter nav modules by query
+  const filteredModules = query.length >= 1
+    ? navModules.filter(m => m.title.toLowerCase().includes(query.toLowerCase()))
+    : navModules
 
   const displayResults = query.length >= 2 ? results : recentSearches
   const showRecent = query.length < 2 && recentSearches.length > 0
@@ -142,6 +188,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px] p-0 gap-0 overflow-hidden">
+        <DialogTitle className="sr-only">Buscar</DialogTitle>
         {/* Search Input */}
         <div className="flex items-center gap-3 px-4 border-b border-border/50">
           <Search className="h-5 w-5 text-muted-foreground flex-shrink-0" />
@@ -164,6 +211,43 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
         {/* Results */}
         <div className="max-h-[400px] overflow-y-auto">
+          {/* Navigation modules */}
+          {filteredModules.length > 0 && (
+            <>
+              <div className="px-3 pt-3 pb-1">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide px-2">
+                  Modulos
+                </p>
+              </div>
+              {filteredModules.map((mod) => {
+                const currentIndex = globalIndex++
+                const isSelected = currentIndex === selectedIndex
+                const ModIcon = mod.icon
+                return (
+                  <button
+                    key={mod.href}
+                    onClick={() => { router.push(mod.href); onOpenChange(false) }}
+                    onMouseEnter={() => setSelectedIndex(currentIndex)}
+                    className={`w-full flex items-center gap-3 px-5 py-3 text-left transition-colors ${
+                      isSelected ? "bg-muted" : "hover:bg-muted/50"
+                    }`}
+                  >
+                    <div className="flex-shrink-0 h-9 w-9 rounded-lg bg-card border border-border/50 flex items-center justify-center">
+                      <ModIcon className="h-4 w-4 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{mod.title}</p>
+                      <p className="text-xs text-muted-foreground truncate">{mod.href}</p>
+                    </div>
+                    {isSelected && (
+                      <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    )}
+                  </button>
+                )
+              })}
+            </>
+          )}
+
           {showRecent && (
             <div className="px-3 pt-3 pb-1">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide px-2">
@@ -172,7 +256,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             </div>
           )}
 
-          {query.length >= 2 && results.length === 0 && !loading && (
+          {query.length >= 2 && results.length === 0 && filteredModules.length === 0 && !loading && (
             <div className="px-4 py-8 text-center text-muted-foreground">
               <Search className="h-8 w-8 mx-auto mb-2 opacity-20" />
               <p className="text-sm">Sin resultados para "{query}"</p>

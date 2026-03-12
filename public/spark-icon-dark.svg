@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 112.78 112.77">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: #e6ff00;
+      }
+      .cls-2 {
+        fill: none;
+        stroke: #e6ff00;
+        stroke-miterlimit: 10;
+        stroke-width: 6px;
+      }
+    </style>
+  </defs>
+  <g>
+    <path class="cls-2" d="M46.32,46.32l7.19-19.43c.99-2.67,4.77-2.67,5.75,0l7.19,19.43,19.43,7.19c2.67.99,2.67,4.77,0,5.75l-19.43,7.19-7.19,19.43c-.99,2.67-4.77,2.67-5.75,0l-7.19-19.43-19.43-7.19c-2.67-.99-2.67-4.77,0-5.75l19.43-7.19Z"/>
+    <circle class="cls-1" cx="56.39" cy="3.59" r="3.59"/>
+    <circle class="cls-1" cx="30.18" cy="28.61" r="3.59"/>
+    <circle class="cls-1" cx="28.61" cy="82.6" r="3.59"/>
+    <circle class="cls-1" cx="82.6" cy="84.16" r="3.59"/>
+    <circle class="cls-1" cx="84.16" cy="30.18" r="3.59"/>
+    <circle class="cls-1" cx="3.59" cy="56.39" r="3.59"/>
+    <circle class="cls-1" cx="56.39" cy="109.19" r="3.59"/>
+    <circle class="cls-1" cx="109.19" cy="56.39" r="3.59"/>
+  </g>
+</svg>

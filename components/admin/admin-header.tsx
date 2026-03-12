@@ -65,7 +65,13 @@ export function AdminHeader({ user }: AdminHeaderProps) {
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-border/50 backdrop-blur-md bg-background/80 px-6">
       <div className="flex-1 flex items-center gap-4">
-        <img src="/logo-milenium.png" alt="Milenium" className="h-7 w-auto hover:scale-105 transition-transform duration-200" />
+        <img
+          src={theme === "dark" ? "/spark-green.svg" : "/spark-black.svg"}
+          alt="SPARK"
+          className="h-7 w-auto hover:scale-105 transition-transform duration-200 cursor-pointer"
+          onClick={() => router.push("/dashboard")}
+          suppressHydrationWarning
+        />
 
         {/* Global Search / Command Palette trigger */}
         <button

@@ -71,6 +71,7 @@ export async function listaDesplegableTipoEvento(categoriaevento = "") {
 }
 
 // Función: listaDesplegablePaquetes: obtiene paquetes de vw_paquetes filtrado por tipoeventoid
+// Enriquece con tipopaquete de la tabla paquetes
 export async function listaDesplegablePaquetes(tipoeventoid: number) {
   try {
     const { data: resultados, error } = await supabase
@@ -82,6 +83,18 @@ export async function listaDesplegablePaquetes(tipoeventoid: number) {
     if (error) {
       console.error("Error obteniendo paquetes: ", error)
       return { success: false, error: error.message }
+    }
+
+    // Enriquecer con tipopaquete de tabla paquetes
+    if (resultados && resultados.length > 0) {
+      const ids = resultados.map((r: any) => r.id)
+      const { data: paqData } = await supabase.from("paquetes").select("id, tipopaquete").in("id", ids)
+      if (paqData) {
+        const tipMap = new Map(paqData.map((p: any) => [p.id, p.tipopaquete]))
+        for (const r of resultados) {
+          (r as any).tipopaquete = tipMap.get(r.id) || "Simple"
+        }
+      }
     }
 
     return { success: true, data: resultados || [] }
@@ -717,6 +730,7 @@ export async function obtenerPlatillosCotizacion(cotizacionid: number) {
         nombre: item.nombre || item.descripcion || item.name || "",
         documentopdf: item.documentopdf || null,
         costo: item.costo ?? 0,
+        tipo: item.tipo || null,
       }
     })
 
@@ -728,7 +742,7 @@ export async function obtenerPlatillosCotizacion(cotizacionid: number) {
 }
 
 // Función: buscarPlatillosItems: obtiene todos los registros de platillositems para el dropdown de Agregar
-export async function buscarPlatillosItems(platilloid = -1, hotelid = -1) {
+export async function buscarPlatillosItems(platilloid = -1, hotelid = -1, tipo: string | null = null) {
   try {
     let query = supabase
       .from("platillositems")
@@ -739,6 +753,9 @@ export async function buscarPlatillosItems(platilloid = -1, hotelid = -1) {
     }
     if (hotelid !== -1) {
       query = query.eq("hotelid", hotelid)
+    }
+    if (tipo) {
+      query = query.eq("tipo", tipo)
     }
 
     const { data, error } = await query.order("nombre", { ascending: true })

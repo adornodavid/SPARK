@@ -17,6 +17,7 @@ export default function QuotationsPage() {
   const [filters, setFilters] = useState({
     status: "",
     hotel_id: "",
+    salon_id: "",
     search: "",
   })
   const supabase = createBrowserClient()
@@ -56,11 +57,14 @@ export default function QuotationsPage() {
       .select("*")
       .order("id", { ascending: false })
 
-    if (filters.status) {
+    if (filters.status && filters.status !== "all") {
       query = query.eq("estatus", filters.status)
     }
-    if (filters.hotel_id) {
+    if (filters.hotel_id && filters.hotel_id !== "all") {
       query = query.eq("hotelid", filters.hotel_id)
+    }
+    if (filters.salon_id && filters.salon_id !== "all") {
+      query = query.eq("salonid", filters.salon_id)
     }
     if (filters.search) {
       query = query.ilike("folio", `%${filters.search}%`)

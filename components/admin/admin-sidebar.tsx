@@ -4,6 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
 import {
   Building2,
@@ -137,6 +138,7 @@ const quickAccessItems = [
 export function AdminSidebar() {
   const pathname = usePathname()
   const router = useRouter()
+  const { theme } = useTheme()
   const [isOffcanvasOpen, setIsOffcanvasOpen] = useState(false)
   const [isCRMExpanded, setIsCRMExpanded] = useState(pathname?.startsWith("/crm") || false)
 
@@ -151,7 +153,7 @@ export function AdminSidebar() {
       <aside className="fixed left-0 top-0 w-[100px] h-screen border-r border-sidebar-border bg-sidebar flex flex-col z-40">
         {/* Logo section */}
         <div className="flex h-16 items-center justify-center border-b border-sidebar-border flex-shrink-0">
-          <img src="/spark-icon.svg" alt="SPARK" className="h-10 w-10 invert brightness-200" />
+          <img src={theme === "dark" ? "/spark-icon-dark.svg" : "/spark-icon.svg"} alt="SPARK" className="h-10 w-10" suppressHydrationWarning />
         </div>
 
         {/* Quick access icons */}
@@ -210,7 +212,7 @@ export function AdminSidebar() {
       >
         {/* Header with SPARK logo and close button */}
         <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-5 flex-shrink-0">
-          <img src="/spark-icon.svg" alt="SPARK" className="h-8 w-8 invert brightness-200" />
+          <img src={theme === "dark" ? "/spark-icon-dark.svg" : "/spark-icon.svg"} alt="SPARK" className="h-8 w-8" suppressHydrationWarning />
           <Button variant="ghost" size="icon" className="text-sidebar-foreground hover:bg-sidebar-accent" onClick={() => setIsOffcanvasOpen(false)}>
             <X className="h-5 w-5" />
           </Button>

@@ -123,6 +123,8 @@ export function QuotationForm() {
   const [limpiarLoading, setLimpiarLoading] = useState(false)
   const [elementosPreviewPaquete, setElementosPreviewPaquete] = useState<any[]>([])
   const [loadingPreviewPaquete, setLoadingPreviewPaquete] = useState(false)
+  const [previewPaqueteId, setPreviewPaqueteId] = useState<string>("")
+  const [previewPaqueteInfo, setPreviewPaqueteInfo] = useState<any>(null)
   const [requerirHabitaciones, setRequerirHabitaciones] = useState(false)
   const [showConfirmReemplazarModal, setShowConfirmReemplazarModal] = useState(false)
   const [showConfirmEliminarModal, setShowConfirmEliminarModal] = useState(false)
@@ -170,6 +172,10 @@ export function QuotationForm() {
   const [savingComplemento, setSavingComplemento] = useState(false)
   const [compPdfUrl, setCompPdfUrl] = useState("")
   const [generatingPDF, setGeneratingPDF] = useState(false)
+  const [pdfGenerated, setPdfGenerated] = useState(false)
+  const [requiereAutorizacion, setRequiereAutorizacion] = useState<"si" | "no" | null>(null)
+  const [loadingEdit, setLoadingEdit] = useState(false)
+  const [loadingEditStep, setLoadingEditStep] = useState("")
 
   const [formData, setFormData] = useState({
     // Venue Selection
@@ -229,8 +235,10 @@ export function QuotationForm() {
     if (!editId) return
 
     async function cargarCotizacion() {
+      setLoadingEdit(true)
+      setLoadingEditStep("Cargando cotizacion...")
       const result = await objetoCotizacion(Number(editId))
-      if (!result.success || !result.data) return
+      if (!result.success || !result.data) { setLoadingEdit(false); return }
       const c = result.data
 
       const fi   = c.fechainicio?.slice(0, 10) ?? ""
@@ -285,9 +293,11 @@ export function QuotationForm() {
         })
       }
 
-      // Cargar tipos de evento por categoría
+      // Cargar tipos de evento por categoría y re-setear tipoEvento después de que cargue la lista
       if (c.categoriaevento) {
-        loadTiposEvento(c.categoriaevento)
+        loadTiposEvento(c.categoriaevento).then(() => {
+          if (tid) setFormData(prev => ({ ...prev, tipoEvento: tid }))
+        })
       }
 
       // Cargar salones → setear salon → luego montajes
@@ -303,6 +313,7 @@ export function QuotationForm() {
       }
 
       // En modo edición: mostrar sección de paquete y cargar datos existentes
+      setLoadingEditStep("Cargando sede y salon...")
       setCotizacionId(Number(editId))
       setShowPackageSection(true)
       cargarAudiovisualItems(Number(editId))
@@ -317,6 +328,7 @@ export function QuotationForm() {
           setLoadingPaquetes(false)
 
           // Cargar elementos ya asignados a esta cotización
+          setLoadingEditStep("Cargando elementos del paquete...")
           setLoadingElementos(true)
           obtenerPlatillosCotizacion(Number(editId)).then((platRes) => {
             if (platRes.success && platRes.data) setPlatillosItems(platRes.data)
@@ -341,6 +353,7 @@ export function QuotationForm() {
               }
             }
             // Construir presupuesto con elementos existentes
+            setLoadingEditStep("Calculando presupuesto...")
             if (elemRes.success && elemRes.data) {
               const dias = calcularDiasEvento(fi, ff)
               const numInvitados = Number(c.numeroinvitados) || 0
@@ -386,15 +399,22 @@ export function QuotationForm() {
                       presItems.unshift(crearPresupuestoItem(salonRes.data.nombre || "Salón", "Salón", precioSalon, dias, 0, 1))
                     }
                     setPresupuestoItems(presItems)
+                    setLoadingEdit(false)
                   })
                 } else {
                   setPresupuestoItems(presItems)
+                  setLoadingEdit(false)
                 }
               })
             }
             setLoadingElementos(false)
+            if (!(elemRes.success && elemRes.data && elemRes.data.length > 0)) {
+              setLoadingEdit(false)
+            }
           })
         })
+      } else {
+        setLoadingEdit(false)
       }
 
       if (c.clienteid) {
@@ -501,12 +521,12 @@ export function QuotationForm() {
   }
 
   async function handlePaqueteChange(paqueteid: string) {
-    setSelectedPaqueteId(paqueteid)
-    setSelectedPaqueteInfo(null)
+    setPreviewPaqueteId(paqueteid)
+    setPreviewPaqueteInfo(null)
     setElementosPreviewPaquete([])
     if (paqueteid) {
       const paquete = paquetes.find((p) => p.paqueteid?.toString() === paqueteid || p.id?.toString() === paqueteid)
-      setSelectedPaqueteInfo(paquete || null)
+      setPreviewPaqueteInfo(paquete || null)
       setLoadingPreviewPaquete(true)
       const res = await obtenerElementosPaquete(Number(paqueteid))
       if (res.success && res.data) setElementosPreviewPaquete(res.data)
@@ -520,6 +540,7 @@ export function QuotationForm() {
     const result = await limpiarElementosCotizacion(cotizacionId)
     if (result.success) {
       setElementosPaquete([])
+      setPlatillosItems([])
       setSelectedPaqueteId("")
       setSelectedPaqueteInfo(null)
       setShowLimpiarModal(false)
@@ -1427,6 +1448,7 @@ export function QuotationForm() {
       const pdfBlob = doc.output("blob")
       const pdfUrl = URL.createObjectURL(pdfBlob)
       window.open(pdfUrl, "_blank")
+      setPdfGenerated(true)
     } catch (error) {
       console.error("Error generando PDF:", error)
       alert("Error al generar el PDF de cotización.")
@@ -1434,7 +1456,7 @@ export function QuotationForm() {
     setGeneratingPDF(false)
   }
 
-  async function handleAbrirAgregar(tipo: string) {
+  async function handleAbrirAgregar(tipo: string, tipoPlatillo: string | null = null) {
     setAgregarTipo(tipo)
     setSelectedElementoId("")
     setElementosTabla([])
@@ -1445,7 +1467,7 @@ export function QuotationForm() {
       const alimentoEl = elementosPaquete.find((el: any) => normalizarSeccion(el.tipoelemento || el.tipo || "") === "alimentos")
       const platilloId = alimentoEl ? Number(alimentoEl.elementoid ?? alimentoEl.id) : -1
       const hotelId = formData.hotel ? Number(formData.hotel) : -1
-      const result = await buscarPlatillosItems(platilloId, hotelId)
+      const result = await buscarPlatillosItems(platilloId, hotelId, tipoPlatillo)
       if (result.success && result.data) {
         const yaAsignados = new Set(platillosItems.map(el => Number(el.elementoid)))
         setElementosTabla(result.data.filter((el: any) => !yaAsignados.has(Number(el.id))))
@@ -1499,7 +1521,7 @@ export function QuotationForm() {
   }
 
   async function handleConfirmPaquete() {
-    if (!selectedPaqueteId || !cotizacionId) return
+    if (!previewPaqueteId || !cotizacionId) return
     if (elementosPaquete.length > 0) {
       setShowConfirmReemplazarModal(true)
       return
@@ -1508,19 +1530,22 @@ export function QuotationForm() {
   }
 
   async function ejecutarAsignarPaquete() {
-    if (!selectedPaqueteId || !cotizacionId) return
+    if (!previewPaqueteId || !cotizacionId) return
     setShowConfirmReemplazarModal(false)
     setAssigningPaquete(true)
     try {
       await limpiarElementosCotizacion(cotizacionId)
-      const result = await asignarPaqueteACotizacion(cotizacionId, Number(selectedPaqueteId), Number(formData.hotel))
+      const result = await asignarPaqueteACotizacion(cotizacionId, Number(previewPaqueteId), Number(formData.hotel))
       if (result.success) {
+        setSelectedPaqueteId(previewPaqueteId)
+        setSelectedPaqueteInfo(previewPaqueteInfo)
         const elementosResult = await obtenerElementosCotizacion(cotizacionId)
         if (elementosResult.success && elementosResult.data) {
           setElementosPaquete(elementosResult.data)
         }
         setShowPaqueteModal(false)
-        setSelectedPaqueteId("")
+        setPreviewPaqueteId("")
+        setPreviewPaqueteInfo(null)
         setElementosPreviewPaquete([])
       } else {
         alert(`Error al asignar paquete: ${result.error}`)
@@ -1780,6 +1805,36 @@ export function QuotationForm() {
   const horaInicioIdx = HORARIOS_EVENTO.findIndex((h) => h.value === formData.horaInicio)
 
   return (
+    <>
+    {/* Pantalla de carga al editar cotización */}
+    {loadingEdit && (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+        <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-sm flex flex-col items-center gap-5 animate-in fade-in zoom-in-95 duration-300">
+          {/* Animated SPARK logo */}
+          <div className="relative">
+            <div className="absolute inset-0 rounded-full bg-[#1a3d2e]/10 animate-ping" />
+            <div className="relative h-16 w-16 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center shadow-lg">
+              <img src="/spark-icon.svg" alt="SPARK" className="h-9 w-9" />
+            </div>
+          </div>
+
+          {/* Spinner */}
+          <div className="flex items-center gap-3">
+            <div className="h-5 w-5 border-[3px] border-[#1a3d2e]/20 border-t-[#1a3d2e] rounded-full animate-spin" />
+            <span className="text-sm font-medium text-gray-700">Cargando cotizacion</span>
+          </div>
+
+          {/* Step indicator */}
+          <p className="text-xs text-gray-400 animate-pulse">{loadingEditStep}</p>
+
+          {/* Progress bar */}
+          <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-[#1a3d2e] to-[#4ade80] rounded-full animate-[loading-bar_2s_ease-in-out_infinite]" />
+          </div>
+        </div>
+      </div>
+    )}
+
     <form onSubmit={handleSubmit} className="space-y-8">
       <Card className="border-l-4 border-l-blue-500 shadow-lg">
         <CardHeader className="bg-gradient-to-r from-blue-50 to-transparent">
@@ -2650,7 +2705,70 @@ export function QuotationForm() {
                         </div>
 
                         {/* Subsección Platillos dentro de Alimentos */}
-                        {tipo === "alimentos" && (
+                        {tipo === "alimentos" && selectedPaqueteInfo?.tipopaquete === "Completo" && (
+                          <>
+                            {([
+                              { label: "Entradas", tipoFiltro: "ENTRADAS" },
+                              { label: "Plato Fuerte", tipoFiltro: "PLATO FUERTE" },
+                              { label: "Postres", tipoFiltro: "POSTRES" },
+                            ] as const).map(({ label, tipoFiltro }) => {
+                              const itemsFiltrados = platillosItems.filter((item: any) => item.tipo === tipoFiltro)
+                              return (
+                                <div key={tipoFiltro} className="mt-4 ml-11 border-l-2 border-[#1a3d2e]/20 pl-4">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <div className="w-6 h-6 flex items-center justify-center text-[#1a3d2e]">
+                                      {tipoIconMap["platillos"]}
+                                    </div>
+                                    <h4 className="text-xs font-bold tracking-widest text-[#1a3d2e] uppercase">{label}</h4>
+                                  </div>
+                                  <div className="space-y-1">
+                                    {itemsFiltrados.map((item: any, i: number) => (
+                                      <div key={i} className="flex items-center justify-between gap-2 group">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleVerPDF(Number(item.elementoid ?? item.id), "platillos")}
+                                          className={`text-sm text-left underline decoration-dotted cursor-pointer ${item.destacado ? "text-[#b87333] hover:text-[#b87333]/70" : "text-[#1a3d2e] hover:text-[#1a3d2e]/70"}`}
+                                          title="Ver documento PDF"
+                                        >
+                                          {item.descripcion || item.nombre || item.elemento || ""}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const nombre = item.descripcion || item.nombre || item.elemento || ""
+                                            setEliminarPendiente({ tipoelemento: item.tipoelemento, id: item.elementoid ?? item.id, nombre })
+                                            setShowConfirmEliminarModal(true)
+                                          }}
+                                          className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600 p-0.5 rounded flex-shrink-0"
+                                          title="Eliminar elemento"
+                                        >
+                                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
+                                            <polyline points="3 6 5 6 21 6"/>
+                                            <path d="M19 6l-1 14H6L5 6"/>
+                                            <path d="M10 11v6M14 11v6"/>
+                                            <path d="M9 6V4h6v2"/>
+                                          </svg>
+                                        </button>
+                                      </div>
+                                    ))}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleAbrirAgregar("platillos", tipoFiltro)}
+                                      className="mt-2 flex items-center gap-1 text-xs text-[#1a3d2e] hover:text-[#1a3d2e]/70 border border-[#1a3d2e]/30 hover:border-[#1a3d2e]/60 rounded px-2 py-1 transition-colors"
+                                    >
+                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
+                                        <line x1="12" y1="5" x2="12" y2="19"/>
+                                        <line x1="5" y1="12" x2="19" y2="12"/>
+                                      </svg>
+                                      Agregar
+                                    </button>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </>
+                        )}
+                        {tipo === "alimentos" && selectedPaqueteInfo?.tipopaquete !== "Completo" && (
                           <div className="mt-4 ml-11 border-l-2 border-[#1a3d2e]/20 pl-4">
                             <div className="flex items-center gap-2 mb-2">
                               <div className="w-6 h-6 flex items-center justify-center text-[#1a3d2e]">
@@ -3029,23 +3147,62 @@ export function QuotationForm() {
       )}
 
       {cotizacionId && (
-        <div className="flex justify-end gap-3">
-          <Button
-            type="button"
-            onClick={handleGenerarPDF}
-            disabled={generatingPDF || !formData.salon || !elementosPaquete.some((el: any) => normalizarSeccion(el.tipoelemento || el.tipo || "") === "alimentos") || platillosItems.length === 0}
-            className="min-w-[160px] bg-[#8B0000] hover:bg-[#8B0000]/90 text-white"
-          >
-            <FileText className="h-4 w-4 mr-2" />
-            {generatingPDF ? "Generando..." : "Generar Cotización"}
-          </Button>
-          <Button
-            type="button"
-            onClick={() => router.push(`/cotizaciones/resumen?id=${cotizacionId}`)}
-            className="min-w-[140px] bg-[#1a3d2e] hover:bg-[#1a3d2e]/90 text-white"
-          >
-            Ver Resumen
-          </Button>
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              onClick={handleGenerarPDF}
+              disabled={generatingPDF || !formData.salon || !elementosPaquete.some((el: any) => normalizarSeccion(el.tipoelemento || el.tipo || "") === "alimentos") || platillosItems.length === 0}
+              className="min-w-[160px] bg-[#8B0000] hover:bg-[#8B0000]/90 text-white"
+            >
+              <FileText className="h-4 w-4 mr-2" />
+              {generatingPDF ? "Generando..." : "Generar Cotización"}
+            </Button>
+          </div>
+
+          {pdfGenerated && (
+            <div className="flex justify-end">
+              <div className="flex items-center gap-4 border border-gray-200 rounded-lg px-4 py-3 bg-white shadow-sm">
+                <span className="text-sm font-medium text-gray-700">Se requiere Autorizacion?</span>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={requiereAutorizacion === "si"}
+                    onChange={() => setRequiereAutorizacion(requiereAutorizacion === "si" ? null : "si")}
+                    className="h-4 w-4 rounded border-gray-300 text-[#1a3d2e] focus:ring-[#1a3d2e] cursor-pointer accent-[#1a3d2e]"
+                  />
+                  <span className="text-sm text-gray-600">Si</span>
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={requiereAutorizacion === "no"}
+                    onChange={() => setRequiereAutorizacion(requiereAutorizacion === "no" ? null : "no")}
+                    className="h-4 w-4 rounded border-gray-300 text-[#1a3d2e] focus:ring-[#1a3d2e] cursor-pointer accent-[#1a3d2e]"
+                  />
+                  <span className="text-sm text-gray-600">No</span>
+                </label>
+                {requiereAutorizacion === "si" && (
+                  <Button
+                    type="button"
+                    className="ml-2 bg-amber-600 hover:bg-amber-700 text-white text-sm"
+                    onClick={() => alert("Enviar Autorizacion - funcionalidad pendiente")}
+                  >
+                    Enviar Autorizacion
+                  </Button>
+                )}
+                {requiereAutorizacion === "no" && (
+                  <Button
+                    type="button"
+                    className="ml-2 bg-[#1a3d2e] hover:bg-[#1a3d2e]/90 text-white text-sm"
+                    onClick={() => alert("Enviar por correo - funcionalidad pendiente")}
+                  >
+                    Enviar por correo
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -3091,7 +3248,7 @@ export function QuotationForm() {
               <h2 className="text-lg font-semibold text-gray-900">Seleccionar Paquete</h2>
               <button
                 type="button"
-                onClick={() => { setShowPaqueteModal(false); setElementosPreviewPaquete([]) }}
+                onClick={() => { setShowPaqueteModal(false); setPreviewPaqueteId(""); setPreviewPaqueteInfo(null); setElementosPreviewPaquete([]) }}
                 className="text-gray-400 hover:text-gray-600"
               >
                 <X className="w-5 h-5" />
@@ -3105,7 +3262,7 @@ export function QuotationForm() {
               ) : paquetes.length === 0 ? (
                 <p className="text-sm text-gray-400">No hay paquetes disponibles para el tipo de evento seleccionado.</p>
               ) : (
-                <Select value={selectedPaqueteId} onValueChange={handlePaqueteChange}>
+                <Select value={previewPaqueteId} onValueChange={handlePaqueteChange}>
                   <SelectTrigger>
                     <SelectValue placeholder="Selecciona un paquete" />
                   </SelectTrigger>
@@ -3121,21 +3278,21 @@ export function QuotationForm() {
             </div>
 
             {/* Preview de elementos del paquete */}
-            {selectedPaqueteId && (
+            {previewPaqueteId && (
               <div className="border rounded-lg bg-[#f7f5f0] overflow-hidden">
                 {/* Header con nombre y precio */}
-                {selectedPaqueteInfo && (
+                {previewPaqueteInfo && (
                   <div className="px-4 py-3 border-b border-[#1a3d2e]/10 bg-[#1a3d2e]/5">
                     <p className="text-sm font-bold text-[#1a3d2e] uppercase tracking-wide">
-                      {selectedPaqueteInfo.nombre || selectedPaqueteInfo.name}
+                      {previewPaqueteInfo.nombre || previewPaqueteInfo.name}
                     </p>
-                    {(selectedPaqueteInfo.precio2025 || selectedPaqueteInfo.precio2026 || selectedPaqueteInfo.precio) && (
+                    {(previewPaqueteInfo.precio2025 || previewPaqueteInfo.precio2026 || previewPaqueteInfo.precio) && (
                       <p className="text-xs text-[#1a3d2e]/70 mt-0.5">
-                        {selectedPaqueteInfo.precio2025
-                          ? `$${selectedPaqueteInfo.precio2025} (2025)`
-                          : selectedPaqueteInfo.precio2026
-                          ? `$${selectedPaqueteInfo.precio2026} (2026)`
-                          : `$${selectedPaqueteInfo.precio}`}
+                        {previewPaqueteInfo.precio2025
+                          ? `$${previewPaqueteInfo.precio2025} (2025)`
+                          : previewPaqueteInfo.precio2026
+                          ? `$${previewPaqueteInfo.precio2026} (2026)`
+                          : `$${previewPaqueteInfo.precio}`}
                       </p>
                     )}
                   </div>
@@ -3176,12 +3333,12 @@ export function QuotationForm() {
             )}
 
             <div className="flex justify-end gap-3 pt-2">
-              <Button type="button" variant="outline" onClick={() => { setShowPaqueteModal(false); setElementosPreviewPaquete([]) }}>
+              <Button type="button" variant="outline" onClick={() => { setShowPaqueteModal(false); setPreviewPaqueteId(""); setPreviewPaqueteInfo(null); setElementosPreviewPaquete([]) }}>
                 Cancelar
               </Button>
               <Button
                 type="button"
-                disabled={!selectedPaqueteId || assigningPaquete || loadingPreviewPaquete}
+                disabled={!previewPaqueteId || assigningPaquete || loadingPreviewPaquete}
                 onClick={handleConfirmPaquete}
                 className="bg-[#1a3d2e] hover:bg-[#1a3d2e]/90 text-white"
               >
@@ -3450,7 +3607,9 @@ export function QuotationForm() {
       <style>{`
         @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
         @keyframes scaleIn { from { opacity: 0; transform: scale(0.88) } to { opacity: 1; transform: scale(1) } }
+        @keyframes loading-bar { 0% { width: 0% } 50% { width: 70% } 100% { width: 100% } }
       `}</style>
     </form>
+    </>
   )
 }
