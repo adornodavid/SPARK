@@ -109,6 +109,7 @@ export function QuotationForm() {
   const [pendingHotelId, setPendingHotelId] = useState<string | null>(null)
   const [pendingSalonId, setPendingSalonId] = useState<string | null>(null)
   const [pendingMontajeId, setPendingMontajeId] = useState<string | null>(null)
+  const [pendingTipoEventoId, setPendingTipoEventoId] = useState<string | null>(null)
   const [clientes, setClientes] = useState<Array<{ value: string; text: string }>>([])
   const [filteredClientes, setFilteredClientes] = useState<Array<{ value: string; text: string }>>([])
   const [showClienteDropdown, setShowClienteDropdown] = useState(false)
@@ -293,23 +294,17 @@ export function QuotationForm() {
         })
       }
 
-      // Cargar tipos de evento por categoría y re-setear tipoEvento después de que cargue la lista
+      // Cargar tipos de evento por categoría — el useEffect de pendingTipoEventoId seteará el valor
       if (c.categoriaevento) {
-        loadTiposEvento(c.categoriaevento).then(() => {
-          if (tid) setFormData(prev => ({ ...prev, tipoEvento: tid }))
-        })
+        if (tid) setPendingTipoEventoId(tid)
+        loadTiposEvento(c.categoriaevento)
       }
 
-      // Cargar salones → setear salon → luego montajes
+      // Cargar salones — los useEffects de pendingSalonId y pendingMontajeId setearán los valores
       if (c.hotelid) {
-        loadSalones(c.hotelid.toString()).then(() => {
-          if (salonId) setFormData(prev => ({ ...prev, salon: salonId }))
-          if (c.salonid) {
-            loadMontajes(c.salonid.toString(), true).then(() => {
-              if (mid) setFormData(prev => ({ ...prev, montaje: mid }))
-            })
-          }
-        })
+        if (salonId) setPendingSalonId(salonId)
+        if (mid) setPendingMontajeId(mid)
+        loadSalones(c.hotelid.toString())
       }
 
       // En modo edición: mostrar sección de paquete y cargar datos existentes
@@ -481,18 +476,31 @@ export function QuotationForm() {
       const salonExists = salones.find((s) => s.value === pendingSalonId)
       if (salonExists) {
         setFormData((prev) => ({ ...prev, salon: pendingSalonId }))
-        loadMontajes(pendingSalonId).then(() => {
-          if (pendingMontajeId) {
-            setFormData((prev) => ({ ...prev, montaje: pendingMontajeId }))
-            setPendingMontajeId(null)
-          }
-        })
+        loadMontajes(pendingSalonId)
         setPendingSalonId(null)
       }
     }
   }, [salones, pendingSalonId])
 
+  useEffect(() => {
+    if (pendingMontajeId && montajes.length > 0) {
+      const montajeExists = montajes.find((m) => m.value === pendingMontajeId)
+      if (montajeExists) {
+        setFormData((prev) => ({ ...prev, montaje: pendingMontajeId }))
+        setPendingMontajeId(null)
+      }
+    }
+  }, [montajes, pendingMontajeId])
 
+  useEffect(() => {
+    if (pendingTipoEventoId && tiposEvento.length > 0) {
+      const tipoExists = tiposEvento.find((t) => t.value === pendingTipoEventoId)
+      if (tipoExists) {
+        setFormData((prev) => ({ ...prev, tipoEvento: pendingTipoEventoId }))
+        setPendingTipoEventoId(null)
+      }
+    }
+  }, [tiposEvento, pendingTipoEventoId])
 
   async function loadTiposEvento(categoriaevento = "") {
     const result = await listaDesplegableTipoEvento(categoriaevento)
