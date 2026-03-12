@@ -13,7 +13,7 @@ import { Calendar } from "@/components/ui/calendar"
 import type { DateRange } from "react-day-picker"
 
 import React from "react"
-import type { ddlItem } from "@/types" // Import ddlItem type
+import type { ddlItem } from "@/types/common"
 
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"

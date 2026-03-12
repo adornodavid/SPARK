@@ -8,7 +8,7 @@ import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosP
 import { Users, MapPin, DollarSign, User, Mail, Phone, Building2, Check, X } from "lucide-react"
 
 import React from "react"
-import type { ddlItem } from "@/types"
+import type { ddlItem } from "@/types/common"
 
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"

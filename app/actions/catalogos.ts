@@ -4,7 +4,7 @@
   Imports
 ================================================== */
 import { createClient } from "@supabase/supabase-js"
-import type { ddlItem } from "@/types/common.types"
+import type { ddlItem } from "@/types/common"
 
 /* ==================================================
   Conexion a la base de datos: Supabase
