@@ -156,7 +156,15 @@ export default function DayDetailSheet({
                 className="mt-4 gap-2 bg-foreground text-background hover:bg-foreground/90"
                 onClick={() => {
                   onOpenChange(false)
-                  router.push("/cotizarevento")
+                  const params = new URLSearchParams()
+                  if (selectedHotel !== "all") params.set("hotelId", selectedHotel)
+                  if (selectedSalon !== "all") params.set("salonId", selectedSalon)
+                  if (selectedDate) {
+                    params.set("fechaInicio", selectedDate)
+                    params.set("fechaFin", selectedDate)
+                  }
+                  const qs = params.toString()
+                  router.push(`/cotizaciones/new${qs ? `?${qs}` : ""}`)
                 }}
               >
                 <Plus className="h-4 w-4" />
@@ -265,7 +273,15 @@ export default function DayDetailSheet({
                   className="w-full gap-2 bg-foreground text-background hover:bg-foreground/90"
                   onClick={() => {
                     onOpenChange(false)
-                    router.push("/cotizarevento")
+                    const params = new URLSearchParams()
+                    if (selectedHotel !== "all") params.set("hotelId", selectedHotel)
+                    if (selectedSalon !== "all") params.set("salonId", selectedSalon)
+                    if (selectedDate) {
+                      params.set("fechaInicio", selectedDate)
+                      params.set("fechaFin", selectedDate)
+                    }
+                    const qs = params.toString()
+                    router.push(`/cotizaciones/new${qs ? `?${qs}` : ""}`)
                   }}
                 >
                   <Plus className="h-4 w-4" />

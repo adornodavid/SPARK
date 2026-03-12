@@ -118,9 +118,9 @@ const quickAccessItems = [
     icon: Home,
   },
   {
-    title: "CRM",
-    href: "/crm",
-    icon: Target,
+    title: "Cotizaciones",
+    href: "/cotizaciones",
+    icon: FileText,
   },
   {
     title: "Salones",
@@ -128,9 +128,9 @@ const quickAccessItems = [
     icon: Building2,
   },
   {
-    title: "Cotizaciones",
-    href: "/cotizaciones",
-    icon: FileText,
+    title: "CRM",
+    href: "/crm",
+    icon: Target,
   },
 ]
 
@@ -151,7 +151,7 @@ export function AdminSidebar() {
       <aside className="fixed left-0 top-0 w-[100px] h-screen border-r border-sidebar-border bg-sidebar flex flex-col z-40">
         {/* Logo section */}
         <div className="flex h-16 items-center justify-center border-b border-sidebar-border flex-shrink-0">
-          <img src="/logo-milenium.png" alt="Milenium" className="h-9 w-auto" />
+          <img src="/spark-icon.svg" alt="SPARK" className="h-10 w-10 invert brightness-200" />
         </div>
 
         {/* Quick access icons */}
@@ -210,7 +210,7 @@ export function AdminSidebar() {
       >
         {/* Header with SPARK logo and close button */}
         <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-5 flex-shrink-0">
-          <img src="/logo-milenium.png" alt="Milenium" className="h-7 w-auto" />
+          <img src="/spark-icon.svg" alt="SPARK" className="h-8 w-8 invert brightness-200" />
           <Button variant="ghost" size="icon" className="text-sidebar-foreground hover:bg-sidebar-accent" onClick={() => setIsOffcanvasOpen(false)}>
             <X className="h-5 w-5" />
           </Button>

@@ -8,7 +8,6 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Calendar, Building2, DoorClosed } from "lucide-react"
 import { listaDesplegableHoteles } from "@/app/actions/hoteles"
-import { listaDesplegableSalones } from "@/app/actions/salones"
 
 interface CalendarFilterPanelProps {
   selectedHotel: string
@@ -63,19 +62,25 @@ export default function CalendarFilterPanel({
     fetchHoteles()
   }, [])
 
-  // Load salones dropdown - cascading based on selected hotel
+  // Cargar salones por hotelid via API route
   useEffect(() => {
-    const fetchSalones = async () => {
-      const hotelId = selectedHotel === "all" ? -1 : Number.parseInt(selectedHotel)
-      const result = await listaDesplegableSalones(-1, "", hotelId)
-      if (result.success && result.data) {
-        setSalonesList(result.data)
-      }
-    }
-    fetchSalones()
+    const hotelId = selectedHotel === "all" ? "-1" : selectedHotel
+    fetch(`/api/salones?hotelid=${hotelId}`)
+      .then((res) => res.json())
+      .then((result) => {
+        if (result.success && result.data) {
+          setSalonesList(result.data)
+        } else {
+          setSalonesList([])
+        }
+      })
+      .catch((err) => {
+        console.error("[SALON] Error fetch:", err)
+        setSalonesList([])
+      })
   }, [selectedHotel])
 
-  // Reset salon when hotel changes
+  // Cuando cambia hotel: resetear salon
   const handleHotelChange = (value: string) => {
     onHotelChange(value)
     onSalonChange("all")
@@ -187,7 +192,7 @@ export default function CalendarFilterPanel({
                 htmlFor="reservaciones"
                 className="text-sm font-medium leading-none cursor-pointer flex items-center gap-1.5"
               >
-                <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500"></span>
+                <span className="inline-block w-2.5 h-2.5 rounded-full bg-purple-900/80"></span>
                 Reservaciones
               </label>
             </div>
@@ -204,7 +209,7 @@ export default function CalendarFilterPanel({
                 htmlFor="confirmadas"
                 className="text-sm font-medium leading-none cursor-pointer flex items-center gap-1.5"
               >
-                <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-600"></span>
+                <span className="inline-block w-2.5 h-2.5 rounded-full bg-purple-900/80"></span>
                 Confirmadas
               </label>
             </div>
@@ -221,7 +226,7 @@ export default function CalendarFilterPanel({
                 htmlFor="pendientes"
                 className="text-sm font-medium leading-none cursor-pointer flex items-center gap-1.5"
               >
-                <span className="inline-block w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
+                <span className="inline-block w-2.5 h-2.5 rounded-full bg-purple-700/75"></span>
                 Pendientes
               </label>
             </div>
@@ -245,28 +250,6 @@ export default function CalendarFilterPanel({
           </div>
         </div>
 
-        {/* Legend - Color coding per spec */}
-        <div className="mt-4 pt-3 border-t">
-          <Label className="text-xs font-semibold mb-2 block text-muted-foreground">Leyenda de colores:</Label>
-          <div className="flex flex-wrap gap-4">
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded bg-lime-500"></div>
-              <span className="text-xs text-muted-foreground">Disponible</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded bg-amber-400"></div>
-              <span className="text-xs text-muted-foreground">Cotizado / Apartado</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded bg-red-500"></div>
-              <span className="text-xs text-muted-foreground">Confirmado / Pagado</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded bg-gray-400"></div>
-              <span className="text-xs text-muted-foreground">Realizado / Cancelado</span>
-            </div>
-          </div>
-        </div>
       </CardContent>
     </Card>
   )

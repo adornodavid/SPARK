@@ -122,7 +122,7 @@ export default function CalendarGrid({
     return eventos.filter((evento) => {
       if (evento.tipo === "Cotizacion" && !filters.cotizaciones) return false
       if (evento.tipo === "Reservacion" && !filters.reservaciones) return false
-      if (evento.estatus === "cancelada" && !filters.canceladas) return false
+      if (isCancelada(evento.estatus) && !filters.canceladas) return false
       if (
         (evento.estatus === "reservada" || evento.estatus === "confirmada") &&
         evento.tipo === "Reservacion" &&
@@ -146,45 +146,66 @@ export default function CalendarGrid({
     [getFilteredEventos],
   )
 
-  // Color coding per spec: green=available, amber=cotizado, red=confirmado, gray=realizado
+  // Color coding: amber=cotizado, purple=reservacion, rojo pastel=cotizacion cancelada, gray=otros cancelados
+  const isCancelada = (estatus: string) => estatus?.toLowerCase().includes("cancelada") || estatus?.toLowerCase() === "cancelada"
+
   const getEventColor = (evento: oCalendario) => {
-    // Cancelada / Realizado - Gray
-    if (evento.estatus === "cancelada" || evento.estatus === "realizado") {
+    // Cotización cancelada - Rojo pastel
+    if (evento.tipo === "Cotizacion" && isCancelada(evento.estatus)) {
+      return "bg-red-600/85 text-white"
+    }
+    // Otras canceladas / Realizado - Gray
+    if (isCancelada(evento.estatus) || evento.estatus === "realizado") {
       return "bg-gray-400 text-white"
     }
-    // Reservacion Confirmada/Pagada - Red
-    if (evento.tipo === "Reservacion" && (evento.estatus === "reservada" || evento.estatus === "confirmada")) {
-      return "bg-red-500 text-white"
-    }
-    // Reservacion Pendiente - Cyan/Blue
-    if (evento.tipo === "Reservacion" && evento.estatus === "pendiente") {
-      return "bg-cyan-500 text-white"
-    }
-    // Cotizacion - Amber/Yellow
+    // Cotizacion activa - Amber/Yellow
     if (evento.tipo === "Cotizacion") {
       return "bg-amber-400 text-white"
+    }
+    // Cualquier Reservacion activa - Morado oscuro
+    if (evento.tipo === "Reservacion") {
+      return "bg-purple-900/80 text-white"
     }
     return "bg-gray-300 text-white"
   }
 
-  // Get priority color for a day (highest priority event determines cell color)
+  // Determina los tipos de eventos activos en un día
+  const getDayEventTypes = (dayEvents: oCalendario[]) => {
+    const hasReservacion = dayEvents.some(
+      (e) => e.tipo === "Reservacion" && !isCancelada(e.estatus) && e.estatus !== "realizado",
+    )
+    const hasCotizacion = dayEvents.some(
+      (e) => e.tipo === "Cotizacion" && !isCancelada(e.estatus) && e.estatus !== "realizado",
+    )
+    const hasCancelada = dayEvents.some(
+      (e) => isCancelada(e.estatus) || e.estatus === "realizado",
+    )
+    return { hasReservacion, hasCotizacion, hasCancelada }
+  }
+
+  // Color sólido de fondo (para un solo tipo)
   const getDayStatusColor = (dayEvents: oCalendario[]) => {
     if (dayEvents.length === 0) return ""
-    // Priority: confirmada > pendiente > cotizacion > cancelada
-    const hasConfirmed = dayEvents.some(
-      (e) => e.tipo === "Reservacion" && (e.estatus === "reservada" || e.estatus === "confirmada"),
-    )
-    if (hasConfirmed) return "bg-red-500 text-white"
-
-    const hasPending = dayEvents.some(
-      (e) => e.tipo === "Reservacion" && e.estatus === "pendiente",
-    )
-    if (hasPending) return "bg-cyan-500 text-white"
-
-    const hasCotizacion = dayEvents.some((e) => e.tipo === "Cotizacion")
+    const { hasReservacion, hasCotizacion } = getDayEventTypes(dayEvents)
+    if (hasReservacion && hasCotizacion) return "" // se maneja con diagonal
+    if (hasReservacion) return "bg-purple-900/80 text-white"
     if (hasCotizacion) return "bg-amber-400 text-white"
-
+    // Solo cotizaciones canceladas
+    const hasCotCancelada = dayEvents.some((e) => e.tipo === "Cotizacion" && isCancelada(e.estatus))
+    if (hasCotCancelada) return "bg-red-600/85 text-white"
     return "bg-gray-400 text-white"
+  }
+
+  // Estilo diagonal para días con reservación + cotización
+  const getDayDiagonalStyle = (dayEvents: oCalendario[]): React.CSSProperties | undefined => {
+    const { hasReservacion, hasCotizacion } = getDayEventTypes(dayEvents)
+    if (hasReservacion && hasCotizacion) {
+      return {
+        background: "linear-gradient(135deg, rgb(88 28 135 / 0.8) 50%, rgb(251 191 36) 50%)",
+        color: "white",
+      }
+    }
+    return undefined
   }
 
   // Calendar math helpers
@@ -281,7 +302,13 @@ export default function CalendarGrid({
           <div className="flex items-center gap-2">
             {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
             <Button
-              onClick={() => router.push("/cotizarevento")}
+              onClick={() => {
+                const params = new URLSearchParams()
+                if (selectedHotel !== "all") params.set("hotelId", selectedHotel)
+                if (selectedSalon !== "all") params.set("salonId", selectedSalon)
+                const qs = params.toString()
+                router.push(`/cotizaciones/new${qs ? `?${qs}` : ""}`)
+              }}
               className="gap-2 bg-foreground text-background hover:bg-foreground/90"
             >
               <Plus className="h-4 w-4" />
@@ -384,10 +411,16 @@ export default function CalendarGrid({
                 const statusColor = getDayStatusColor(eventosDelDia)
                 const primaryEvento = eventosDelDia[0]
 
+                const diagonalStyle = hasEvents && !past ? getDayDiagonalStyle(eventosDelDia) : undefined
+                const isDiagonal = !!diagonalStyle
+                const reservaciones = eventosDelDia.filter((e) => e.tipo === "Reservacion" && !isCancelada(e.estatus) && e.estatus !== "realizado")
+                const cotizaciones = eventosDelDia.filter((e) => e.tipo === "Cotizacion" && !isCancelada(e.estatus) && e.estatus !== "realizado")
+
                 return (
                   <div
                     key={index}
                     onClick={() => day && handleDayClick(day)}
+                    style={diagonalStyle}
                     className={`
                       relative aspect-square p-2 rounded-lg transition-all duration-200 cursor-pointer
                       ${day === null ? "bg-transparent cursor-default" : ""}
@@ -396,8 +429,12 @@ export default function CalendarGrid({
                         ? "bg-card border border-border hover:border-lime-500 hover:shadow-lg hover:scale-105"
                         : ""
                       }
-                      ${!past && day !== null && hasEvents
+                      ${!past && day !== null && hasEvents && !isDiagonal
                         ? `hover:scale-105 hover:shadow-xl ${statusColor}`
+                        : ""
+                      }
+                      ${!past && day !== null && hasEvents && isDiagonal
+                        ? "hover:scale-105 hover:shadow-xl"
                         : ""
                       }
                       ${isTodayDay ? "ring-2 ring-lime-600 ring-offset-2" : ""}
@@ -416,7 +453,26 @@ export default function CalendarGrid({
                         >
                           {day}
                         </div>
-                        {!past && hasEvents && (
+                        {!past && hasEvents && isDiagonal && (
+                          <div className="flex-1 flex flex-col justify-between overflow-hidden text-white gap-0.5">
+                            {/* Reservación arriba-izquierda */}
+                            <div className="text-[0.55rem] leading-tight">
+                              <div className="font-bold truncate">{reservaciones[0]?.nombreevento}</div>
+                              <div className="truncate opacity-90">{reservaciones[0]?.salon}</div>
+                              <div className="inline-block text-[0.5rem] font-bold bg-white/25 px-1 py-0.5 rounded uppercase">
+                                {reservaciones.length} reserv.
+                              </div>
+                            </div>
+                            {/* Cotización abajo-derecha */}
+                            <div className="text-[0.55rem] leading-tight text-right">
+                              <div className="font-bold truncate">{cotizaciones[0]?.nombreevento}</div>
+                              <div className="inline-block text-[0.5rem] font-bold bg-white/25 px-1 py-0.5 rounded uppercase">
+                                {cotizaciones.length} cotiz.
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {!past && hasEvents && !isDiagonal && (
                           <div className="flex-1 flex flex-col gap-0.5 overflow-hidden text-white">
                             {eventosDelDia.slice(0, 1).map((evento, idx) => (
                               <div key={idx} className="flex flex-col gap-0.5 text-[0.6rem] leading-tight">

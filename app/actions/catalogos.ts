@@ -42,12 +42,17 @@ export async function listaEstatusCotizacion() {
 }
 
 // Función: listaDesplegableTipoEvento: obtiene id y nombre de la tabla tipoevento
-export async function listaDesplegableTipoEvento() {
+export async function listaDesplegableTipoEvento(categoriaevento = "") {
   try {
-    const { data: resultados, error } = await supabase
+    let query = supabase
       .from("tipoevento")
       .select("id, nombre")
-      .order("nombre", { ascending: true })
+
+    if (categoriaevento !== "") {
+      query = query.eq("categoriaevento", categoriaevento)
+    }
+
+    const { data: resultados, error } = await query.order("nombre", { ascending: true })
 
     if (error) {
       console.error("Error obteniendo tipos de evento: ", error)
@@ -200,15 +205,16 @@ const TIPO_CANONICO: Record<string, string> = {
   alimento: "Alimento",
   platillo: "Platillo",
   platillos: "Platillo",
-  bebidas: "Bebida",
-  bebida: "Bebida",
+  bebidas: "Bebidas",
+  bebida: "Bebidas",
   cortesias: "Cortesias",
   cortesia: "Cortesias",
   servicios: "Servicio",
   servicio: "Servicio",
   mobiliario: "Mobiliario",
   audiovisual: "Audiovisual",
-  beneficiosadicionales: "Beneficios adicionales",
+  beneficiosadicionales: "Beneficios Adicionales",
+  "beneficios adicionales": "Beneficios Adicionales",
   lugar: "Lugar",
 }
 
@@ -722,12 +728,20 @@ export async function obtenerPlatillosCotizacion(cotizacionid: number) {
 }
 
 // Función: buscarPlatillosItems: obtiene todos los registros de platillositems para el dropdown de Agregar
-export async function buscarPlatillosItems() {
+export async function buscarPlatillosItems(platilloid = -1, hotelid = -1) {
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from("platillositems")
       .select("*")
-      .order("nombre", { ascending: true })
+
+    if (platilloid !== -1) {
+      query = query.eq("platilloid", platilloid)
+    }
+    if (hotelid !== -1) {
+      query = query.eq("hotelid", hotelid)
+    }
+
+    const { data, error } = await query.order("nombre", { ascending: true })
 
     if (error) {
       console.error("Error buscando platillositems:", error)

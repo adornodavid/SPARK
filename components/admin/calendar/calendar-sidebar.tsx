@@ -57,9 +57,9 @@ export default function CalendarSidebar({
       if (result.success && Array.isArray(result.data)) {
         const allEventos = result.data as oCalendario[]
 
-        // Upcoming events (next 7)
+        // Upcoming events - solo reservaciones (next 7)
         const upcoming = allEventos
-          .filter((e) => e.fechainicio >= rangoInicio)
+          .filter((e) => e.fechainicio >= rangoInicio && e.tipo === "Reservacion")
           .sort((a, b) => a.fechainicio.localeCompare(b.fechainicio))
           .slice(0, 7)
         setUpcomingEvents(upcoming)

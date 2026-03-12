@@ -58,7 +58,7 @@ function DashboardContent() {
     checkSession()
   }, [router])
 
-  // Persist filter state in URL params
+  // Persist filter state in URL params (sin remontar componente)
   const updateUrlParams = useCallback(
     (hotelId: string, salonId: string) => {
       const params = new URLSearchParams()
@@ -66,9 +66,9 @@ function DashboardContent() {
       if (salonId !== "all") params.set("salonId", salonId)
       const queryString = params.toString()
       const newUrl = queryString ? `/dashboard?${queryString}` : "/dashboard"
-      router.replace(newUrl, { scroll: false })
+      window.history.replaceState(null, "", newUrl)
     },
-    [router],
+    [],
   )
 
   const handleHotelChange = (value: string) => {

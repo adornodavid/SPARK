@@ -379,16 +379,62 @@ export async function estatusActivoReservacion(
   }
 }
 
-// Función: obtenerDisponibilidadSalon: Obtiene las reservaciones activas de un salón para validar disponibilidad
+// Función auxiliar: obtiene todos los salonIds relacionados (combinados) para un salón
+// salonid en la tabla salones es un JSON con formato {"salon1": id, "salon2": id}
+async function obtenerSalonesRelacionados(salonId: number): Promise<number[]> {
+  const idsSet = new Set<number>([salonId])
+
+  // Extraer sub-ids de un objeto salonid JSON {"salon1": 2, "salon2": 3}
+  function extraerSubIds(salonidObj: any): number[] {
+    if (!salonidObj || typeof salonidObj !== "object") return []
+    return Object.values(salonidObj).filter((v): v is number => typeof v === "number")
+  }
+
+  // 1. Obtener el salón seleccionado para ver si es combinado
+  const { data: salon } = await supabase
+    .from("salones")
+    .select("id, estacombinado, salonid")
+    .eq("id", salonId)
+    .maybeSingle()
+
+  if (salon?.estacombinado && salon.salonid) {
+    // El salón seleccionado es combinado → agregar sus sub-salones
+    for (const id of extraerSubIds(salon.salonid)) {
+      idsSet.add(id)
+    }
+  }
+
+  // 2. Buscar salones combinados que incluyan al salón seleccionado
+  const { data: padres } = await supabase
+    .from("salones")
+    .select("id, salonid")
+    .eq("estacombinado", true)
+    .not("salonid", "is", null)
+
+  if (padres) {
+    for (const padre of padres) {
+      const subIds = extraerSubIds(padre.salonid)
+      if (subIds.includes(salonId)) {
+        // Este salón combinado incluye al salón seleccionado → agregar el padre
+        idsSet.add(padre.id)
+      }
+    }
+  }
+
+  return Array.from(idsSet)
+}
+
+// Función: obtenerDisponibilidadSalon: Obtiene las reservaciones de un salón y sus salones combinados
 export async function obtenerDisponibilidadSalon(
   salonId: number,
 ): Promise<{ success: boolean; error: string; data: any[] | null }> {
   try {
+    const salonIds = await obtenerSalonesRelacionados(salonId)
+
     const { data, error } = await supabase
       .from("vw_oreservaciones")
       .select("*")
-      .eq("salonid", salonId)
-      .eq("activo", true)
+      .in("salonid", salonIds)
 
     if (error) {
       return { success: false, error: "Error en obtenerDisponibilidadSalon: " + error.message, data: null }
@@ -401,17 +447,18 @@ export async function obtenerDisponibilidadSalon(
   }
 }
 
-// Función: obtenerReservacionesPorDia: Obtiene las reservaciones de un salón en una fecha específica
+// Función: obtenerReservacionesPorDia: Obtiene las reservaciones de un salón y sus combinados en una fecha
 export async function obtenerReservacionesPorDia(
   fecha: string,
   salonId: number,
 ): Promise<{ success: boolean; error: string; data: any[] | null }> {
   try {
+    const salonIds = await obtenerSalonesRelacionados(salonId)
+
     const { data, error } = await supabase
       .from("vw_oreservaciones")
       .select("*")
-      .eq("salonid", salonId)
-      .eq("activo", true)
+      .in("salonid", salonIds)
       .lte("fechainicio", fecha)
       .gte("fechafin", fecha)
 

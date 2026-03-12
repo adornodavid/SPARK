@@ -206,9 +206,20 @@ export function QuotationForm() {
   useEffect(() => {
     loadHoteles()
     loadClientes()
-    loadTiposEvento()
     listaCategoriaEvento().then(r => { if (r.success && r.data) setCategoriasEvento(r.data) })
-    listaEstatusCotizacion().then(r => { if (r.success && r.data) setEstatusList(r.data as ddlItem[]) })
+    listaEstatusCotizacion().then(r => {
+      if (r.success && r.data) {
+        const lista = r.data as ddlItem[]
+        setEstatusList(lista)
+        // En modo creación, pre-seleccionar "Borrador"
+        if (!searchParams.get("editId")) {
+          const borrador = lista.find((e) => e.text.trim().toLowerCase() === "borrador")
+          if (borrador) {
+            setFormData((prev) => ({ ...prev, estatusId: borrador.value }))
+          }
+        }
+      }
+    })
   }, [])
 
 
@@ -272,6 +283,11 @@ export function QuotationForm() {
           from: new Date(fi + "T12:00:00"),
           to: new Date(ff + "T12:00:00"),
         })
+      }
+
+      // Cargar tipos de evento por categoría
+      if (c.categoriaevento) {
+        loadTiposEvento(c.categoriaevento)
       }
 
       // Cargar salones → setear salon → luego montajes
@@ -402,17 +418,29 @@ export function QuotationForm() {
 
     const hotelId = searchParams.get("hotelId")
     const salonId = searchParams.get("salonId")
+    const fechaInicio = searchParams.get("fechaInicio")
+    const fechaFin = searchParams.get("fechaFin")
 
     if (hotelId) {
-      console.log("[v0] Prefilling hotel:", hotelId)
       setPendingHotelId(hotelId)
 
       if (salonId) {
-        console.log("[v0] Setting pending salonId:", salonId)
         setPendingSalonId(salonId)
       }
 
       setHasLoadedFromParams(true)
+    }
+
+    if (fechaInicio) {
+      setFormData((prev) => ({
+        ...prev,
+        fechaInicial: fechaInicio,
+        fechaFinal: fechaFin || fechaInicio,
+      }))
+      // Sincronizar el calendario visual
+      const from = new Date(fechaInicio + "T12:00:00")
+      const to = new Date((fechaFin || fechaInicio) + "T12:00:00")
+      setCalendarRange({ from, to })
     }
   }, [searchParams, hasLoadedFromParams])
 
@@ -446,10 +474,12 @@ export function QuotationForm() {
 
 
 
-  async function loadTiposEvento() {
-    const result = await listaDesplegableTipoEvento()
+  async function loadTiposEvento(categoriaevento = "") {
+    const result = await listaDesplegableTipoEvento(categoriaevento)
     if (result.success && result.data) {
       setTiposEvento(result.data)
+    } else {
+      setTiposEvento([])
     }
   }
 
@@ -1411,7 +1441,11 @@ export function QuotationForm() {
     setShowAgregarModal(true)
     setLoadingTabla(true)
     if (tipo === "platillos") {
-      const result = await buscarPlatillosItems()
+      // Obtener el platilloid del alimento seleccionado en la sección Alimentos
+      const alimentoEl = elementosPaquete.find((el: any) => normalizarSeccion(el.tipoelemento || el.tipo || "") === "alimentos")
+      const platilloId = alimentoEl ? Number(alimentoEl.elementoid ?? alimentoEl.id) : -1
+      const hotelId = formData.hotel ? Number(formData.hotel) : -1
+      const result = await buscarPlatillosItems(platilloId, hotelId)
       if (result.success && result.data) {
         const yaAsignados = new Set(platillosItems.map(el => Number(el.elementoid)))
         setElementosTabla(result.data.filter((el: any) => !yaAsignados.has(Number(el.id))))
@@ -1548,6 +1582,7 @@ export function QuotationForm() {
 
     // Cargar reservaciones del salón para validar disponibilidad
     const resResult = await obtenerDisponibilidadSalon(Number(salonId))
+    console.log("[DISPO] salonId:", salonId, "success:", resResult.success, "error:", resResult.error, "reservaciones:", resResult.data?.length, "data:", JSON.stringify(resResult.data?.map((r: any) => ({ salonid: r.salonid, salon: r.salon, fecha: r.fechainicio }))))
     if (resResult.success && resResult.data) {
       setSalonReservaciones(resResult.data)
     } else {
@@ -1828,35 +1863,39 @@ export function QuotationForm() {
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="empresa" className="text-sm font-medium flex items-center gap-2">
-                  <Building2 className="h-4 w-4" />
-                  Empresa
-                </Label>
-                <Input
-                  id="empresa"
-                  value={formData.empresa}
-                  placeholder="Se completa al seleccionar cliente"
-                  className="border-blue-200 bg-gray-50 text-gray-500 cursor-not-allowed"
-                  disabled
-                  readOnly
-                />
-              </div>
+              {formData.categoriaEvento?.toUpperCase() === "EMPRESARIAL" && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="empresa" className="text-sm font-medium flex items-center gap-2">
+                      <Building2 className="h-4 w-4" />
+                      Empresa
+                    </Label>
+                    <Input
+                      id="empresa"
+                      value={formData.empresa}
+                      placeholder="Se completa al seleccionar cliente"
+                      className="border-blue-200 bg-gray-50 text-gray-500 cursor-not-allowed"
+                      disabled
+                      readOnly
+                    />
+                  </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="grupo" className="text-sm font-medium flex items-center gap-2">
-                  <Building2 className="h-4 w-4" />
-                  Grupo (Empresa Principal)
-                </Label>
-                <Input
-                  id="grupo"
-                  value={formData.grupo}
-                  placeholder="Se completa al seleccionar cliente"
-                  className="border-blue-200 bg-gray-50 text-gray-500 cursor-not-allowed"
-                  disabled
-                  readOnly
-                />
-              </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="grupo" className="text-sm font-medium flex items-center gap-2">
+                      <Building2 className="h-4 w-4" />
+                      Grupo (Empresa Principal)
+                    </Label>
+                    <Input
+                      id="grupo"
+                      value={formData.grupo}
+                      placeholder="Se completa al seleccionar cliente"
+                      className="border-blue-200 bg-gray-50 text-gray-500 cursor-not-allowed"
+                      disabled
+                      readOnly
+                    />
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -1903,7 +1942,17 @@ export function QuotationForm() {
                       onValueChange={async (value) => {
                         setFormData(prev => ({ ...prev, salon: value, montaje: "" }))
                         setMontajes([])
-                        loadMontajes(value)
+                        setSalonReservaciones([])
+                        setReservacionesDia([])
+                        await loadMontajes(value)
+                        // Recargar reservaciones del día seleccionado con el nuevo salón
+                        if (diaSeleccionado) {
+                          setLoadingResDia(true)
+                          obtenerReservacionesPorDia(diaSeleccionado, Number(value)).then((res) => {
+                            setReservacionesDia(res.data ?? [])
+                            setLoadingResDia(false)
+                          })
+                        }
                         // Actualizar salón en presupuesto
                         const salonItem = salones.find((s) => s.value === value)
                         const salonResult = await objetoSalon(Number(value))
@@ -2253,7 +2302,14 @@ export function QuotationForm() {
                 <Label htmlFor="categoriaEvento" className="text-xs font-medium">
                   Categoría del Evento
                 </Label>
-                <Select value={formData.categoriaEvento} onValueChange={(v) => setFormData(prev => ({ ...prev, categoriaEvento: v }))}>
+                <Select
+                  value={formData.categoriaEvento}
+                  onValueChange={(v) => {
+                    setFormData(prev => ({ ...prev, categoriaEvento: v, tipoEvento: "" }))
+                    setTiposEvento([])
+                    loadTiposEvento(v)
+                  }}
+                >
                   <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full">
                     <SelectValue placeholder="Selecciona categoría" />
                   </SelectTrigger>
@@ -2269,9 +2325,9 @@ export function QuotationForm() {
                 <Label htmlFor="tipoEvento" className="text-xs font-medium">
                   Tipo de Evento <span className="text-red-500">*</span>
                 </Label>
-                <Select value={formData.tipoEvento} onValueChange={handleTipoEventoChange} required>
+                <Select value={formData.tipoEvento} onValueChange={handleTipoEventoChange} disabled={!formData.categoriaEvento} required>
                   <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full">
-                    <SelectValue placeholder="Selecciona tipo" />
+                    <SelectValue placeholder={formData.categoriaEvento ? "Selecciona tipo" : "Selecciona categoría primero"} />
                   </SelectTrigger>
                   <SelectContent>
                     {tiposEvento.map((tipo) => (
@@ -2285,7 +2341,11 @@ export function QuotationForm() {
                 <Label htmlFor="estatus" className="text-xs font-medium">
                   Estatus
                 </Label>
-                <Select value={formData.estatusId} onValueChange={(v) => setFormData(prev => ({ ...prev, estatusId: v }))}>
+                <Select
+                  value={formData.estatusId}
+                  onValueChange={(v) => setFormData(prev => ({ ...prev, estatusId: v }))}
+                  disabled={!searchParams.get("editId") && !cotizacionId}
+                >
                   <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full">
                     <SelectValue placeholder="Selecciona estatus" />
                   </SelectTrigger>
@@ -2973,11 +3033,11 @@ export function QuotationForm() {
           <Button
             type="button"
             onClick={handleGenerarPDF}
-            disabled={generatingPDF}
+            disabled={generatingPDF || !formData.salon || !elementosPaquete.some((el: any) => normalizarSeccion(el.tipoelemento || el.tipo || "") === "alimentos") || platillosItems.length === 0}
             className="min-w-[160px] bg-[#8B0000] hover:bg-[#8B0000]/90 text-white"
           >
             <FileText className="h-4 w-4 mr-2" />
-            {generatingPDF ? "Generando..." : "Generar PDF"}
+            {generatingPDF ? "Generando..." : "Generar Cotización"}
           </Button>
           <Button
             type="button"
