@@ -119,6 +119,7 @@ export function QuotationForm() {
   const [tiposEvento, setTiposEvento] = useState<ddlItem[]>([])
   const [categoriasEvento, setCategoriasEvento] = useState<string[]>([])
   const [estatusList, setEstatusList] = useState<ddlItem[]>([])
+  const [pendingEstatusId, setPendingEstatusId] = useState<string | null>(null)
   const [showPaqueteModal, setShowPaqueteModal] = useState(false)
   const [showLimpiarModal, setShowLimpiarModal] = useState(false)
   const [limpiarLoading, setLimpiarLoading] = useState(false)
@@ -218,17 +219,27 @@ export function QuotationForm() {
       if (r.success && r.data) {
         const lista = r.data as ddlItem[]
         setEstatusList(lista)
-        // En modo creación, pre-seleccionar "Borrador"
+        // En modo creación, pre-seleccionar "Borrador" via pending state
         if (!searchParams.get("editId")) {
           const borrador = lista.find((e) => e.text.trim().toLowerCase() === "borrador")
           if (borrador) {
-            setFormData((prev) => ({ ...prev, estatusId: borrador.value }))
+            setPendingEstatusId(borrador.value)
           }
         }
       }
     })
   }, [])
 
+  // Aplicar pending estatus cuando la lista esté cargada
+  useEffect(() => {
+    if (pendingEstatusId && estatusList.length > 0) {
+      const match = estatusList.find((e) => e.value === pendingEstatusId)
+      if (match) {
+        setFormData((prev) => ({ ...prev, estatusId: pendingEstatusId }))
+      }
+      setPendingEstatusId(null)
+    }
+  }, [pendingEstatusId, estatusList])
 
   // Cargar cotización existente si viene editId en URL
   useEffect(() => {
@@ -1717,10 +1728,11 @@ export function QuotationForm() {
       formDataToSubmit.append("hospedajefechafin", requerirHabitaciones ? formData.hospedajeFechaFin : "")
 
       const editId = searchParams.get("editId")
+      const existingId = editId || cotizacionId?.toString()
 
       let result
-      if (editId) {
-        formDataToSubmit.append("id", editId)
+      if (existingId) {
+        formDataToSubmit.append("id", existingId)
         formDataToSubmit.append("fechaactualizacion", new Date().toISOString().slice(0, 10))
         formDataToSubmit.append("impuestos", formData.impuestos)
         formDataToSubmit.append("porcentajedescuento", formData.descuentoPorcentaje)
@@ -2507,10 +2519,10 @@ export function QuotationForm() {
       <div className="flex gap-4 justify-end">
         <Button
           type="submit"
-          disabled={loading || !selectedClienteId || (!searchParams.get("editId") && !!cotizacionId)}
+          disabled={loading || !selectedClienteId}
           className="min-w-[120px] bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:opacity-50"
         >
-          {loading ? "Guardando..." : searchParams.get("editId") ? "Actualizar Cotización" : "Crear Cotización"}
+          {loading ? "Guardando..." : (searchParams.get("editId") || cotizacionId) ? "Actualizar Cotización" : "Crear Cotización"}
         </Button>
       </div>
 
