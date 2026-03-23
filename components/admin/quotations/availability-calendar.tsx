@@ -20,7 +20,7 @@ type ViewMode = "day" | "week" | "month"
 
 interface AvailabilityCalendarProps {
   hotelId: string; salones: ddlItem[]
-  onSelectSlot: (fecha: string, salonId: string, horaPreMontaje?: string, horaInicio?: string, horaFin?: string, horaPostMontaje?: string, horasExtras?: number) => void
+  onSelectSlot: (fecha: string, salonId: string, horaPreMontaje?: string, horaInicio?: string, horaFin?: string, horaPostMontaje?: string, horasExtras?: number, fechaFin?: string, overlappingCotizacion?: string) => void
   selectedFechaInicio?: string; selectedFechaFin?: string; selectedSalonId?: string
   selectedHoraPreMontaje?: string; selectedHoraInicio?: string; selectedHoraFin?: string; selectedHoraPostMontaje?: string
 }
@@ -30,13 +30,22 @@ interface SelectionState {
   extrasBefore: number; extrasAfter: number
 }
 
+// Day range selection for week/month view
+interface DaySelectionState {
+  salonId: string
+  startDate: string  // core selected day
+  daysBefore: number // extra days before
+  daysAfter: number  // extra days after
+}
+
 /* ==================================================
   Constants
 ================================================== */
 const HOURS = (() => {
   const h: { value: string; label: string; hour24: number }[] = []
-  for (let i = 8; i <= 23; i++) { const h12 = i > 12 ? i - 12 : i === 0 ? 12 : i; h.push({ value: `${i.toString().padStart(2, "0")}:00`, label: `${h12} ${i < 12 ? "AM" : "PM"}`, hour24: i }) }
-  for (let i = 0; i <= 2; i++) { h.push({ value: `${i.toString().padStart(2, "0")}:00`, label: `${i === 0 ? 12 : i} AM`, hour24: i }) }
+  function fmt(hr: number) { if (hr === 0 || hr === 24) return "12AM"; if (hr === 12) return "12PM"; return hr > 12 ? `${hr - 12}PM` : `${hr}AM` }
+  for (let i = 8; i <= 23; i++) { h.push({ value: `${i.toString().padStart(2, "0")}:00`, label: `${fmt(i)}-${fmt(i + 1)}`, hour24: i }) }
+  for (let i = 0; i <= 2; i++) { h.push({ value: `${i.toString().padStart(2, "0")}:00`, label: `${fmt(i)}-${fmt(i + 1)}`, hour24: i }) }
   return h
 })()
 const BLOCK_SIZE = 10 // 1 pre + 8 event + 1 post
@@ -53,7 +62,7 @@ function getMonthStart(d: Date) { return new Date(d.getFullYear(), d.getMonth(),
 function getMonthEnd(d: Date) { return new Date(d.getFullYear(), d.getMonth() + 1, 0) }
 function parseHour(t: string) { if (!t) return -1; return parseInt(t.split(":")[0], 10) }
 function getHourIdx(v: string) { return HOURS.findIndex((h) => h.value === v) }
-function getEventBarColor(ev: CalendarEvent) { if (ev.tipo === "reservacion") { const e = ev.estatus?.toLowerCase() || ""; if (e.includes("confirm")) return "bg-red-500"; if (e.includes("cancel")) return "bg-gray-400"; return "bg-red-400" } return "bg-amber-400" }
+function getEventBarColor(ev: CalendarEvent) { if (ev.tipo === "reservacion") { const e = ev.estatus?.toLowerCase() || ""; if (e.includes("cancel")) return "bg-gray-400"; return "bg-purple-900" } return "bg-amber-400" }
 
 /* ==================================================
   Main Component
@@ -71,6 +80,10 @@ export function AvailabilityCalendar({
   const [hoveredCell, setHoveredCell] = useState<string | null>(null)
   const [hoverBlock, setHoverBlock] = useState<{ salonId: string; startIdx: number } | null>(null)
   const [selection, setSelection] = useState<SelectionState | null>(null)
+  // Day range selection for week/month view
+  const [daySel, setDaySel] = useState<DaySelectionState | null>(null)
+  const [dayDragging, setDayDragging] = useState<"left" | "right" | null>(null)
+  const dayDragStartRef = useRef<{ daysBefore: number; daysAfter: number; startDateStr: string } | null>(null)
 
   // Drag state
   const [dragging, setDragging] = useState<"left" | "right" | null>(null)
@@ -81,7 +94,8 @@ export function AvailabilityCalendar({
   const dateRange = useMemo(() => {
     if (viewMode === "day") return { start: new Date(currentDate), end: new Date(currentDate) }
     if (viewMode === "week") { const s = getWeekStart(currentDate); return { start: s, end: addDays(s, 6) } }
-    return { start: getMonthStart(currentDate), end: getMonthEnd(currentDate) }
+    // Month view: load full year
+    return { start: new Date(currentDate.getFullYear(), 0, 1), end: new Date(currentDate.getFullYear(), 11, 31) }
   }, [viewMode, currentDate])
 
   const loadEvents = useCallback(async () => {
@@ -101,7 +115,7 @@ export function AvailabilityCalendar({
 
   function goToDayView(date: Date, from: ViewMode) { setPreviousView(from); setCurrentDate(date); setViewMode("day") }
   function goBack() { if (previousView) { setViewMode(previousView); setPreviousView(null) } }
-  function navigate(dir: -1 | 1) { setCurrentDate((p) => { const d = new Date(p); if (viewMode === "day") d.setDate(d.getDate() + dir); else if (viewMode === "week") d.setDate(d.getDate() + dir * 7); else d.setMonth(d.getMonth() + dir); return d }) }
+  function navigate(dir: -1 | 1) { setCurrentDate((p) => { const d = new Date(p); if (viewMode === "day") d.setDate(d.getDate() + dir); else if (viewMode === "week") d.setDate(d.getDate() + dir * 7); else d.setFullYear(d.getFullYear() + dir); return d }) }
 
   function getEventsForCell(sId: string, ds: string) { return events.filter((e) => e.salonid === Number(sId) && e.fechainicio <= ds && e.fechafin >= ds) }
   function getEventsForHourCell(sId: string, ds: string, hr: number) {
@@ -117,15 +131,37 @@ export function AvailabilityCalendar({
     const fullStart = Math.max(sel.coreStartIdx - sel.extrasBefore, 0)
     const fullEnd = Math.min(coreEnd + sel.extrasAfter, HOURS.length - 1)
 
-    // Pre-montaje = siempre la primera hora del rango completo
-    // Post-montaje = siempre la última hora del rango completo
-    // Hora inicio/fin = el rango completo (pre a post inclusive)
-    onSelectSlot(sel.dateStr, sel.salonId,
-      HOURS[fullStart].value,     // horaPreMontaje (primera hora, sea extra o core)
-      HOURS[fullStart].value,     // horaInicio = inicio del rango completo
-      HOURS[fullEnd].value,       // horaFin = fin del rango completo
-      HOURS[fullEnd].value,       // horaPostMontaje (última hora, sea extra o core)
+    // Detectar solapamiento con cotizaciones existentes
+    // Usar índices del array HOURS en vez de hour24 para evitar problemas al cruzar medianoche
+    const dateCheck = sel.dateStr.slice(0, 10)
+    const overlapping = events.filter((e) => {
+      if (e.tipo !== "cotizacion") return false
+      if (e.salonid !== Number(sel.salonId)) return false
+      const eFechaIni = (e.fechainicio || "").slice(0, 10)
+      const eFechaFin = (e.fechafin || "").slice(0, 10)
+      if (eFechaIni > dateCheck || eFechaFin < dateCheck) return false
+      const eStartH = parseHour(e.horainicio)
+      const eEndH = parseHour(e.horafin)
+      if (eStartH < 0 || eEndH < 0) return true
+      // Convertir a índices de HOURS para comparar linealmente
+      const eStartIdx = HOURS.findIndex(h => h.hour24 === eStartH)
+      const eEndIdx = HOURS.findIndex(h => h.hour24 === eEndH)
+      if (eStartIdx < 0 || eEndIdx < 0) return true
+      // Overlap: rangos [fullStart, fullEnd] y [eStartIdx, eEndIdx) se intersectan
+      return fullStart <= eEndIdx && fullEnd >= eStartIdx
+    })
+    const overlapMsg = overlapping.length > 0
+      ? `Empalme con cotización: ${overlapping.map(o => o.nombreevento).join(", ")}`
+      : undefined
+
+    onSelectSlot("", sel.salonId,
+      HOURS[fullStart].value,
+      HOURS[fullStart].value,
+      HOURS[fullEnd].value,
+      HOURS[fullEnd].value,
       sel.extrasBefore + sel.extrasAfter,
+      undefined,
+      overlapMsg,
     )
   }
 
@@ -174,13 +210,61 @@ export function AvailabilityCalendar({
 
   function endDrag() { setDragging(null); dragStartRef.current = null }
 
+  // === Day range selection (week view) ===
+  function emitDaySel(ds: DaySelectionState) {
+    const startD = addDays(new Date(ds.startDate + "T12:00:00"), -ds.daysBefore)
+    const endD = addDays(new Date(ds.startDate + "T12:00:00"), ds.daysAfter)
+    const fechaIni = toDateStr(startD)
+    const fechaFin = toDateStr(endD)
+    onSelectSlot(fechaIni, ds.salonId, undefined, undefined, undefined, undefined, undefined, fechaFin)
+  }
+
+  function handleDayClick(date: Date, salonId: string) {
+    const ds: DaySelectionState = { salonId, startDate: toDateStr(date), daysBefore: 0, daysAfter: 0 }
+    setDaySel(ds)
+    emitDaySel(ds)
+  }
+
+  function handleDayRangeClick() {
+    // Click on selected range → go to day view
+    if (!daySel) return
+    const startD = addDays(new Date(daySel.startDate + "T12:00:00"), -daySel.daysBefore)
+    goToDayView(startD, viewMode as "week" | "month")
+  }
+
+  function startDayDrag(side: "left" | "right", dateStr: string) {
+    if (!daySel) return
+    setDayDragging(side)
+    dayDragStartRef.current = { daysBefore: daySel.daysBefore, daysAfter: daySel.daysAfter, startDateStr: dateStr }
+  }
+
+  function daysDiff(a: string, b: string): number {
+    return Math.round((new Date(a + "T12:00:00").getTime() - new Date(b + "T12:00:00").getTime()) / 86400000)
+  }
+
+  function onDayDragMove(hoverDateStr: string) {
+    if (!dayDragging || !daySel || !dayDragStartRef.current) return
+    const { startDateStr, daysBefore: origBefore, daysAfter: origAfter } = dayDragStartRef.current
+    const delta = daysDiff(hoverDateStr, startDateStr)
+    if (dayDragging === "left") {
+      const newExtras = Math.max(0, origBefore - delta)
+      const newSel = { ...daySel, daysBefore: newExtras }
+      setDaySel(newSel); emitDaySel(newSel)
+    } else {
+      const newExtras = Math.max(0, origAfter + delta)
+      const newSel = { ...daySel, daysAfter: newExtras }
+      setDaySel(newSel); emitDaySel(newSel)
+    }
+  }
+
+  function endDayDrag() { setDayDragging(null); dayDragStartRef.current = null }
+
   const title = useMemo(() => {
     if (viewMode === "day") { const d = currentDate; return `${DAYS_ES[d.getDay()]} ${d.getDate()} de ${MONTHS_ES[d.getMonth()]} ${d.getFullYear()}` }
     if (viewMode === "week") { const s = dateRange.start, e = dateRange.end; return s.getMonth() === e.getMonth() ? `${s.getDate()} – ${e.getDate()} de ${MONTHS_ES[s.getMonth()]} ${s.getFullYear()}` : `${s.getDate()} ${MONTHS_ES[s.getMonth()].slice(0, 3)} – ${e.getDate()} ${MONTHS_ES[e.getMonth()].slice(0, 3)} ${e.getFullYear()}` }
-    return `${MONTHS_ES[currentDate.getMonth()]} ${currentDate.getFullYear()}`
+    return `${currentDate.getFullYear()}`
   }, [viewMode, currentDate, dateRange])
   const weekDays = useMemo(() => { const d: Date[] = [], s = getWeekStart(currentDate); for (let i = 0; i < 7; i++) d.push(addDays(s, i)); return d }, [currentDate])
-  const monthDays = useMemo(() => { const s = getMonthStart(currentDate), e = getMonthEnd(currentDate), fw = s.getDay() === 0 ? 6 : s.getDay() - 1; const d: (Date | null)[] = []; for (let i = 0; i < fw; i++) d.push(null); for (let i = 1; i <= e.getDate(); i++) d.push(new Date(currentDate.getFullYear(), currentDate.getMonth(), i)); return d }, [currentDate])
   const isToday = (d: Date) => toDateStr(d) === toDateStr(new Date())
   const isPast = (d: Date) => d < new Date(new Date().setHours(0, 0, 0, 0))
 
@@ -189,7 +273,7 @@ export function AvailabilityCalendar({
 
   return (
     <div className="border border-blue-200 rounded-xl bg-white overflow-hidden shadow-sm"
-      onMouseUp={endDrag} onMouseLeave={endDrag}>
+      onMouseUp={() => { endDrag(); endDayDrag() }} onMouseLeave={() => { endDrag(); endDayDrag() }}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-200">
         <div className="flex items-center gap-2">
@@ -223,14 +307,38 @@ export function AvailabilityCalendar({
       {/* Body */}
       <div className="overflow-auto max-h-[420px]">
         {viewMode === "day" && <DayView date={currentDate} salones={salones} getEventsForHourCell={getEventsForHourCell} hourHasRes={hourHasRes} onHourClick={handleHourClick} hoverBlock={hoverBlock} setHoverBlock={setHoverBlock} selection={selection} dragging={dragging} startDrag={startDrag} onDragMove={onDragMove} onClearSelection={() => { setSelection(null) }} />}
-        {viewMode === "week" && <WeekView days={weekDays} salones={salones} getEventsForCell={getEventsForCell} onDayClick={(d, s) => { onSelectSlot(toDateStr(d), s); goToDayView(d, "week") }} isCellSel={isCellSel} isToday={isToday} isPast={isPast} hoveredCell={hoveredCell} setHoveredCell={setHoveredCell} />}
-        {viewMode === "month" && <MonthView days={monthDays} salones={salones} getEventsForCell={getEventsForCell} onDayClick={(d, s) => { onSelectSlot(toDateStr(d), s); goToDayView(d, "month") }} isCellSel={isCellSel} isToday={isToday} isPast={isPast} />}
+        {viewMode === "week" && <WeekView days={weekDays} salones={salones} getEventsForCell={getEventsForCell}
+          onDayClick={handleDayClick}
+          onRangeClick={handleDayRangeClick}
+          daySel={daySel}
+          dayDragging={dayDragging}
+          startDayDrag={startDayDrag}
+          onDayDragMove={onDayDragMove}
+          onClearDaySel={() => setDaySel(null)}
+          isCellSel={isCellSel} isToday={isToday} isPast={isPast} hoveredCell={hoveredCell} setHoveredCell={setHoveredCell} />}
+        {viewMode === "month" && <MonthView
+          year={currentDate.getFullYear()}
+          salones={salones}
+          events={events}
+          onMonthClick={(month) => {
+            const now = new Date()
+            const yr = currentDate.getFullYear()
+            // Si es el mes actual del año actual, ir a la semana actual
+            if (yr === now.getFullYear() && month === now.getMonth()) {
+              setCurrentDate(now)
+            } else {
+              setCurrentDate(new Date(yr, month, 1))
+            }
+            setViewMode("week")
+            setPreviousView("month")
+          }}
+        />}
       </div>
 
       {/* Legend */}
       <div className="flex items-center gap-3 px-4 py-2 border-t border-blue-100 bg-gray-50/50 flex-wrap">
         <span className="text-[10px] text-gray-500 uppercase font-semibold tracking-wide">Leyenda:</span>
-        <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-red-500" /><span className="text-[10px] text-gray-600">Reservación</span></div>
+        <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-purple-900" /><span className="text-[10px] text-gray-600">Reservación</span></div>
         <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-amber-400" /><span className="text-[10px] text-gray-600">Cotización</span></div>
         <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded bg-purple-300 border border-purple-400" /><span className="text-[10px] text-gray-600">Montaje</span></div>
         <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded bg-blue-200 border border-blue-400" /><span className="text-[10px] text-gray-600">Evento</span></div>
@@ -287,7 +395,19 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
     return null
   }
 
-  // Check if 8-block from startIdx fits (enough room and no reservacion in the individual clicked hour)
+  // Determine if this cell is start/middle/end of an event span for connected rendering
+  function getEventSpanPos(ev: CalendarEvent, hour: number): "start" | "middle" | "end" | "single" {
+    const eStart = parseHour(ev.horainicio)
+    const eEnd = parseHour(ev.horafin)
+    if (eStart < 0 || eEnd < 0) return "middle"
+    const lastHour = eEnd > 0 ? eEnd - 1 : eEnd // last occupied hour
+    if (eStart === lastHour) return "single"
+    if (hour === eStart) return "start"
+    if (hour === lastHour) return "end"
+    return "middle"
+  }
+
+  // Check if 8-block from startIdx fits
   function canSelectBlock(sId: string, startIdx: number): boolean {
     if (isPastDay) return false
     if (startIdx + BLOCK_SIZE - 1 >= HOURS.length) return false
@@ -364,14 +484,24 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
                     : "Disponible — clic para seleccionar"
                   }>
 
-                  {/* Event bar when no selection on this cell */}
-                  {primary && !ct && (
-                    <div className={`absolute inset-0.5 rounded ${getEventBarColor(primary)} ${hasRes ? "opacity-80" : "opacity-40"}`}>
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <span className={`text-[9px] font-bold truncate px-0.5 ${hasRes ? "text-white" : "text-amber-900"}`}>{primary.nombreevento?.slice(0, 6)}</span>
+                  {/* Event bar — connected span rendering */}
+                  {primary && !ct && (() => {
+                    const pos = getEventSpanPos(primary, h.hour24)
+                    const roundL = pos === "start" || pos === "single" ? "rounded-l" : ""
+                    const roundR = pos === "end" || pos === "single" ? "rounded-r" : ""
+                    const insetL = pos === "start" || pos === "single" ? "left-0.5" : "left-0"
+                    const insetR = pos === "end" || pos === "single" ? "right-0.5" : "right-0"
+                    const showLabel = pos === "start" || pos === "single"
+                    return (
+                      <div className={`absolute top-1 bottom-1 ${insetL} ${insetR} ${roundL} ${roundR} ${getEventBarColor(primary)} ${hasRes ? "opacity-85" : "opacity-50"}`}>
+                        {showLabel && (
+                          <div className="absolute inset-0 flex items-center pl-1.5">
+                            <span className={`text-[9px] font-bold truncate ${hasRes ? "text-white" : "text-amber-900"}`}>{primary.nombreevento?.slice(0, 12)}</span>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  )}
+                    )
+                  })()}
 
                   {/* Labels */}
                   {(ct === "pre" || ct === "hover-pre") && !primary && <div className="absolute inset-0 flex items-center justify-center"><span className="text-[8px] font-bold text-purple-700">PRE</span></div>}
@@ -407,32 +537,110 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
 }
 
 /* ==================================================
-  Week View
+  Week View — with day range selection + drag handles
 ================================================== */
-function WeekView({ days, salones, getEventsForCell, onDayClick, isCellSel, isToday, isPast, hoveredCell, setHoveredCell }: {
+function WeekView({ days, salones, getEventsForCell, onDayClick, onRangeClick, daySel, dayDragging, startDayDrag, onDayDragMove, onClearDaySel, isCellSel, isToday, isPast, hoveredCell, setHoveredCell }: {
   days: Date[]; salones: ddlItem[]; getEventsForCell: (s: string, d: string) => CalendarEvent[]
-  onDayClick: (d: Date, s: string) => void; isCellSel: (s: string, d: string) => boolean
+  onDayClick: (d: Date, s: string) => void
+  onRangeClick: () => void
+  daySel: DaySelectionState | null
+  dayDragging: "left" | "right" | null
+  startDayDrag: (side: "left" | "right", dateStr: string) => void
+  onDayDragMove: (dateStr: string) => void
+  onClearDaySel: () => void
+  isCellSel: (s: string, d: string) => boolean
   isToday: (d: Date) => boolean; isPast: (d: Date) => boolean; hoveredCell: string | null; setHoveredCell: (v: string | null) => void
 }) {
+  // Compute day selection range
+  function getDayCellType(salonId: string, dateStr: string, colIdx: number): "selected" | "range" | null {
+    if (!daySel || daySel.salonId !== salonId) return null
+    const coreDate = daySel.startDate
+    const startD = addDays(new Date(coreDate + "T12:00:00"), -daySel.daysBefore)
+    const endD = addDays(new Date(coreDate + "T12:00:00"), daySel.daysAfter)
+    const rangeStart = toDateStr(startD)
+    const rangeEnd = toDateStr(endD)
+    if (dateStr < rangeStart || dateStr > rangeEnd) return null
+    if (dateStr === coreDate && daySel.daysBefore === 0 && daySel.daysAfter === 0) return "selected"
+    return "range"
+  }
+
+  function isLeftEdge(salonId: string, dateStr: string): boolean {
+    if (!daySel || daySel.salonId !== salonId) return false
+    const startD = addDays(new Date(daySel.startDate + "T12:00:00"), -daySel.daysBefore)
+    return dateStr === toDateStr(startD)
+  }
+
+  function isRightEdge(salonId: string, dateStr: string): boolean {
+    if (!daySel || daySel.salonId !== salonId) return false
+    const endD = addDays(new Date(daySel.startDate + "T12:00:00"), daySel.daysAfter)
+    return dateStr === toDateStr(endD)
+  }
+
   return (
     <table className="w-full border-collapse text-[11px]">
       <thead className="sticky top-0 z-10"><tr className="bg-blue-50">
         <th className="text-left p-2 font-semibold text-blue-900 border-b border-r border-blue-200 min-w-[110px] sticky left-0 bg-blue-50 z-20">Salón</th>
         {days.map((d) => { const t = isToday(d); return <th key={toDateStr(d)} className={`text-center p-2 border-b border-r border-blue-100 min-w-[100px] ${t ? "bg-blue-600 text-white" : "text-blue-700"}`}><div className="text-[10px] uppercase tracking-wide">{DAYS_ES[d.getDay()]}</div><div className={`text-base font-bold ${t ? "text-white" : "text-blue-900"}`}>{d.getDate()}</div></th> })}
       </tr></thead>
-      <tbody>{salones.map((s) => (
-        <tr key={s.value} className="group">
-          <td className="p-2 font-semibold text-gray-800 border-b border-r border-blue-100 sticky left-0 bg-white group-hover:bg-blue-50/30 z-10 truncate max-w-[130px]">{s.text}</td>
-          {days.map((d) => {
-            const ds = toDateStr(d), evts = getEventsForCell(s.value, ds), res = evts.filter(e => e.tipo === "reservacion"), cot = evts.filter(e => e.tipo === "cotizacion")
-            const sel = isCellSel(s.value, ds), past = isPast(d), hov = hoveredCell === `${s.value}-${ds}`
-            return <td key={ds} className={`border-b border-r border-blue-50 p-1 align-top min-h-[56px] h-[56px] transition-all ${past ? "bg-gray-50/80 cursor-not-allowed" : sel ? "bg-blue-100 ring-2 ring-inset ring-blue-500 cursor-pointer" : hov ? "bg-blue-50 cursor-pointer" : "cursor-pointer hover:bg-blue-50/50"}`}
-              onClick={() => !past && onDayClick(d, s.value)} onMouseEnter={() => setHoveredCell(`${s.value}-${ds}`)} onMouseLeave={() => setHoveredCell(null)}>
-              {res.slice(0, 2).map(r => <div key={`r-${r.id}`} className="rounded px-1.5 py-0.5 mb-0.5 border text-[10px] leading-tight truncate bg-red-100 border-red-300 text-red-800"><div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" /><span className="font-semibold truncate">{r.nombreevento?.slice(0, 10)}</span></div><div className="text-[9px] text-red-600 opacity-70">{r.horainicio?.slice(0, 5)} – {r.horafin?.slice(0, 5)}</div></div>)}
-              {res.length > 2 && <div className="text-[9px] text-red-500 pl-1">+{res.length - 2}</div>}
+      <tbody>{salones.map((salon) => (
+        <tr key={salon.value} className="group">
+          <td className="p-2 font-semibold text-gray-800 border-b border-r border-blue-100 sticky left-0 bg-white group-hover:bg-blue-50/30 z-10 truncate max-w-[130px]">{salon.text}</td>
+          {days.map((d, colIdx) => {
+            const ds = toDateStr(d), evts = getEventsForCell(salon.value, ds)
+            const res = evts.filter(e => e.tipo === "reservacion"), cot = evts.filter(e => e.tipo === "cotizacion")
+            const past = isPast(d), hov = hoveredCell === `${salon.value}-${ds}`
+            const dayCt = getDayCellType(salon.value, ds, colIdx)
+            const leftEdge = isLeftEdge(salon.value, ds)
+            const rightEdge = isRightEdge(salon.value, ds)
+            const isInRange = dayCt !== null
+
+            return <td key={ds} className={`border-b border-r border-blue-50 p-1 align-top min-h-[56px] h-[56px] transition-all relative select-none ${
+              past ? "bg-gray-50/80 cursor-not-allowed"
+              : dayCt === "selected" ? "bg-blue-200 ring-2 ring-inset ring-blue-500 cursor-pointer"
+              : dayCt === "range" ? "bg-blue-100 ring-2 ring-inset ring-blue-400 cursor-pointer"
+              : hov ? "bg-blue-50 cursor-pointer" : "cursor-pointer hover:bg-blue-50/50"
+            }`}
+              onClick={() => {
+                if (past) return
+                if (isInRange) { onRangeClick() } // click on range → go to day view
+                else { onDayClick(d, salon.value) }
+              }}
+              onContextMenu={(e) => { e.preventDefault(); if (isInRange) onClearDaySel() }}
+              onMouseEnter={() => {
+                if (dayDragging) { onDayDragMove(ds) }
+                else { setHoveredCell(`${salon.value}-${ds}`) }
+              }}
+              onMouseLeave={() => { if (!dayDragging) setHoveredCell(null) }}>
+
+              {/* Events */}
+              {res.slice(0, 2).map(r => <div key={`r-${r.id}`} className="rounded px-1.5 py-0.5 mb-0.5 border text-[10px] leading-tight truncate bg-purple-100 border-purple-400 text-purple-900"><div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-purple-900 flex-shrink-0" /><span className="font-semibold truncate">{r.nombreevento?.slice(0, 10)}</span></div><div className="text-[9px] text-purple-600 opacity-70">{r.horainicio?.slice(0, 5)} – {r.horafin?.slice(0, 5)}</div></div>)}
+              {res.length > 2 && <div className="text-[9px] text-purple-700 pl-1">+{res.length - 2}</div>}
               {cot.slice(0, 2).map(c => <div key={`c-${c.id}`} className="rounded px-1.5 py-0.5 mb-0.5 border text-[10px] leading-tight truncate bg-amber-50 border-amber-200 text-amber-800"><div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" /><span className="font-semibold truncate">{c.nombreevento?.slice(0, 10)}</span></div><div className="text-[9px] text-amber-600 opacity-70">{c.horainicio?.slice(0, 5)} – {c.horafin?.slice(0, 5)}</div></div>)}
               {cot.length > 2 && <div className="text-[9px] text-amber-500 pl-1">+{cot.length - 2}</div>}
-              {evts.length === 0 && !past && <div className="h-full flex items-center justify-center opacity-0 group-hover:opacity-30"><span className="text-[10px] text-blue-400">Disponible</span></div>}
+              {evts.length === 0 && !past && !isInRange && <div className="h-full flex items-center justify-center opacity-0 group-hover:opacity-30"><span className="text-[10px] text-blue-400">Disponible</span></div>}
+
+              {/* Selected range indicator */}
+              {isInRange && evts.length === 0 && (
+                <div className="h-full flex items-center justify-center">
+                  <span className="text-[9px] text-blue-600 font-semibold">Clic para horarios →</span>
+                </div>
+              )}
+
+              {/* LEFT drag handle */}
+              {leftEdge && (
+                <div className="absolute left-0 top-0 bottom-0 w-3 flex items-center justify-center cursor-ew-resize z-20 group/handle hover:bg-blue-400/20 rounded-l"
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startDayDrag("left", ds) }}>
+                  <div className="w-1 h-8 rounded-full bg-blue-600 group-hover/handle:bg-blue-800 group-hover/handle:w-1.5 transition-all shadow-sm" />
+                </div>
+              )}
+
+              {/* RIGHT drag handle */}
+              {rightEdge && (
+                <div className="absolute right-0 top-0 bottom-0 w-3 flex items-center justify-center cursor-ew-resize z-20 group/handle hover:bg-blue-400/20 rounded-r"
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startDayDrag("right", ds) }}>
+                  <div className="w-1 h-8 rounded-full bg-blue-600 group-hover/handle:bg-blue-800 group-hover/handle:w-1.5 transition-all shadow-sm" />
+                </div>
+              )}
             </td>
           })}
         </tr>
@@ -444,29 +652,90 @@ function WeekView({ days, salones, getEventsForCell, onDayClick, isCellSel, isTo
 /* ==================================================
   Month View
 ================================================== */
-function MonthView({ days, salones, getEventsForCell, onDayClick, isCellSel, isToday, isPast }: {
-  days: (Date | null)[]; salones: ddlItem[]; getEventsForCell: (s: string, d: string) => CalendarEvent[]
-  onDayClick: (d: Date, s: string) => void; isCellSel: (s: string, d: string) => boolean; isToday: (d: Date) => boolean; isPast: (d: Date) => boolean
+function MonthView({ year, salones, events, onMonthClick }: {
+  year: number; salones: ddlItem[]; events: CalendarEvent[]
+  onMonthClick: (month: number) => void
 }) {
-  function getSummary(ds: string) { const r: { salon: ddlItem; res: CalendarEvent[]; cot: CalendarEvent[] }[] = []; for (const s of salones) { const e = getEventsForCell(s.value, ds); if (e.length > 0) r.push({ salon: s, res: e.filter(x => x.tipo === "reservacion"), cot: e.filter(x => x.tipo === "cotizacion") }) }; return r }
+  const currentMonth = new Date().getMonth()
+  const currentYear = new Date().getFullYear()
+  const MONTHS_SHORT = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+
+  // Count events per salon per month
+  function getMonthCounts(salonId: string, month: number): { res: number; cot: number } {
+    const monthStart = `${year}-${String(month + 1).padStart(2, "0")}-01`
+    const monthEnd = `${year}-${String(month + 1).padStart(2, "0")}-${new Date(year, month + 1, 0).getDate()}`
+    let res = 0, cot = 0
+    for (const e of events) {
+      if (e.salonid !== Number(salonId)) continue
+      if (e.fechainicio > monthEnd || e.fechafin < monthStart) continue
+      if (e.tipo === "reservacion") res++; else cot++
+    }
+    return { res, cot }
+  }
+
+  const isPastMonth = (m: number) => year < currentYear || (year === currentYear && m < currentMonth)
+  const isCurrentMonth = (m: number) => year === currentYear && m === currentMonth
+
   return (
-    <div className="p-2">
-      <div className="grid grid-cols-7 gap-1 mb-1">{["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"].map(d => <div key={d} className="text-center text-[10px] font-bold text-blue-700 uppercase tracking-wide py-1">{d}</div>)}</div>
-      <div className="grid grid-cols-7 gap-1">
-        {days.map((day, i) => {
-          if (!day) return <div key={`e-${i}`} className="min-h-[74px] rounded-lg bg-gray-50/50" />
-          const ds = toDateStr(day), t = isToday(day), p = isPast(day), sum = getSummary(ds), anySel = salones.some(s => isCellSel(s.value, ds))
-          return <div key={ds} className={`min-h-[74px] rounded-lg border p-1 transition-all ${t ? "border-blue-500 bg-blue-50 ring-1 ring-blue-500" : anySel ? "border-blue-400 bg-blue-50" : p ? "border-gray-100 bg-gray-50/50" : "border-gray-200 hover:border-blue-300 hover:bg-blue-50/30 cursor-pointer"}`}
-            onClick={() => !p && onDayClick(day, salones[0]?.value || "")}>
-            <div className={`text-xs font-bold mb-0.5 ${t ? "text-blue-600" : p ? "text-gray-400" : "text-gray-700"}`}>{day.getDate()}</div>
-            {sum.length > 0 ? <div className="space-y-0.5">
-              {sum.slice(0, 3).map(({ salon, res, cot }) => <div key={salon.value} className={`rounded px-1 py-0.5 text-[9px] leading-tight truncate cursor-pointer border ${res.length > 0 ? "bg-red-50 border-red-200 text-red-700" : "bg-amber-50 border-amber-200 text-amber-700"}`}
-                onClick={e => { e.stopPropagation(); if (!p) onDayClick(day, salon.value) }}><div className="flex items-center gap-0.5"><div className={`w-1.5 h-1.5 rounded-full ${res.length > 0 ? "bg-red-500" : "bg-amber-400"}`} /><span className="font-semibold truncate">{salon.text.slice(0, 8)}</span></div></div>)}
-              {sum.length > 3 && <div className="text-[8px] text-blue-500">+{sum.length - 3}</div>}
-            </div> : !p ? <div className="h-full flex items-center justify-center"><span className="text-[9px] text-green-400 opacity-0 hover:opacity-100">Libre</span></div> : null}
-          </div>
-        })}
-      </div>
-    </div>
+    <table className="w-full border-collapse text-[11px]">
+      <thead className="sticky top-0 z-10">
+        <tr className="bg-blue-50">
+          <th className="text-left p-2 font-semibold text-blue-900 border-b border-r border-blue-200 min-w-[110px] sticky left-0 bg-blue-50 z-20">Salón</th>
+          {MONTHS_SHORT.map((m, i) => (
+            <th key={i} className={`text-center p-2 font-medium border-b border-r border-blue-100 min-w-[70px] ${
+              isCurrentMonth(i) ? "bg-blue-600 text-white" : isPastMonth(i) ? "text-gray-400" : "text-blue-700"
+            }`}>
+              {m}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {salones.map((salon) => (
+          <tr key={salon.value} className="group">
+            <td className="p-2 font-semibold text-gray-800 border-b border-r border-blue-100 sticky left-0 bg-white group-hover:bg-blue-50/30 z-10 truncate max-w-[130px]">
+              {salon.text}
+            </td>
+            {MONTHS_SHORT.map((_, month) => {
+              const { res, cot } = getMonthCounts(salon.value, month)
+              const past = isPastMonth(month)
+              const current = isCurrentMonth(month)
+              const total = res + cot
+
+              return (
+                <td key={month}
+                  className={`border-b border-r border-blue-50 p-1.5 align-top transition-all h-[52px] ${
+                    past ? "bg-gray-50/50 cursor-not-allowed"
+                    : current ? "bg-blue-50 cursor-pointer hover:bg-blue-100"
+                    : "cursor-pointer hover:bg-blue-50"
+                  }`}
+                  onClick={() => onMonthClick(month)}>
+                  {total > 0 ? (
+                    <div className="space-y-0.5">
+                      {res > 0 && (
+                        <div className="flex items-center gap-1">
+                          <div className="w-1.5 h-1.5 rounded-full bg-purple-900 flex-shrink-0" />
+                          <span className="text-[10px] text-purple-900 font-semibold">{res} res.</span>
+                        </div>
+                      )}
+                      {cot > 0 && (
+                        <div className="flex items-center gap-1">
+                          <div className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                          <span className="text-[10px] text-amber-700 font-semibold">{cot} cot.</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : !past ? (
+                    <div className="h-full flex items-center justify-center opacity-0 group-hover:opacity-40 transition-opacity">
+                      <span className="text-[9px] text-blue-400">Ver →</span>
+                    </div>
+                  ) : null}
+                </td>
+              )
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
   )
 }

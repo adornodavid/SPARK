@@ -94,6 +94,8 @@ const HORARIOS_EVENTO = (() => {
   slots.push({ value: "00:00", label: "12:00 AM" })
   slots.push({ value: "00:30", label: "12:30 AM" })
   slots.push({ value: "01:00", label: "1:00 AM" })
+  slots.push({ value: "01:30", label: "1:30 AM" })
+  slots.push({ value: "02:00", label: "2:00 AM" })
   return slots
 })()
 
@@ -160,6 +162,7 @@ export function QuotationForm() {
   const [diaSeleccionado, setDiaSeleccionado] = useState<string | null>(null)
   const [reservacionesDia, setReservacionesDia] = useState<{ salon: string; fechainicio: string; fechafin: string; horainicio: string; horafin: string; estatus: string }[]>([])
   const [loadingResDia, setLoadingResDia] = useState(false)
+  const [overlapWarning, setOverlapWarning] = useState<string | null>(null)
   const [presupuestoItems, setPresupuestoItems] = useState<{ concepto: string; tipo: string; precio: number; iva: number; servicio: number; subtotal: number; cantidad: number; dias: number; total: number }[]>([])
   const [audiovisualItems, setAudiovisualItems] = useState<any[]>([])
   const [showAudiovisualModal, setShowAudiovisualModal] = useState(false)
@@ -1707,6 +1710,11 @@ export function QuotationForm() {
       return
     }
 
+    if (!formData.montaje) {
+      alert("Selecciona un montaje antes de crear la cotización.")
+      return
+    }
+
     setLoading(true)
 
     try {
@@ -2050,6 +2058,21 @@ export function QuotationForm() {
                   required
                 />
               </div>
+
+              <div className="space-y-1 w-64">
+                <Label htmlFor="nombreEvento" className="text-xs font-medium">
+                  Nombre del Evento <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="nombreEvento"
+                  type="text"
+                  value={formData.nombreEvento}
+                  onChange={(e) => setFormData(prev => ({ ...prev, nombreEvento: e.target.value }))}
+                  placeholder="Ej: Boda de Juan y María"
+                  className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
+                  required
+                />
+              </div>
             </div>
           </div>
 
@@ -2057,40 +2080,88 @@ export function QuotationForm() {
           <div className="border-t pt-3 space-y-3">
             <h3 className="text-xs font-semibold text-blue-900 mb-2 uppercase tracking-wide">Selección de Espacio</h3>
 
-            {/* Row 1: Hotel, Salón, Montaje + Galería de fotos */}
-            <div className="grid md:grid-cols-[1fr_280px] gap-3">
-              <div className="space-y-2">
-                {/* Hotel */}
-                <div className="space-y-1">
-                  <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Hotel <span className="text-red-500">*</span></Label>
-                  <Select
-                    value={formData.hotel}
-                    onValueChange={(value) => {
-                      setFormData(prev => ({ ...prev, hotel: value, salon: "", montaje: "" }))
-                      setSalones([])
-                      setMontajes([])
-                      setSalonFotos([])
-                      setCurrentPhotoIndex(0)
-                      setSalonReservaciones([])
-                      loadSalones(value)
-                    }}
-                    required
-                  >
-                    <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm">
-                      <SelectValue placeholder="Selecciona un hotel" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {hoteles.map((hotel) => (
-                        <SelectItem key={hotel.value} value={hotel.value}>{hotel.text}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+            {/* Hotel */}
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Hotel <span className="text-red-500">*</span></Label>
+              <Select
+                value={formData.hotel}
+                onValueChange={(value) => {
+                  setFormData(prev => ({ ...prev, hotel: value, salon: "", montaje: "" }))
+                  setSalones([])
+                  setMontajes([])
+                  setSalonFotos([])
+                  setCurrentPhotoIndex(0)
+                  setSalonReservaciones([])
+                  loadSalones(value)
+                }}
+                required
+              >
+                <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm">
+                  <SelectValue placeholder="Selecciona un hotel" />
+                </SelectTrigger>
+                <SelectContent>
+                  {hoteles.map((hotel) => (
+                    <SelectItem key={hotel.value} value={hotel.value}>{hotel.text}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
+            {/* Row 2: Calendario de Disponibilidad — full width */}
+            <AvailabilityCalendar
+              hotelId={formData.hotel}
+              salones={salones}
+              onSelectSlot={async (fecha, salonId, horaPreMontaje, horaInicio, horaFin, horaPostMontaje, horasExtras, fechaFin2, overlappingCotizacion) => {
+                setOverlapWarning(overlappingCotizacion || null)
+                const prevSalon = formData.salon
+                setFormData(prev => ({
+                  ...prev,
+                  // Solo actualizar fechas si viene fecha (selección de día), no cuando solo cambian horas
+                  ...(fecha ? { fechaInicial: fecha, fechaFinal: fechaFin2 || fecha } : {}),
+                  salon: salonId,
+                  ...(horaPreMontaje ? { horaPreMontaje } : {}),
+                  ...(horaInicio ? { horaInicio } : {}),
+                  ...(horaFin ? { horaFin } : {}),
+                  ...(horaPostMontaje ? { horaPostMontaje } : {}),
+                  horasExtras: (horasExtras ?? 0).toString(),
+                }))
+                if (fecha) {
+                  setCalendarRange({ from: new Date(fecha + "T00:00:00"), to: new Date((fechaFin2 || fecha) + "T00:00:00") })
+                }
+                // Solo recargar montajes/reservaciones/presupuesto cuando cambia el salón
+                if (salonId !== prevSalon) {
+                  setFormData(prev => ({ ...prev, montaje: "" }))
+                  setMontajes([])
+                  setSalonReservaciones([])
+                  setReservacionesDia([])
+                  await loadMontajes(salonId)
+                  const salonItem = salones.find((s) => s.value === salonId)
+                  const salonResult = await objetoSalon(Number(salonId))
+                  const precioSalon = salonResult.success && salonResult.data?.preciopordia ? Number(salonResult.data.preciopordia) : 0
+                  const nombreSalon = salonResult.success && salonResult.data?.nombre ? salonResult.data.nombre : salonItem?.text || "Salón"
+                  setPresupuestoItems(prev => {
+                    const sinSalon = prev.filter(p => p.tipo !== "Salón")
+                    return [crearPresupuestoItem(nombreSalon, "Salón", precioSalon, 1, 0, 1), ...sinSalon]
+                  })
+                }
+              }}
+              selectedFechaInicio={formData.fechaInicial}
+              selectedFechaFin={formData.fechaFinal}
+              selectedSalonId={formData.salon}
+              selectedHoraPreMontaje={formData.horaPreMontaje}
+              selectedHoraInicio={formData.horaInicio}
+              selectedHoraFin={formData.horaFin}
+              selectedHoraPostMontaje={formData.horaPostMontaje}
+            />
+
+            {/* Salón, Montaje, Fechas, Horarios + Galería */}
+            <div className="grid md:grid-cols-[1fr_380px] gap-3">
+              {/* Izquierda: inputs */}
+              <div className="space-y-2">
                 {/* Salón + Montaje */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Salón <span className="text-red-500">*</span></Label>
+                <div className="flex gap-2 items-end bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5">
+                  <div className="space-y-1 w-[220px]">
+                    <Label className="text-[10px] font-semibold text-slate-700 uppercase tracking-wide">Salón <span className="text-red-500">*</span></Label>
                     <Select
                       value={formData.salon}
                       onValueChange={async (value) => {
@@ -2119,7 +2190,7 @@ export function QuotationForm() {
                       disabled={!formData.hotel}
                       required
                     >
-                      <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                      <SelectTrigger className="border-slate-300 bg-white focus:ring-blue-500 h-8 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
                         <SelectValue placeholder={formData.hotel ? "Selecciona un salón" : "Selecciona hotel primero"} />
                       </SelectTrigger>
                       <SelectContent>
@@ -2129,14 +2200,15 @@ export function QuotationForm() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Montaje</Label>
+                  <div className="space-y-1 w-[220px]">
+                    <Label className="text-[10px] font-semibold text-slate-700 uppercase tracking-wide">Montaje <span className="text-red-500">*</span></Label>
                     <Select
                       value={formData.montaje}
                       onValueChange={(value) => setFormData(prev => ({ ...prev, montaje: value }))}
                       disabled={!formData.salon}
+                      required
                     >
-                      <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                      <SelectTrigger className="border-slate-300 bg-white focus:ring-blue-500 h-8 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
                         <SelectValue placeholder={formData.salon ? "Selecciona un montaje" : "Selecciona salón primero"} />
                       </SelectTrigger>
                       <SelectContent>
@@ -2147,13 +2219,73 @@ export function QuotationForm() {
                     </Select>
                   </div>
                 </div>
+
+                {/* Fechas */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Fecha Inicio <span className="text-red-500">*</span></Label>
+                    <Input id="fechaInicial" type="date" value={formData.fechaInicial}
+                      onChange={(e) => { setFormData(prev => ({ ...prev, fechaInicial: e.target.value })); if (e.target.value) setCalendarRange((prev) => ({ from: new Date(e.target.value + "T00:00:00"), to: prev?.to })) }}
+                      className="border-blue-200 focus:ring-blue-500 h-8 text-sm" required />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Fecha Fin <span className="text-red-500">*</span></Label>
+                    <Input id="fechaFinal" type="date" value={formData.fechaFinal}
+                      onChange={(e) => { setFormData(prev => ({ ...prev, fechaFinal: e.target.value })); if (e.target.value) setCalendarRange((prev) => ({ from: prev?.from, to: new Date(e.target.value + "T00:00:00") })) }}
+                      className="border-blue-200 focus:ring-blue-500 h-8 text-sm" required />
+                  </div>
+                </div>
+
+                {/* Horarios */}
+                <div className="flex gap-1.5 items-end flex-wrap">
+                  <div className="space-y-1 w-[105px]">
+                    <Label className="text-[10px] font-semibold text-purple-900 uppercase tracking-wide">PreMontaje</Label>
+                    <Input type="text" value={formData.horaPreMontaje ? HORARIOS_EVENTO.find(h => h.value === formData.horaPreMontaje)?.label || formData.horaPreMontaje : "—"}
+                      className="border-purple-200 bg-purple-50/50 text-purple-800 h-7 text-xs cursor-not-allowed text-center" disabled readOnly />
+                  </div>
+                  <div className="space-y-1 w-[120px]">
+                    <Label className="text-[10px] font-semibold text-blue-900 uppercase tracking-wide">Hora Inicio <span className="text-red-500">*</span></Label>
+                    <Select value={formData.horaInicio} onValueChange={(value) => setFormData(prev => ({ ...prev, horaInicio: value }))} required>
+                      <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-7 text-xs"><SelectValue placeholder="Hora" /></SelectTrigger>
+                      <SelectContent>{HORARIOS_EVENTO.map((h) => <SelectItem key={h.value} value={h.value}>{h.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1 w-[120px]">
+                    <Label className="text-[10px] font-semibold text-blue-900 uppercase tracking-wide">Hora Fin <span className="text-red-500">*</span></Label>
+                    <Select value={formData.horaFin} onValueChange={(value) => setFormData(prev => ({ ...prev, horaFin: value }))} required>
+                      <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-7 text-xs"><SelectValue placeholder="Hora" /></SelectTrigger>
+                      <SelectContent>{HORARIOS_EVENTO.map((h, idx) => { const d = horaInicioIdx >= 0 && idx <= horaInicioIdx; return <SelectItem key={h.value} value={h.value} disabled={d}>{h.label}</SelectItem> })}</SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1 w-[105px]">
+                    <Label className="text-[10px] font-semibold text-purple-900 uppercase tracking-wide">PostMontaje</Label>
+                    <Input type="text" value={formData.horaPostMontaje ? HORARIOS_EVENTO.find(h => h.value === formData.horaPostMontaje)?.label || formData.horaPostMontaje : "—"}
+                      className="border-purple-200 bg-purple-50/50 text-purple-800 h-7 text-xs cursor-not-allowed text-center" disabled readOnly />
+                  </div>
+                  <div className="space-y-1 w-[75px]">
+                    <Label className="text-[10px] font-semibold text-teal-900 uppercase tracking-wide">Extras</Label>
+                    <Input type="text" value={Number(formData.horasExtras) > 0 ? `${formData.horasExtras} hr` : "0"}
+                      className="border-teal-200 bg-teal-50/50 text-teal-800 h-7 text-xs cursor-not-allowed font-semibold text-center" disabled readOnly />
+                  </div>
+                </div>
+
+                {/* Warning de solapamiento */}
+                {overlapWarning && (
+                  <div className="flex items-center gap-2 bg-orange-50 border border-orange-300 rounded-lg px-3 py-1.5">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5 text-orange-500 flex-shrink-0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+                    <div>
+                      <p className="text-[10px] font-bold text-orange-800">{overlapWarning}</p>
+                      <p className="text-[9px] text-orange-600">Se requiere autorización especial para confirmar esta cotización.</p>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {/* Galería de fotos del salón */}
-              <div className="relative rounded-xl overflow-hidden bg-blue-50 border border-blue-100 flex flex-col min-h-[140px]">
+              {/* Derecha: Galería de fotos del salón */}
+              <div className="relative rounded-xl overflow-hidden bg-blue-50 border border-blue-100 flex flex-col">
                 {formData.salon && salonFotos.length > 0 ? (
                   <>
-                    <div className="relative flex-1 overflow-hidden group">
+                    <div className="relative flex-1 overflow-hidden group min-h-[180px]">
                       <img
                         src={salonFotos[currentPhotoIndex]}
                         alt={`Foto ${currentPhotoIndex + 1} del salón`}
@@ -2162,20 +2294,14 @@ export function QuotationForm() {
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent pointer-events-none" />
                       <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
-                        <div className="w-7 h-7 rounded-full bg-black/50 flex items-center justify-center">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" className="w-4 h-4">
-                            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-                          </svg>
+                        <div className="w-6 h-6 rounded-full bg-black/50 flex items-center justify-center">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" className="w-3.5 h-3.5"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>
                         </div>
                       </div>
                       <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
                         {salonFotos.map((_, i) => (
-                          <button
-                            key={i}
-                            type="button"
-                            onClick={() => setCurrentPhotoIndex(i)}
-                            className={`h-1.5 rounded-full transition-all ${i === currentPhotoIndex ? "bg-white w-5" : "bg-white/50 w-1.5"}`}
-                          />
+                          <button key={i} type="button" onClick={() => setCurrentPhotoIndex(i)}
+                            className={`h-1.5 rounded-full transition-all ${i === currentPhotoIndex ? "bg-white w-4" : "bg-white/50 w-1.5"}`} />
                         ))}
                       </div>
                       {salonFotos.length > 1 && (
@@ -2194,11 +2320,9 @@ export function QuotationForm() {
                     </div>
                   </>
                 ) : (
-                  <div className="flex flex-col items-center justify-center flex-1 gap-2 p-4 text-center">
+                  <div className="flex flex-col items-center justify-center flex-1 gap-2 p-4 text-center min-h-[180px]">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-8 h-8 text-blue-200">
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <circle cx="8.5" cy="8.5" r="1.5" />
-                      <polyline points="21 15 16 10 5 21" />
+                      <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
                     </svg>
                     <p className="text-xs text-blue-300">
                       {!formData.hotel ? "Selecciona hotel" : !formData.salon ? "Selecciona salón" : "Sin fotos"}
@@ -2207,184 +2331,12 @@ export function QuotationForm() {
                 )}
               </div>
             </div>
-
-            {/* Row 2: Calendario de Disponibilidad — full width */}
-            <AvailabilityCalendar
-              hotelId={formData.hotel}
-              salones={salones}
-              onSelectSlot={async (fecha, salonId, horaPreMontaje, horaInicio, horaFin, horaPostMontaje, horasExtras) => {
-                const prevSalon = formData.salon
-                setFormData(prev => ({
-                  ...prev,
-                  fechaInicial: fecha,
-                  fechaFinal: fecha,
-                  salon: salonId,
-                  ...(horaPreMontaje ? { horaPreMontaje } : {}),
-                  ...(horaInicio ? { horaInicio } : {}),
-                  ...(horaFin ? { horaFin } : {}),
-                  ...(horaPostMontaje ? { horaPostMontaje } : {}),
-                  horasExtras: (horasExtras ?? 0).toString(),
-                }))
-                setCalendarRange({ from: new Date(fecha + "T00:00:00"), to: new Date(fecha + "T00:00:00") })
-                // Solo recargar montajes/reservaciones/presupuesto cuando cambia el salón
-                if (salonId !== prevSalon) {
-                  setFormData(prev => ({ ...prev, montaje: "" }))
-                  setMontajes([])
-                  setSalonReservaciones([])
-                  setReservacionesDia([])
-                  await loadMontajes(salonId)
-                  const salonItem = salones.find((s) => s.value === salonId)
-                  const salonResult = await objetoSalon(Number(salonId))
-                  const precioSalon = salonResult.success && salonResult.data?.preciopordia ? Number(salonResult.data.preciopordia) : 0
-                  const nombreSalon = salonResult.success && salonResult.data?.nombre ? salonResult.data.nombre : salonItem?.text || "Salón"
-                  setPresupuestoItems(prev => {
-                    const sinSalon = prev.filter(p => p.tipo !== "Salón")
-                    return [crearPresupuestoItem(nombreSalon, "Salón", precioSalon, 1, 0, 1), ...sinSalon]
-                  })
-                }
-              }}
-              selectedFechaInicio={formData.fechaInicial}
-              selectedFechaFin={formData.fechaFinal}
-              selectedSalonId={formData.salon}
-              selectedHoraPreMontaje={formData.horaPreMontaje}
-              selectedHoraInicio={formData.horaInicio}
-              selectedHoraFin={formData.horaFin}
-              selectedHoraPostMontaje={formData.horaPostMontaje}
-            />
-
-            {/* Row 3: Fechas y Horarios */}
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Fecha Inicio <span className="text-red-500">*</span></Label>
-                <Input
-                  id="fechaInicial"
-                  type="date"
-                  value={formData.fechaInicial}
-                  onChange={(e) => {
-                    setFormData(prev => ({ ...prev, fechaInicial: e.target.value }))
-                    if (e.target.value) {
-                      setCalendarRange((prev) => ({ from: new Date(e.target.value + "T00:00:00"), to: prev?.to }))
-                    }
-                  }}
-                  className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
-                  required
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Fecha Fin <span className="text-red-500">*</span></Label>
-                <Input
-                  id="fechaFinal"
-                  type="date"
-                  value={formData.fechaFinal}
-                  onChange={(e) => {
-                    setFormData(prev => ({ ...prev, fechaFinal: e.target.value }))
-                    if (e.target.value) {
-                      setCalendarRange((prev) => ({ from: prev?.from, to: new Date(e.target.value + "T00:00:00") }))
-                    }
-                  }}
-                  className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
-                  required
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-5 gap-2">
-              <div className="space-y-1">
-                <Label className="text-xs font-semibold text-purple-900 uppercase tracking-wide">Hora PreMontaje</Label>
-                <Input
-                  type="text"
-                  value={formData.horaPreMontaje ? HORARIOS_EVENTO.find(h => h.value === formData.horaPreMontaje)?.label || formData.horaPreMontaje : ""}
-                  placeholder="Auto desde calendario"
-                  className="border-purple-200 bg-purple-50/50 text-purple-800 h-8 text-sm cursor-not-allowed"
-                  disabled
-                  readOnly
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Hora Inicio <span className="text-red-500">*</span></Label>
-                <Select
-                  value={formData.horaInicio}
-                  onValueChange={(value) => setFormData(prev => ({ ...prev, horaInicio: value }))}
-                  required
-                >
-                  <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm">
-                    <SelectValue placeholder="Selecciona hora" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {HORARIOS_EVENTO.map((h, idx) => (
-                      <SelectItem key={h.value} value={h.value} disabled={blockedIndices.has(idx)}>
-                        {h.label}{blockedIndices.has(idx) ? " — ocupado" : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Hora Fin <span className="text-red-500">*</span></Label>
-                <Select
-                  value={formData.horaFin}
-                  onValueChange={(value) => setFormData(prev => ({ ...prev, horaFin: value }))}
-                  required
-                >
-                  <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm">
-                    <SelectValue placeholder="Selecciona hora" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {HORARIOS_EVENTO.map((h, idx) => {
-                      const isBlocked = blockedIndices.has(idx)
-                      const isBeforeInicio = horaInicioIdx >= 0 && idx <= horaInicioIdx
-                      return (
-                        <SelectItem key={h.value} value={h.value} disabled={isBlocked || isBeforeInicio}>
-                          {h.label}{isBlocked ? " — ocupado" : ""}
-                        </SelectItem>
-                      )
-                    })}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs font-semibold text-purple-900 uppercase tracking-wide">Hora PostMontaje</Label>
-                <Input
-                  type="text"
-                  value={formData.horaPostMontaje ? HORARIOS_EVENTO.find(h => h.value === formData.horaPostMontaje)?.label || formData.horaPostMontaje : ""}
-                  placeholder="Auto desde calendario"
-                  className="border-purple-200 bg-purple-50/50 text-purple-800 h-8 text-sm cursor-not-allowed"
-                  disabled
-                  readOnly
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs font-semibold text-teal-900 uppercase tracking-wide">Horas Extras</Label>
-                <Input
-                  type="text"
-                  value={Number(formData.horasExtras) > 0 ? `${formData.horasExtras} hr${Number(formData.horasExtras) !== 1 ? "s" : ""}` : "0"}
-                  placeholder="0"
-                  className="border-teal-200 bg-teal-50/50 text-teal-800 h-8 text-sm cursor-not-allowed font-semibold"
-                  disabled
-                  readOnly
-                />
-              </div>
-            </div>
           </div>
 
           {/* Event Details */}
           <div className="border-t pt-3">
             <h3 className="text-xs font-semibold text-blue-900 mb-2 uppercase tracking-wide">Información del Evento</h3>
             <div className="flex flex-wrap gap-5">
-              <div className="space-y-1 w-64">
-                <Label htmlFor="nombreEvento" className="text-xs font-medium">
-                  Nombre del Evento <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="nombreEvento"
-                  type="text"
-                  value={formData.nombreEvento}
-                  onChange={(e) => setFormData(prev => ({ ...prev, nombreEvento: e.target.value }))}
-                  placeholder="Ej: Boda de Juan y María"
-                  className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
-                  required
-  />
-              </div>
-
               <div className="space-y-1 w-48">
                 <Label htmlFor="estatus" className="text-xs font-medium">
                   Estatus
