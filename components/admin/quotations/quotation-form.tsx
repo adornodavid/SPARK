@@ -6,6 +6,7 @@ import { listaDesplegableHoteles } from "@/app/actions/hoteles"
 import { listaDesplegableSalones, objetoSalon, objetoSalones } from "@/app/actions/salones"
 import { crearCotizacion, actualizarCotizacion, objetoCotizacion } from "@/app/actions/cotizaciones"
 import { obtenerDisponibilidadSalon, obtenerReservacionesPorDia } from "@/app/actions/reservaciones"
+import { AvailabilityCalendar } from "./availability-calendar"
 import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, agregarElementoACotizacion, buscarLugaresPorHotel, modificarLugarCotizacion, listaEstatusCotizacion, obtenerDocumentoPDF, obtenerPlatillosCotizacion, buscarPlatillosItems, obtenerFormatoCotizacion, obtenerUsuarioSesionActual, obtenerEmpresaPorCliente, obtenerGrupoEmpresa, obtenerComplementosPorHotel, obtenerPlatilloItemPorId, obtenerAudiovisualPorHotel } from "@/app/actions/catalogos"
 import { listaCategoriaEvento } from "@/app/actions/cotizaciones"
 import { Users, MapPin, DollarSign, User, Mail, Phone, Building2, Check, X, CalendarIcon, FileText } from "lucide-react"
@@ -189,6 +190,9 @@ export function QuotationForm() {
     fechaFinal: "",
     horaInicio: "",
     horaFin: "",
+    horaPreMontaje: "",
+    horaPostMontaje: "",
+    horasExtras: "0",
     // Event Details
     nombreEvento: "",
     categoriaEvento: "",
@@ -272,6 +276,9 @@ export function QuotationForm() {
         fechaFinal:          ff,
         horaInicio:          hi,
         horaFin:             hf,
+        horaPreMontaje:      c.horapremontaje?.slice(0, 5) ?? "",
+        horaPostMontaje:     c.horapostmontaje?.slice(0, 5) ?? "",
+        horasExtras:         c.horasextras?.toString() ?? "0",
         nombreEvento:        c.nombreevento              ?? "",
         categoriaEvento:     c.categoriaevento           ?? "",
         tipoEvento:          tid,
@@ -1974,405 +1981,10 @@ export function QuotationForm() {
             </div>
           </div>
 
-          {/* Selección de Espacio y Fechas — altura fija */}
+          {/* Categoría, Tipo de Evento, No. Invitados */}
           <div className="border-t pt-3">
-            <div className="grid md:grid-cols-2 gap-4" style={{ minHeight: "410px" }}>
-
-              {/* LEFT — Inputs: Hotel, Salón, Montaje + Calendario + Fechas */}
-              <div className="flex flex-col gap-2 overflow-y-auto pr-1">
-
-                {/* Hotel */}
-                <div className="space-y-1">
-                  <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Hotel <span className="text-red-500">*</span></Label>
-                  <Select
-                    value={formData.hotel}
-                    onValueChange={(value) => {
-                      setFormData(prev => ({ ...prev, hotel: value, salon: "", montaje: "" }))
-                      setSalones([])
-                      setMontajes([])
-                      setSalonFotos([])
-                      setCurrentPhotoIndex(0)
-                      setSalonReservaciones([])
-                      loadSalones(value)
-                    }}
-                    required
-                  >
-                    <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm">
-                      <SelectValue placeholder="Selecciona un hotel" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {hoteles.map((hotel) => (
-                        <SelectItem key={hotel.value} value={hotel.value}>{hotel.text}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Salón + Montaje en la misma fila */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Salón <span className="text-red-500">*</span></Label>
-                    <Select
-                      value={formData.salon}
-                      onValueChange={async (value) => {
-                        setFormData(prev => ({ ...prev, salon: value, montaje: "" }))
-                        setMontajes([])
-                        setSalonReservaciones([])
-                        setReservacionesDia([])
-                        await loadMontajes(value)
-                        // Recargar reservaciones del día seleccionado con el nuevo salón
-                        if (diaSeleccionado) {
-                          setLoadingResDia(true)
-                          obtenerReservacionesPorDia(diaSeleccionado, Number(value)).then((res) => {
-                            setReservacionesDia(res.data ?? [])
-                            setLoadingResDia(false)
-                          })
-                        }
-                        // Actualizar salón en presupuesto
-                        const salonItem = salones.find((s) => s.value === value)
-                        const salonResult = await objetoSalon(Number(value))
-                        const precioSalon = salonResult.success && salonResult.data?.preciopordia ? Number(salonResult.data.preciopordia) : 0
-                        const dias = calcularDiasEvento(formData.fechaInicial, formData.fechaFinal)
-                        const nombreSalon = salonResult.success && salonResult.data?.nombre ? salonResult.data.nombre : salonItem?.text || "Salón"
-                        setPresupuestoItems(prev => {
-                          const sinSalon = prev.filter(p => p.tipo !== "Salón")
-                          return [crearPresupuestoItem(nombreSalon, "Salón", precioSalon, dias, 0, 1), ...sinSalon]
-                        })
-                      }}
-                      disabled={!formData.hotel}
-                      required
-                    >
-                      <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
-                        <SelectValue placeholder={formData.hotel ? "Selecciona un salón" : "Selecciona hotel primero"} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {salones.map((salon) => (
-                          <SelectItem key={salon.value} value={salon.value}>{salon.text}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Montaje</Label>
-                    <Select
-                      value={formData.montaje}
-                      onValueChange={(value) => setFormData(prev => ({ ...prev, montaje: value }))}
-                      disabled={!formData.salon}
-                    >
-                      <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
-                        <SelectValue placeholder={formData.salon ? "Selecciona un montaje" : "Selecciona salón primero"} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {montajes.map((montaje) => (
-                          <SelectItem key={montaje.value} value={montaje.value}>{montaje.text}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                {/* Calendario + Panel de reservaciones del día */}
-                <div className="border border-blue-100 rounded-lg bg-blue-50/50 overflow-hidden">
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-blue-100 bg-blue-50">
-                    <CalendarIcon className="w-3.5 h-3.5 text-blue-600" />
-                    <span className="text-xs font-semibold text-blue-900 uppercase tracking-wide">
-                      {!formData.fechaInicial
-                        ? "Selecciona fecha de inicio"
-                        : !formData.fechaFinal
-                        ? "Selecciona fecha de fin"
-                        : "Rango seleccionado"}
-                    </span>
-                  </div>
-                  <div className="flex">
-                    {/* Calendario */}
-                    <div className="flex-shrink-0 [&_.rdp]:p-2 [&_.rdp-months]:flex [&_.rdp-months]:flex-row [&_.rdp-months]:gap-4">
-                      <Calendar
-                        mode="range"
-                        numberOfMonths={2}
-                        selected={calendarRange}
-                        onSelect={(range) => {
-                          setCalendarRange(range)
-                          if (range?.from) {
-                            const from = range.from
-                            const yyyy = from.getFullYear()
-                            const mm = String(from.getMonth() + 1).padStart(2, "0")
-                            const dd = String(from.getDate()).padStart(2, "0")
-                            setFormData((prev) => ({ ...prev, fechaInicial: `${yyyy}-${mm}-${dd}`, fechaFinal: "" }))
-                          }
-                          if (range?.to) {
-                            const to = range.to
-                            const yyyy = to.getFullYear()
-                            const mm = String(to.getMonth() + 1).padStart(2, "0")
-                            const dd = String(to.getDate()).padStart(2, "0")
-                            setFormData((prev) => ({ ...prev, fechaFinal: `${yyyy}-${mm}-${dd}` }))
-                          }
-                        }}
-                        onDayClick={(day) => {
-                          if (!formData.salon) return
-                          const dateStr = toLocalDateStr(day)
-                          setDiaSeleccionado(dateStr)
-                          setLoadingResDia(true)
-                          obtenerReservacionesPorDia(dateStr, Number(formData.salon)).then((res) => {
-                            setReservacionesDia(res.data ?? [])
-                            setLoadingResDia(false)
-                          })
-                        }}
-                        disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0)) || isDayFullyBooked(date)}
-                        modifiers={{ ocupado: (date) => !isDayFullyBooked(date) && getBlockedIndices(toLocalDateStr(date)).size > 0 }}
-                        modifiersClassNames={{ ocupado: "bg-orange-100 text-orange-700 font-semibold" }}
-                      />
-                    </div>
-
-                    {/* Panel de reservaciones del día seleccionado */}
-                    <div className="flex-1 border-l border-blue-100 bg-white min-w-[180px] max-w-[220px]">
-                      {!formData.salon ? (
-                        <div className="flex flex-col items-center justify-center h-full p-4 text-center">
-                          <p className="text-xs text-blue-300">Selecciona un salón para ver reservaciones</p>
-                        </div>
-                      ) : !diaSeleccionado ? (
-                        <div className="flex flex-col items-center justify-center h-full p-4 text-center gap-2">
-                          <CalendarIcon className="w-6 h-6 text-blue-200" />
-                          <p className="text-xs text-blue-300">Haz clic en un día para ver sus reservaciones</p>
-                        </div>
-                      ) : (
-                        <div className="flex flex-col h-full">
-                          {/* Encabezado del día */}
-                          <div className="px-3 py-2 bg-blue-50 border-b border-blue-100">
-                            <p className="text-xs font-bold text-blue-800">
-                              {new Date(diaSeleccionado + "T12:00:00").toLocaleDateString("es-MX", { weekday: "short", day: "numeric", month: "short" })}
-                            </p>
-                            <p className="text-[10px] text-blue-500">{loadingResDia ? "Cargando..." : `${reservacionesDia.length} reservación${reservacionesDia.length !== 1 ? "es" : ""}`}</p>
-                          </div>
-
-                          {/* Lista */}
-                          <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-                            {loadingResDia ? (
-                              <div className="flex items-center justify-center py-6">
-                                <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                              </div>
-                            ) : reservacionesDia.length === 0 ? (
-                              <div className="flex flex-col items-center justify-center py-6 text-center gap-1">
-                                <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center">
-                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-3 h-3 text-green-600"><polyline points="20 6 9 17 4 12" /></svg>
-                                </div>
-                                <p className="text-[10px] text-green-600 font-medium">Día disponible</p>
-                              </div>
-                            ) : (
-                              reservacionesDia.map((r, i) => {
-                                const hi = r.horainicio?.slice(0, 5) ?? ""
-                                const hf = r.horafin?.slice(0, 5) ?? ""
-                                const fi = r.fechainicio?.slice(0, 10) ?? ""
-                                const ff = r.fechafin?.slice(0, 10) ?? ""
-                                const estatusColor =
-                                  r.estatus?.toLowerCase().includes("confirm") ? "bg-green-100 text-green-700" :
-                                  r.estatus?.toLowerCase().includes("cancel") ? "bg-red-100 text-red-700" :
-                                  "bg-yellow-100 text-yellow-700"
-                                return (
-                                  <div key={i} className="bg-blue-50 border border-blue-100 rounded-md p-2 space-y-1">
-                                    <div className="flex items-start justify-between gap-1">
-                                      <p className="text-[10px] font-semibold text-blue-900 leading-tight truncate">{r.salon}</p>
-                                      <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0 ${estatusColor}`}>
-                                        {r.estatus}
-                                      </span>
-                                    </div>
-                                    <div className="flex items-center gap-1 text-[10px] text-blue-600">
-                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-2.5 h-2.5 flex-shrink-0"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                                      <span>{fi} → {ff}</span>
-                                    </div>
-                                    <div className="flex items-center gap-1 text-[10px] text-blue-600">
-                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-2.5 h-2.5 flex-shrink-0"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                                      <span>{hi} – {hf}</span>
-                                    </div>
-                                  </div>
-                                )
-                              })
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Fechas y Horarios */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Fecha Inicio <span className="text-red-500">*</span></Label>
-                    <Input
-                      id="fechaInicial"
-                      type="date"
-                      value={formData.fechaInicial}
-                      onChange={(e) => {
-                        setFormData(prev => ({ ...prev, fechaInicial: e.target.value }))
-                        if (e.target.value) {
-                          setCalendarRange((prev) => ({ from: new Date(e.target.value + "T00:00:00"), to: prev?.to }))
-                        }
-                      }}
-                      className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
-                      required
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Fecha Fin <span className="text-red-500">*</span></Label>
-                    <Input
-                      id="fechaFinal"
-                      type="date"
-                      value={formData.fechaFinal}
-                      onChange={(e) => {
-                        setFormData(prev => ({ ...prev, fechaFinal: e.target.value }))
-                        if (e.target.value) {
-                          setCalendarRange((prev) => ({ from: prev?.from, to: new Date(e.target.value + "T00:00:00") }))
-                        }
-                      }}
-                      className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
-                      required
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Hora Inicio <span className="text-red-500">*</span></Label>
-                    <Select
-                      value={formData.horaInicio}
-                      onValueChange={(value) => setFormData(prev => ({ ...prev, horaInicio: value }))}
-                      required
-                    >
-                      <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm">
-                        <SelectValue placeholder="Selecciona hora" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {HORARIOS_EVENTO.map((h, idx) => (
-                          <SelectItem key={h.value} value={h.value} disabled={blockedIndices.has(idx)}>
-                            {h.label}{blockedIndices.has(idx) ? " — ocupado" : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Hora Fin <span className="text-red-500">*</span></Label>
-                    <Select
-                      value={formData.horaFin}
-                      onValueChange={(value) => setFormData(prev => ({ ...prev, horaFin: value }))}
-                      required
-                    >
-                      <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm">
-                        <SelectValue placeholder="Selecciona hora" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {HORARIOS_EVENTO.map((h, idx) => {
-                          const isBlocked = blockedIndices.has(idx)
-                          const isBeforeInicio = horaInicioIdx >= 0 && idx <= horaInicioIdx
-                          return (
-                            <SelectItem key={h.value} value={h.value} disabled={isBlocked || isBeforeInicio}>
-                              {h.label}{isBlocked ? " — ocupado" : ""}
-                            </SelectItem>
-                          )
-                        })}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* RIGHT — Galería de fotos del salón, altura fija */}
-              <div className="relative rounded-xl overflow-hidden bg-blue-50 border border-blue-100 flex flex-col h-full">
-                {formData.salon && salonFotos.length > 0 ? (
-                  <>
-                    <div className="relative flex-1 overflow-hidden group">
-                      <img
-                        src={salonFotos[currentPhotoIndex]}
-                        alt={`Foto ${currentPhotoIndex + 1} del salón`}
-                        className="absolute inset-0 w-full h-full object-cover cursor-zoom-in transition-transform duration-300 group-hover:scale-105"
-                        onClick={() => setShowPhotoModal(true)}
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent pointer-events-none" />
-                      {/* Ícono expandir */}
-                      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
-                        <div className="w-7 h-7 rounded-full bg-black/50 flex items-center justify-center">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" className="w-4 h-4">
-                            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-                          </svg>
-                        </div>
-                      </div>
-                      {/* Dots */}
-                      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
-                        {salonFotos.map((_, i) => (
-                          <button
-                            key={i}
-                            type="button"
-                            onClick={() => setCurrentPhotoIndex(i)}
-                            className={`h-1.5 rounded-full transition-all ${i === currentPhotoIndex ? "bg-white w-5" : "bg-white/50 w-1.5"}`}
-                          />
-                        ))}
-                      </div>
-                      {/* Prev/Next */}
-                      {salonFotos.length > 1 && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => setCurrentPhotoIndex((p) => (p === 0 ? salonFotos.length - 1 : p - 1))}
-                            className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/80 hover:bg-white shadow-md flex items-center justify-center transition-colors z-10"
-                          >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-4 h-4 text-blue-700"><polyline points="15 18 9 12 15 6" /></svg>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setCurrentPhotoIndex((p) => (p === salonFotos.length - 1 ? 0 : p + 1))}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/80 hover:bg-white shadow-md flex items-center justify-center transition-colors z-10"
-                          >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-4 h-4 text-blue-700"><polyline points="9 18 15 12 9 6" /></svg>
-                          </button>
-                        </>
-                      )}
-                    </div>
-                    <div className="px-3 py-2 text-xs text-blue-600 font-medium text-center bg-white flex-shrink-0">
-                      {currentPhotoIndex + 1} / {salonFotos.length} fotos
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex flex-col items-center justify-center flex-1 gap-3 p-8 text-center">
-                    <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-8 h-8 text-blue-300">
-                        <rect x="3" y="3" width="18" height="18" rx="2" />
-                        <circle cx="8.5" cy="8.5" r="1.5" />
-                        <polyline points="21 15 16 10 5 21" />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-blue-400">
-                        {!formData.hotel ? "Selecciona un hotel" : !formData.salon ? "Selecciona un salón" : "Sin fotos disponibles"}
-                      </p>
-                      <p className="text-xs text-blue-300 mt-1">
-                        {!formData.hotel ? "para ver los salones disponibles" : !formData.salon ? "para ver su galería de fotos" : ""}
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-            </div>
-          </div>
-
-          {/* Event Details */}
-          <div className="border-t pt-3">
-            <h3 className="text-xs font-semibold text-blue-900 mb-2 uppercase tracking-wide">Información del Evento</h3>
+            <h3 className="text-xs font-semibold text-blue-900 mb-2 uppercase tracking-wide">Datos del Evento</h3>
             <div className="flex flex-wrap gap-5">
-              <div className="space-y-1 w-64">
-                <Label htmlFor="nombreEvento" className="text-xs font-medium">
-                  Nombre del Evento <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="nombreEvento"
-                  type="text"
-                  value={formData.nombreEvento}
-                  onChange={(e) => setFormData(prev => ({ ...prev, nombreEvento: e.target.value }))}
-                  placeholder="Ej: Boda de Juan y María"
-                  className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
-                  required
-  />
-              </div>
-
               <div className="space-y-1 w-48">
                 <Label htmlFor="categoriaEvento" className="text-xs font-medium">
                   Categoría del Evento
@@ -2412,26 +2024,6 @@ export function QuotationForm() {
                 </Select>
               </div>
 
-              <div className="space-y-1 w-48">
-                <Label htmlFor="estatus" className="text-xs font-medium">
-                  Estatus
-                </Label>
-                <Select
-                  value={formData.estatusId}
-                  onValueChange={(v) => setFormData(prev => ({ ...prev, estatusId: v }))}
-                  disabled={!searchParams.get("editId") && !cotizacionId}
-                >
-                  <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full">
-                    <SelectValue placeholder="Selecciona estatus" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {estatusList.map((e) => (
-                      <SelectItem key={e.value} value={e.value}>{e.text}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
               <div className="space-y-1 w-36">
                 <Label htmlFor="numeroInvitados" className="text-xs font-medium">
                   No. Invitados <span className="text-red-500">*</span>
@@ -2457,6 +2049,360 @@ export function QuotationForm() {
                   className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
                   required
                 />
+              </div>
+            </div>
+          </div>
+
+          {/* Selección de Espacio y Fechas */}
+          <div className="border-t pt-3 space-y-3">
+            <h3 className="text-xs font-semibold text-blue-900 mb-2 uppercase tracking-wide">Selección de Espacio</h3>
+
+            {/* Row 1: Hotel, Salón, Montaje + Galería de fotos */}
+            <div className="grid md:grid-cols-[1fr_280px] gap-3">
+              <div className="space-y-2">
+                {/* Hotel */}
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Hotel <span className="text-red-500">*</span></Label>
+                  <Select
+                    value={formData.hotel}
+                    onValueChange={(value) => {
+                      setFormData(prev => ({ ...prev, hotel: value, salon: "", montaje: "" }))
+                      setSalones([])
+                      setMontajes([])
+                      setSalonFotos([])
+                      setCurrentPhotoIndex(0)
+                      setSalonReservaciones([])
+                      loadSalones(value)
+                    }}
+                    required
+                  >
+                    <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm">
+                      <SelectValue placeholder="Selecciona un hotel" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {hoteles.map((hotel) => (
+                        <SelectItem key={hotel.value} value={hotel.value}>{hotel.text}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Salón + Montaje */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Salón <span className="text-red-500">*</span></Label>
+                    <Select
+                      value={formData.salon}
+                      onValueChange={async (value) => {
+                        setFormData(prev => ({ ...prev, salon: value, montaje: "" }))
+                        setMontajes([])
+                        setSalonReservaciones([])
+                        setReservacionesDia([])
+                        await loadMontajes(value)
+                        if (diaSeleccionado) {
+                          setLoadingResDia(true)
+                          obtenerReservacionesPorDia(diaSeleccionado, Number(value)).then((res) => {
+                            setReservacionesDia(res.data ?? [])
+                            setLoadingResDia(false)
+                          })
+                        }
+                        const salonItem = salones.find((s) => s.value === value)
+                        const salonResult = await objetoSalon(Number(value))
+                        const precioSalon = salonResult.success && salonResult.data?.preciopordia ? Number(salonResult.data.preciopordia) : 0
+                        const dias = calcularDiasEvento(formData.fechaInicial, formData.fechaFinal)
+                        const nombreSalon = salonResult.success && salonResult.data?.nombre ? salonResult.data.nombre : salonItem?.text || "Salón"
+                        setPresupuestoItems(prev => {
+                          const sinSalon = prev.filter(p => p.tipo !== "Salón")
+                          return [crearPresupuestoItem(nombreSalon, "Salón", precioSalon, dias, 0, 1), ...sinSalon]
+                        })
+                      }}
+                      disabled={!formData.hotel}
+                      required
+                    >
+                      <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                        <SelectValue placeholder={formData.hotel ? "Selecciona un salón" : "Selecciona hotel primero"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {salones.map((salon) => (
+                          <SelectItem key={salon.value} value={salon.value}>{salon.text}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Montaje</Label>
+                    <Select
+                      value={formData.montaje}
+                      onValueChange={(value) => setFormData(prev => ({ ...prev, montaje: value }))}
+                      disabled={!formData.salon}
+                    >
+                      <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                        <SelectValue placeholder={formData.salon ? "Selecciona un montaje" : "Selecciona salón primero"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {montajes.map((montaje) => (
+                          <SelectItem key={montaje.value} value={montaje.value}>{montaje.text}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Galería de fotos del salón */}
+              <div className="relative rounded-xl overflow-hidden bg-blue-50 border border-blue-100 flex flex-col min-h-[140px]">
+                {formData.salon && salonFotos.length > 0 ? (
+                  <>
+                    <div className="relative flex-1 overflow-hidden group">
+                      <img
+                        src={salonFotos[currentPhotoIndex]}
+                        alt={`Foto ${currentPhotoIndex + 1} del salón`}
+                        className="absolute inset-0 w-full h-full object-cover cursor-zoom-in transition-transform duration-300 group-hover:scale-105"
+                        onClick={() => setShowPhotoModal(true)}
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent pointer-events-none" />
+                      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
+                        <div className="w-7 h-7 rounded-full bg-black/50 flex items-center justify-center">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" className="w-4 h-4">
+                            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                          </svg>
+                        </div>
+                      </div>
+                      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
+                        {salonFotos.map((_, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => setCurrentPhotoIndex(i)}
+                            className={`h-1.5 rounded-full transition-all ${i === currentPhotoIndex ? "bg-white w-5" : "bg-white/50 w-1.5"}`}
+                          />
+                        ))}
+                      </div>
+                      {salonFotos.length > 1 && (
+                        <>
+                          <button type="button" onClick={() => setCurrentPhotoIndex((p) => (p === 0 ? salonFotos.length - 1 : p - 1))} className="absolute left-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-white/80 hover:bg-white shadow flex items-center justify-center z-10">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-3 h-3 text-blue-700"><polyline points="15 18 9 12 15 6" /></svg>
+                          </button>
+                          <button type="button" onClick={() => setCurrentPhotoIndex((p) => (p === salonFotos.length - 1 ? 0 : p + 1))} className="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-white/80 hover:bg-white shadow flex items-center justify-center z-10">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-3 h-3 text-blue-700"><polyline points="9 18 15 12 9 6" /></svg>
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    <div className="px-2 py-1 text-[10px] text-blue-600 font-medium text-center bg-white flex-shrink-0">
+                      {currentPhotoIndex + 1} / {salonFotos.length} fotos
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex flex-col items-center justify-center flex-1 gap-2 p-4 text-center">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-8 h-8 text-blue-200">
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <polyline points="21 15 16 10 5 21" />
+                    </svg>
+                    <p className="text-xs text-blue-300">
+                      {!formData.hotel ? "Selecciona hotel" : !formData.salon ? "Selecciona salón" : "Sin fotos"}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Row 2: Calendario de Disponibilidad — full width */}
+            <AvailabilityCalendar
+              hotelId={formData.hotel}
+              salones={salones}
+              onSelectSlot={async (fecha, salonId, horaPreMontaje, horaInicio, horaFin, horaPostMontaje, horasExtras) => {
+                const prevSalon = formData.salon
+                setFormData(prev => ({
+                  ...prev,
+                  fechaInicial: fecha,
+                  fechaFinal: fecha,
+                  salon: salonId,
+                  ...(horaPreMontaje ? { horaPreMontaje } : {}),
+                  ...(horaInicio ? { horaInicio } : {}),
+                  ...(horaFin ? { horaFin } : {}),
+                  ...(horaPostMontaje ? { horaPostMontaje } : {}),
+                  horasExtras: (horasExtras ?? 0).toString(),
+                }))
+                setCalendarRange({ from: new Date(fecha + "T00:00:00"), to: new Date(fecha + "T00:00:00") })
+                // Solo recargar montajes/reservaciones/presupuesto cuando cambia el salón
+                if (salonId !== prevSalon) {
+                  setFormData(prev => ({ ...prev, montaje: "" }))
+                  setMontajes([])
+                  setSalonReservaciones([])
+                  setReservacionesDia([])
+                  await loadMontajes(salonId)
+                  const salonItem = salones.find((s) => s.value === salonId)
+                  const salonResult = await objetoSalon(Number(salonId))
+                  const precioSalon = salonResult.success && salonResult.data?.preciopordia ? Number(salonResult.data.preciopordia) : 0
+                  const nombreSalon = salonResult.success && salonResult.data?.nombre ? salonResult.data.nombre : salonItem?.text || "Salón"
+                  setPresupuestoItems(prev => {
+                    const sinSalon = prev.filter(p => p.tipo !== "Salón")
+                    return [crearPresupuestoItem(nombreSalon, "Salón", precioSalon, 1, 0, 1), ...sinSalon]
+                  })
+                }
+              }}
+              selectedFechaInicio={formData.fechaInicial}
+              selectedFechaFin={formData.fechaFinal}
+              selectedSalonId={formData.salon}
+              selectedHoraPreMontaje={formData.horaPreMontaje}
+              selectedHoraInicio={formData.horaInicio}
+              selectedHoraFin={formData.horaFin}
+              selectedHoraPostMontaje={formData.horaPostMontaje}
+            />
+
+            {/* Row 3: Fechas y Horarios */}
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Fecha Inicio <span className="text-red-500">*</span></Label>
+                <Input
+                  id="fechaInicial"
+                  type="date"
+                  value={formData.fechaInicial}
+                  onChange={(e) => {
+                    setFormData(prev => ({ ...prev, fechaInicial: e.target.value }))
+                    if (e.target.value) {
+                      setCalendarRange((prev) => ({ from: new Date(e.target.value + "T00:00:00"), to: prev?.to }))
+                    }
+                  }}
+                  className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
+                  required
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Fecha Fin <span className="text-red-500">*</span></Label>
+                <Input
+                  id="fechaFinal"
+                  type="date"
+                  value={formData.fechaFinal}
+                  onChange={(e) => {
+                    setFormData(prev => ({ ...prev, fechaFinal: e.target.value }))
+                    if (e.target.value) {
+                      setCalendarRange((prev) => ({ from: prev?.from, to: new Date(e.target.value + "T00:00:00") }))
+                    }
+                  }}
+                  className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
+                  required
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-5 gap-2">
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-purple-900 uppercase tracking-wide">Hora PreMontaje</Label>
+                <Input
+                  type="text"
+                  value={formData.horaPreMontaje ? HORARIOS_EVENTO.find(h => h.value === formData.horaPreMontaje)?.label || formData.horaPreMontaje : ""}
+                  placeholder="Auto desde calendario"
+                  className="border-purple-200 bg-purple-50/50 text-purple-800 h-8 text-sm cursor-not-allowed"
+                  disabled
+                  readOnly
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Hora Inicio <span className="text-red-500">*</span></Label>
+                <Select
+                  value={formData.horaInicio}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, horaInicio: value }))}
+                  required
+                >
+                  <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm">
+                    <SelectValue placeholder="Selecciona hora" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {HORARIOS_EVENTO.map((h, idx) => (
+                      <SelectItem key={h.value} value={h.value} disabled={blockedIndices.has(idx)}>
+                        {h.label}{blockedIndices.has(idx) ? " — ocupado" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Hora Fin <span className="text-red-500">*</span></Label>
+                <Select
+                  value={formData.horaFin}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, horaFin: value }))}
+                  required
+                >
+                  <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm">
+                    <SelectValue placeholder="Selecciona hora" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {HORARIOS_EVENTO.map((h, idx) => {
+                      const isBlocked = blockedIndices.has(idx)
+                      const isBeforeInicio = horaInicioIdx >= 0 && idx <= horaInicioIdx
+                      return (
+                        <SelectItem key={h.value} value={h.value} disabled={isBlocked || isBeforeInicio}>
+                          {h.label}{isBlocked ? " — ocupado" : ""}
+                        </SelectItem>
+                      )
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-purple-900 uppercase tracking-wide">Hora PostMontaje</Label>
+                <Input
+                  type="text"
+                  value={formData.horaPostMontaje ? HORARIOS_EVENTO.find(h => h.value === formData.horaPostMontaje)?.label || formData.horaPostMontaje : ""}
+                  placeholder="Auto desde calendario"
+                  className="border-purple-200 bg-purple-50/50 text-purple-800 h-8 text-sm cursor-not-allowed"
+                  disabled
+                  readOnly
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-teal-900 uppercase tracking-wide">Horas Extras</Label>
+                <Input
+                  type="text"
+                  value={Number(formData.horasExtras) > 0 ? `${formData.horasExtras} hr${Number(formData.horasExtras) !== 1 ? "s" : ""}` : "0"}
+                  placeholder="0"
+                  className="border-teal-200 bg-teal-50/50 text-teal-800 h-8 text-sm cursor-not-allowed font-semibold"
+                  disabled
+                  readOnly
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Event Details */}
+          <div className="border-t pt-3">
+            <h3 className="text-xs font-semibold text-blue-900 mb-2 uppercase tracking-wide">Información del Evento</h3>
+            <div className="flex flex-wrap gap-5">
+              <div className="space-y-1 w-64">
+                <Label htmlFor="nombreEvento" className="text-xs font-medium">
+                  Nombre del Evento <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="nombreEvento"
+                  type="text"
+                  value={formData.nombreEvento}
+                  onChange={(e) => setFormData(prev => ({ ...prev, nombreEvento: e.target.value }))}
+                  placeholder="Ej: Boda de Juan y María"
+                  className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
+                  required
+  />
+              </div>
+
+              <div className="space-y-1 w-48">
+                <Label htmlFor="estatus" className="text-xs font-medium">
+                  Estatus
+                </Label>
+                <Select
+                  value={formData.estatusId}
+                  onValueChange={(v) => setFormData(prev => ({ ...prev, estatusId: v }))}
+                  disabled={!searchParams.get("editId") && !cotizacionId}
+                >
+                  <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full">
+                    <SelectValue placeholder="Selecciona estatus" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {estatusList.map((e) => (
+                      <SelectItem key={e.value} value={e.value}>{e.text}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 

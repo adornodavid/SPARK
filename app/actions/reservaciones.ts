@@ -473,6 +473,31 @@ export async function obtenerReservacionesPorDia(
   }
 }
 
+// Función: obtenerReservacionesPorHotel: Obtiene todas las reservaciones de un hotel en un rango de fechas
+export async function obtenerReservacionesPorHotel(
+  hotelId: number,
+  fechaInicio: string,
+  fechaFin: string,
+): Promise<{ success: boolean; error: string; data: any[] | null }> {
+  try {
+    const { data, error } = await supabase
+      .from("vw_oreservaciones")
+      .select("id, nombreevento, salon, salonid, fechainicio, fechafin, horainicio, horafin, estatus, cliente, numeroinvitados")
+      .eq("hotelid", hotelId)
+      .lte("fechainicio", fechaFin)
+      .gte("fechafin", fechaInicio)
+
+    if (error) {
+      return { success: false, error: "Error en obtenerReservacionesPorHotel: " + error.message, data: null }
+    }
+
+    return { success: true, error: "", data: data ?? [] }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error en obtenerReservacionesPorHotel: " + errorMessage, data: null }
+  }
+}
+
 // Función: listaDesplegableReservaciones / ddlReservaciones: Función que se utiliza para los dropdownlist
 export async function listaDesplegableReservaciones(id = -1, nombreevento = "") {
   try {
