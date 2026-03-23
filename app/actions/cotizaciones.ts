@@ -181,6 +181,31 @@ export async function objetoCotizaciones(
     return { success: false, error: "Error en funcion objetoCotizaciones: " + errorMessage, data: null }
   }
 }
+// Función: obtenerCotizacionesPorHotel: Obtiene cotizaciones de un hotel en un rango de fechas
+export async function obtenerCotizacionesPorHotel(
+  hotelId: number,
+  fechaInicio: string,
+  fechaFin: string,
+): Promise<{ success: boolean; error: string; data: any[] | null }> {
+  try {
+    const { data, error } = await supabase
+      .from("vw_ocotizaciones")
+      .select("id, nombreevento, salonid, fechainicio, fechafin, horainicio, horafin, estatus, cliente, numeroinvitados")
+      .eq("hotelid", hotelId)
+      .lte("fechainicio", fechaFin)
+      .gte("fechafin", fechaInicio)
+
+    if (error) {
+      return { success: false, error: "Error en obtenerCotizacionesPorHotel: " + error.message, data: null }
+    }
+
+    return { success: true, error: "", data: data ?? [] }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error en obtenerCotizacionesPorHotel: " + errorMessage, data: null }
+  }
+}
+
 /*==================================================
     INSERTS: CREATE / CREAR / INSERT
 ================================================== */
