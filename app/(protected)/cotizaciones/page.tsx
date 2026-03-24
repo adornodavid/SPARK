@@ -45,7 +45,7 @@ export default function QuotationsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Cotizaciones de Banquetes</h1>
+          <h1 className="text-3xl font-bold">Eventos</h1>
           <p className="text-muted-foreground mt-1">
             Gestiona prospectos y cotizaciones de eventos
           </p>

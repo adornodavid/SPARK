@@ -80,6 +80,7 @@ export function AvailabilityCalendar({
   const [hoveredCell, setHoveredCell] = useState<string | null>(null)
   const [hoverBlock, setHoverBlock] = useState<{ salonId: string; startIdx: number } | null>(null)
   const [selection, setSelection] = useState<SelectionState | null>(null)
+  const [overlapAlert, setOverlapAlert] = useState<string | null>(null)
   // Day range selection for week/month view
   const [daySel, setDaySel] = useState<DaySelectionState | null>(null)
   const [dayDragging, setDayDragging] = useState<"left" | "right" | null>(null)
@@ -153,6 +154,7 @@ export function AvailabilityCalendar({
     const overlapMsg = overlapping.length > 0
       ? `Empalme con cotización: ${overlapping.map(o => o.nombreevento).join(", ")}`
       : undefined
+    setOverlapAlert(overlapMsg || null)
 
     onSelectSlot("", sel.salonId,
       HOURS[fullStart].value,
@@ -286,6 +288,12 @@ export function AvailabilityCalendar({
               +{selection.extrasBefore + selection.extrasAfter} hr extra{(selection.extrasBefore + selection.extrasAfter) !== 1 ? "s" : ""}
             </span>
           )}
+          {overlapAlert && (
+            <div className="flex items-center gap-1.5 bg-orange-50 border border-orange-300 rounded-full px-2.5 py-0.5 ml-2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5 text-orange-500 flex-shrink-0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+              <span className="text-[10px] font-bold text-orange-800">{overlapAlert}</span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-1.5">
           {viewMode === "day" && !selection && <span className="text-[10px] text-gray-400 mr-2">Clic en una hora para bloque de 8 hrs</span>}
@@ -306,7 +314,7 @@ export function AvailabilityCalendar({
 
       {/* Body */}
       <div className="overflow-auto max-h-[420px]">
-        {viewMode === "day" && <DayView date={currentDate} salones={salones} getEventsForHourCell={getEventsForHourCell} hourHasRes={hourHasRes} onHourClick={handleHourClick} hoverBlock={hoverBlock} setHoverBlock={setHoverBlock} selection={selection} dragging={dragging} startDrag={startDrag} onDragMove={onDragMove} onClearSelection={() => { setSelection(null) }} />}
+        {viewMode === "day" && <DayView date={currentDate} salones={salones} getEventsForHourCell={getEventsForHourCell} hourHasRes={hourHasRes} onHourClick={handleHourClick} hoverBlock={hoverBlock} setHoverBlock={setHoverBlock} selection={selection} dragging={dragging} startDrag={startDrag} onDragMove={onDragMove} onClearSelection={() => { setSelection(null); setOverlapAlert(null) }} />}
         {viewMode === "week" && <WeekView days={weekDays} salones={salones} getEventsForCell={getEventsForCell}
           onDayClick={handleDayClick}
           onRangeClick={handleDayRangeClick}
