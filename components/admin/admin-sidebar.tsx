@@ -67,7 +67,7 @@ const navItems = [
     icon: Users,
   },
   {
-    title: "Cotizaciones",
+    title: "Eventos",
     href: "/cotizaciones",
     icon: FileText,
   },
@@ -119,7 +119,7 @@ const quickAccessItems = [
     icon: Home,
   },
   {
-    title: "Cotizaciones",
+    title: "Eventos",
     href: "/cotizaciones",
     icon: FileText,
   },
