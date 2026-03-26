@@ -55,7 +55,7 @@ export async function objetoCliente(
   compañiaid = -1,
 ): Promise<{ success: boolean; error: string; data: oClientes | null }> {
   try {
-    let query = supabase.from("vw_oclientes").select("*")
+    let query = supabase.from("clientes").select("*").eq("activo", true)
 
     // Agregar filtros condicionales
     if (id !== -1) {
@@ -427,7 +427,7 @@ export async function actualizarCliente(formData: FormData) {
 export async function listaDesplegableClientes(id = -1, descripcion = "") {
   try {
     // Query principal
-    let query = supabase.from("vw_oclientes").select("id, nombre, apellidopaterno, apellidomaterno")
+    let query = supabase.from("clientes").select("id, nombre, apellidopaterno, apellidomaterno, email, telefono").eq("activo", true)
 
     // Filtros en query, dependiendo parametros
     if (id !== -1) {
@@ -452,9 +452,11 @@ export async function listaDesplegableClientes(id = -1, descripcion = "") {
       return { success: true, data: [] }
     }
 
-    const data: ddlItem[] = clientes.map((cliente) => ({
+    const data = clientes.map((cliente) => ({
       value: cliente.id.toString(),
       text: `${cliente.nombre} ${cliente.apellidopaterno || ""} ${cliente.apellidomaterno || ""}`.trim(),
+      email: cliente.email || "",
+      telefono: cliente.telefono || "",
     }))
 
     return { success: true, data }

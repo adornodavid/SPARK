@@ -7,6 +7,7 @@ import CalendarFilterPanel from "@/components/admin/calendar/calendar-filter-pan
 import CalendarGrid from "@/components/admin/calendar/calendar-grid"
 import CalendarSidebar from "@/components/admin/calendar/calendar-sidebar"
 import DayDetailSheet from "@/components/admin/calendar/day-detail-sheet"
+import DashboardAvailabilityCalendar from "@/components/admin/calendar/dashboard-availability-calendar"
 
 function DashboardContent() {
   const router = useRouter()
@@ -30,6 +31,9 @@ function DashboardContent() {
     confirmadas: true,
     pendientes: true,
   })
+
+  // Calendar view mode: "classic" or "availability"
+  const [calendarView, setCalendarView] = useState<"classic" | "availability">("classic")
 
   // Day Detail Sheet state
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -145,12 +149,38 @@ function DashboardContent() {
 
   return (
     <div className="space-y-6 bg-background">
-      {/* Page Title */}
-      <div>
-        <h1 className="text-3xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground mt-1">
-          Calendario multipropiedad de reservaciones y cotizaciones
-        </p>
+      {/* Page Title + View Toggle */}
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Dashboard</h1>
+          <p className="text-muted-foreground mt-1">
+            Calendario multipropiedad de reservaciones y cotizaciones
+          </p>
+        </div>
+        <div className="flex bg-muted rounded-lg border p-0.5">
+          <button
+            onClick={() => setCalendarView("classic")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+              calendarView === "classic"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+            Clásico
+          </button>
+          <button
+            onClick={() => setCalendarView("availability")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+              calendarView === "availability"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /></svg>
+            Disponibilidad
+          </button>
+        </div>
       </div>
 
       {/* Filter Panel */}
@@ -164,21 +194,30 @@ function DashboardContent() {
         userHoteles={session?.Hoteles || ""}
       />
 
-      {/* Calendar Grid + Sidebar */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <CalendarGrid
-          selectedHotel={selectedHotel}
-          selectedSalon={selectedSalon}
-          filters={filters}
-          onDayClick={handleDayClick}
-        />
+      {/* Calendar Grid + Sidebar / Availability Calendar */}
+      {calendarView === "classic" ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <CalendarGrid
+            selectedHotel={selectedHotel}
+            selectedSalon={selectedSalon}
+            filters={filters}
+            onDayClick={handleDayClick}
+          />
 
-        <CalendarSidebar
-          selectedHotel={selectedHotel}
-          selectedSalon={selectedSalon}
-          onEventClick={handleDayClick}
-        />
-      </div>
+          <CalendarSidebar
+            selectedHotel={selectedHotel}
+            selectedSalon={selectedSalon}
+            onEventClick={handleDayClick}
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <DashboardAvailabilityCalendar
+            hotelId={selectedHotel}
+            onDayClick={handleDayClick}
+          />
+        </div>
+      )}
 
       {/* Day Detail Sheet */}
       <DayDetailSheet
