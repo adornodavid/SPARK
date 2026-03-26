@@ -1,8 +1,9 @@
 "use client"
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react"
-import { ChevronLeft, ChevronRight, Calendar, Clock, CalendarDays, CalendarRange, ArrowLeft, GripVertical } from "lucide-react"
+import { ChevronLeft, ChevronRight, Calendar, Clock, CalendarDays, CalendarRange, ArrowLeft, GripVertical, User, Users, MapPin, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { obtenerEventosPorHotel } from "@/app/actions/cotizaciones"
 import type { ddlItem } from "@/types/common"
 
@@ -27,6 +28,7 @@ interface AvailabilityCalendarProps {
 interface SelectionState {
   salonId: string; dateStr: string; coreStartIdx: number
   extrasBefore: number; extrasAfter: number
+  preHours: number; postHours: number // horas de montaje dentro del rango (mínimo 1)
 }
 
 // Day range selection for week/month view
@@ -48,6 +50,9 @@ const HOURS = (() => {
   return h
 })()
 const BLOCK_SIZE = 6 // 1 pre + 4 event + 1 post
+const MAX_EVENT_HOURS = 8
+const CORE_EVENTS = BLOCK_SIZE - 2 // 4
+const REMAINING_CAP = MAX_EVENT_HOURS - CORE_EVENTS // 4 slots adicionales de evento antes de extras
 const DAYS_ES = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"]
 const MONTHS_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
@@ -61,7 +66,36 @@ function getMonthStart(d: Date) { return new Date(d.getFullYear(), d.getMonth(),
 function getMonthEnd(d: Date) { return new Date(d.getFullYear(), d.getMonth() + 1, 0) }
 function parseHour(t: string) { if (!t) return -1; return parseInt(t.split(":")[0], 10) }
 function getHourIdx(v: string) { return HOURS.findIndex((h) => h.value === v) }
+/** Hora de fin de un bloque: la hora siguiente. Ej: celda "16:00" (4PM-5PM) → fin = "17:00" */
+function endOfBlock(idx: number): string {
+  const hr = HOURS[idx].hour24
+  const next = (hr + 1) % 24
+  return `${next.toString().padStart(2, "0")}:00`
+}
+/** Índice de la celda que EMPIEZA en la hora dada (inverso de endOfBlock) */
+function idxFromEndHour(v: string): number {
+  const hr = parseInt(v.split(":")[0], 10)
+  const prev = (hr - 1 + 24) % 24
+  return HOURS.findIndex((h) => h.hour24 === prev)
+}
 function getEventBarColor(ev: CalendarEvent) { if (ev.tipo === "reservacion") { const e = ev.estatus?.toLowerCase() || ""; if (e.includes("cancel")) return "bg-gray-400"; return "bg-purple-900" } return "bg-amber-400" }
+
+/** Total máximo de evento = 8 (core 4 + 4 de extensiones).
+ *  Prioridad al lado más extendido: ese lado absorbe primero sus slots de evento.
+ *  El lado menor recibe lo que queda. Extras siempre quedan de su lado. */
+function calcSideExtras(leftExt: number, rightExt: number, totalExtras: number) {
+  if (totalExtras <= 0) return { leftExtras: 0, rightExtras: 0 }
+  // El lado más grande absorbe primero hasta REMAINING_CAP
+  let la: number, ra: number
+  if (leftExt >= rightExt) {
+    la = Math.min(leftExt, REMAINING_CAP)
+    ra = Math.min(rightExt, REMAINING_CAP - la)
+  } else {
+    ra = Math.min(rightExt, REMAINING_CAP)
+    la = Math.min(leftExt, REMAINING_CAP - ra)
+  }
+  return { leftExtras: leftExt - la, rightExtras: rightExt - ra }
+}
 
 /* ==================================================
   Main Component
@@ -80,14 +114,17 @@ export function AvailabilityCalendar({
   const [hoverBlock, setHoverBlock] = useState<{ salonId: string; startIdx: number } | null>(null)
   const [selection, setSelection] = useState<SelectionState | null>(null)
   const [overlapAlert, setOverlapAlert] = useState<string | null>(null)
+  const [eventDetail, setEventDetail] = useState<CalendarEvent | null>(null)
+  // Guardar las últimas horas emitidas por el calendario para detectar cambios del usuario vs del calendario
+  const lastEmittedRef = useRef<{ horaInicio: string; horaFin: string } | null>(null)
   // Day range selection for week/month view
   const [daySel, setDaySel] = useState<DaySelectionState | null>(null)
   const [dayDragging, setDayDragging] = useState<"left" | "right" | null>(null)
   const dayDragStartRef = useRef<{ daysBefore: number; daysAfter: number; startDateStr: string } | null>(null)
 
-  // Drag state
-  const [dragging, setDragging] = useState<"left" | "right" | null>(null)
-  const dragStartRef = useRef<{ extrasBefore: number; extrasAfter: number; startMouseIdx: number } | null>(null)
+  // Drag state: left/right = rango evento, pre/post = montaje dentro del rango
+  const [dragging, setDragging] = useState<"left" | "right" | "pre" | "post" | null>(null)
+  const dragStartRef = useRef<{ extrasBefore: number; extrasAfter: number; preHours: number; postHours: number; startMouseIdx: number } | null>(null)
 
   const salonNameMap = useMemo(() => { const m = new Map<string, string>(); for (const s of salones) m.set(s.value, s.text); return m }, [salones])
 
@@ -126,6 +163,57 @@ export function AvailabilityCalendar({
   }, [hotelId, dateRange, salonNameMap])
 
   useEffect(() => { loadEvents() }, [loadEvents])
+
+  // Sincronizar selection cuando los inputs de hora del formulario cambian
+  // selectedHoraInicio/Fin = horas de EVENTO (primera y última hora de evento, no pre/post)
+  useEffect(() => {
+    if (!selection || !selectedSalonId || !selectedHoraInicio || !selectedHoraFin) return
+    if (selection.salonId !== selectedSalonId) return
+    // Si las horas coinciden con lo que el calendario emitió, el cambio vino del calendario → ignorar
+    if (lastEmittedRef.current && lastEmittedRef.current.horaInicio === selectedHoraInicio && lastEmittedRef.current.horaFin === selectedHoraFin) return
+
+    const newEvtStartIdx = getHourIdx(selectedHoraInicio)
+    let newEvtEndIdx = idxFromEndHour(selectedHoraFin)
+    if (newEvtStartIdx < 0 || newEvtEndIdx < 0) return
+
+    const preH = selection.preHours ?? 1
+    const postH = selection.postHours ?? 1
+
+    // Si el rango de evento es menor a 4 horas, extender el fin para mantener mínimo 4
+    if (newEvtEndIdx - newEvtStartIdx + 1 < CORE_EVENTS) {
+      newEvtEndIdx = newEvtStartIdx + CORE_EVENTS - 1
+    }
+
+    // Rango completo = PRE + evento + POST
+    const newFullStart = newEvtStartIdx - preH
+    const newFullEnd = newEvtEndIdx + postH
+    if (newFullStart < 0 || newFullEnd >= HOURS.length) return
+
+    // Comparar con rango actual de evento
+    const coreEnd = Math.min(selection.coreStartIdx + BLOCK_SIZE - 1, HOURS.length - 1)
+    const curFullStart = selection.coreStartIdx - selection.extrasBefore
+    const curFullEnd = coreEnd + selection.extrasAfter
+    const curEvtStart = curFullStart + preH
+    const curEvtEnd = curFullEnd - postH
+    if (curEvtStart === newEvtStartIdx && curEvtEnd === newEvtEndIdx) return
+
+    // Recalcular: extrasBefore/After son respecto al core dentro del rango completo
+    // fullStart = coreStartIdx - extrasBefore, fullEnd = coreEnd + extrasAfter
+    // Necesitamos: newFullStart = newCore - newBefore, newFullEnd = newCoreEnd + newAfter
+    const newCore = Math.max(newFullStart, Math.min(selection.coreStartIdx, newFullEnd - BLOCK_SIZE + 1))
+    const newCoreEnd = Math.min(newCore + BLOCK_SIZE - 1, HOURS.length - 1)
+    const newBefore = newCore - newFullStart
+    const newAfter = newFullEnd - newCoreEnd
+
+    const newSel: SelectionState = {
+      ...selection,
+      coreStartIdx: newCore,
+      extrasBefore: newBefore,
+      extrasAfter: newAfter,
+    }
+    setSelection(newSel)
+    emitSelection(newSel)
+  }, [selectedHoraInicio, selectedHoraFin])
 
   function goToDayView(date: Date, from: ViewMode) { setPreviousView(from); setCurrentDate(date); setViewMode("day") }
   function goBack() { if (previousView) { setViewMode(previousView); setPreviousView(null) } }
@@ -169,27 +257,43 @@ export function AvailabilityCalendar({
       : undefined
     setOverlapAlert(overlapMsg || null)
 
+    // Extras: prioridad al lado más extendido
+    const rawInner = fullEnd - fullStart - 1
+    const rawTotalExtras = Math.max(0, rawInner - MAX_EVENT_HOURS)
+    const { leftExtras, rightExtras } = calcSideExtras(Math.max(0, sel.extrasBefore), Math.max(0, sel.extrasAfter), rawTotalExtras)
+    const extraHours = leftExtras + rightExtras
+
+    // Pre/Post montaje en los extremos, horaInicio/Fin = primera/última celda de evento
+    const preH = sel.preHours ?? 1
+    const postH = sel.postHours ?? 1
+    const evtStartIdx = fullStart + preH
+    const evtEndIdx = fullEnd - postH
+
+    const emitHoraInicio = HOURS[Math.min(evtStartIdx, HOURS.length - 1)].value
+    const emitHoraFin = endOfBlock(Math.max(evtEndIdx, 0))
+    lastEmittedRef.current = { horaInicio: emitHoraInicio, horaFin: emitHoraFin }
+
     onSelectSlot("", sel.salonId,
-      HOURS[fullStart].value,
-      HOURS[fullStart].value,
-      HOURS[fullEnd].value,
-      HOURS[fullEnd].value,
-      sel.extrasBefore + sel.extrasAfter,
+      HOURS[fullStart].value,                                        // horaPreMontaje (inicio del bloque pre)
+      emitHoraInicio,                                                // horaInicio (inicio primera hora evento)
+      emitHoraFin,                                                   // horaFin (fin de la última hora evento)
+      endOfBlock(fullEnd),                                           // horaPostMontaje (fin del bloque post)
+      extraHours,
       undefined,
       overlapMsg,
     )
   }
 
   function handleHourClick(sId: string, ds: string, idx: number) {
-    const sel: SelectionState = { salonId: sId, dateStr: ds, coreStartIdx: idx, extrasBefore: 0, extrasAfter: 0 }
+    const sel: SelectionState = { salonId: sId, dateStr: ds, coreStartIdx: idx, extrasBefore: 0, extrasAfter: 0, preHours: 1, postHours: 1 }
     setSelection(sel); emitSelection(sel)
   }
 
   // Drag handlers for edge handles
-  function startDrag(side: "left" | "right", mouseHourIdx: number) {
+  function startDrag(side: "left" | "right" | "pre" | "post", mouseHourIdx: number) {
     if (!selection) return
     setDragging(side)
-    dragStartRef.current = { extrasBefore: selection.extrasBefore, extrasAfter: selection.extrasAfter, startMouseIdx: mouseHourIdx }
+    dragStartRef.current = { extrasBefore: selection.extrasBefore, extrasAfter: selection.extrasAfter, preHours: selection.preHours, postHours: selection.postHours, startMouseIdx: mouseHourIdx }
   }
 
   function onDragMove(hoverIdx: number) {
@@ -197,33 +301,85 @@ export function AvailabilityCalendar({
     const { startMouseIdx, extrasBefore: origBefore, extrasAfter: origAfter } = dragStartRef.current
     const delta = hoverIdx - startMouseIdx
     const coreEnd = Math.min(selection.coreStartIdx + BLOCK_SIZE - 1, HOURS.length - 1)
+    const MIN_TOTAL = BLOCK_SIZE // PRE + 4 eventos + POST mínimo
 
-    if (dragging === "left") {
-      // Moving left handle: negative delta = more extras before, positive = fewer
-      const newExtras = Math.max(0, origBefore - delta)
-      // Check bounds
-      const newStartIdx = selection.coreStartIdx - newExtras
-      if (newStartIdx < 0) return
-      // Check for reservaciones in the new extra range
-      for (let i = newStartIdx; i < selection.coreStartIdx; i++) {
-        if (hourHasRes(selection.salonId, selection.dateStr, HOURS[i].hour24)) return
+    if (dragging === "pre") {
+      // Arrastrar ▶ de PRE hacia la derecha = más pre, hacia izquierda = menos pre
+      const newPre = Math.max(1, Math.min(MAX_PRE_POST, (dragStartRef.current.preHours) + delta))
+      const fs = selection.coreStartIdx - selection.extrasBefore
+      const fe = coreEnd + selection.extrasAfter
+      const totalCells = fe - fs + 1
+      if (totalCells - newPre - selection.postHours < MIN_EVENT_INNER) return
+      const newSel = { ...selection, preHours: newPre }
+      setSelection(newSel); emitSelection(newSel)
+    } else if (dragging === "post") {
+      const newPost = Math.max(1, Math.min(MAX_PRE_POST, (dragStartRef.current.postHours) - delta))
+      const fs = selection.coreStartIdx - selection.extrasBefore
+      const fe = coreEnd + selection.extrasAfter
+      const totalCells = fe - fs + 1
+      if (totalCells - selection.preHours - newPost < MIN_EVENT_INNER) return
+      const newSel = { ...selection, postHours: newPost }
+      setSelection(newSel); emitSelection(newSel)
+    } else if (dragging === "left") {
+      const newBefore = origBefore - delta
+      const minBefore = MIN_TOTAL - BLOCK_SIZE - selection.extrasAfter
+      const clampedBefore = Math.max(minBefore, newBefore)
+      const newStartIdx = selection.coreStartIdx - clampedBefore
+      if (newStartIdx < 0 || newStartIdx >= HOURS.length) return
+      if (clampedBefore > 0) {
+        for (let i = newStartIdx; i < selection.coreStartIdx; i++) {
+          if (hourHasRes(selection.salonId, selection.dateStr, HOURS[i].hour24)) return
+        }
       }
-      const newSel = { ...selection, extrasBefore: newExtras }
+      const newSel = { ...selection, extrasBefore: clampedBefore }
       setSelection(newSel); emitSelection(newSel)
     } else {
-      // Moving right handle: positive delta = more extras after, negative = fewer
-      const newExtras = Math.max(0, origAfter + delta)
-      const newEndIdx = coreEnd + newExtras
-      if (newEndIdx >= HOURS.length) return
-      for (let i = coreEnd + 1; i <= newEndIdx; i++) {
-        if (hourHasRes(selection.salonId, selection.dateStr, HOURS[i].hour24)) return
+      const newAfter = origAfter + delta
+      const minAfter = MIN_TOTAL - BLOCK_SIZE - selection.extrasBefore
+      const clampedAfter = Math.max(minAfter, newAfter)
+      const newEndIdx = coreEnd + clampedAfter
+      if (newEndIdx < 0 || newEndIdx >= HOURS.length) return
+      if (clampedAfter > 0) {
+        for (let i = coreEnd + 1; i <= newEndIdx; i++) {
+          if (hourHasRes(selection.salonId, selection.dateStr, HOURS[i].hour24)) return
+        }
       }
-      const newSel = { ...selection, extrasAfter: newExtras }
+      const newSel = { ...selection, extrasAfter: clampedAfter }
       setSelection(newSel); emitSelection(newSel)
     }
   }
 
   function endDrag() { setDragging(null); dragStartRef.current = null }
+
+  // Ajustar pre/post montaje dentro del rango (máx 3 hrs c/u, no cubrir las 4 hrs fijas de evento)
+  const MAX_PRE_POST = 3
+  const MIN_EVENT_INNER = CORE_EVENTS // 4 horas de evento siempre protegidas
+
+  function adjustPre(delta: number) {
+    if (!selection) return
+    const newPre = Math.max(1, Math.min(MAX_PRE_POST, (selection.preHours ?? 1) + delta))
+    const ce = Math.min(selection.coreStartIdx + BLOCK_SIZE - 1, HOURS.length - 1)
+    const fs = selection.coreStartIdx - selection.extrasBefore
+    const fe = ce + selection.extrasAfter
+    const totalCells = fe - fs + 1
+    const postH = selection.postHours ?? 1
+    if (totalCells - newPre - postH < MIN_EVENT_INNER) return
+    const newSel = { ...selection, preHours: newPre }
+    setSelection(newSel); emitSelection(newSel)
+  }
+
+  function adjustPost(delta: number) {
+    if (!selection) return
+    const newPost = Math.max(1, Math.min(MAX_PRE_POST, (selection.postHours ?? 1) + delta))
+    const ce = Math.min(selection.coreStartIdx + BLOCK_SIZE - 1, HOURS.length - 1)
+    const fs = selection.coreStartIdx - selection.extrasBefore
+    const fe = ce + selection.extrasAfter
+    const totalCells = fe - fs + 1
+    const preH = selection.preHours ?? 1
+    if (totalCells - preH - newPost < MIN_EVENT_INNER) return
+    const newSel = { ...selection, postHours: newPost }
+    setSelection(newSel); emitSelection(newSel)
+  }
 
   // === Day range selection (week view) ===
   function emitDaySel(ds: DaySelectionState) {
@@ -296,11 +452,40 @@ export function AvailabilityCalendar({
           <Calendar className="w-4 h-4 text-blue-600" />
           <h3 className="text-sm font-bold text-blue-900">{title}</h3>
           {loading && <div className="w-3.5 h-3.5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />}
-          {viewMode === "day" && selection && (selection.extrasBefore + selection.extrasAfter) > 0 && (
-            <span className="text-[10px] font-bold text-teal-700 bg-teal-100 border border-teal-300 px-2 py-0.5 rounded-full ml-2">
-              +{selection.extrasBefore + selection.extrasAfter} hr extra{(selection.extrasBefore + selection.extrasAfter) !== 1 ? "s" : ""}
-            </span>
-          )}
+          {viewMode === "day" && selection && (() => {
+            const ce = Math.min(selection.coreStartIdx + BLOCK_SIZE - 1, HOURS.length - 1)
+            const fs = selection.coreStartIdx - selection.extrasBefore
+            const fe = ce + selection.extrasAfter
+            const preH = selection.preHours ?? 1, postH = selection.postHours ?? 1
+            const totalInner = fe - fs + 1 - preH - postH
+            const rawInner = fe - fs - 1
+            const extraHrs = Math.max(0, rawInner - MAX_EVENT_HOURS)
+            const eventHrs = Math.min(MAX_EVENT_HOURS, Math.max(0, rawInner))
+            return (
+              <>
+                {preH > 1 && (
+                  <span className="text-[10px] font-bold text-purple-700 bg-purple-100 border border-purple-300 px-2 py-0.5 rounded-full ml-2">
+                    {preH} hrs pre
+                  </span>
+                )}
+                {eventHrs > CORE_EVENTS && (
+                  <span className="text-[10px] font-bold text-blue-700 bg-blue-100 border border-blue-300 px-2 py-0.5 rounded-full ml-1">
+                    {eventHrs} hrs evento
+                  </span>
+                )}
+                {extraHrs > 0 && (
+                  <span className="text-[10px] font-bold text-teal-700 bg-teal-100 border border-teal-300 px-2 py-0.5 rounded-full ml-1">
+                    +{extraHrs} hr extra{extraHrs !== 1 ? "s" : ""}
+                  </span>
+                )}
+                {postH > 1 && (
+                  <span className="text-[10px] font-bold text-purple-700 bg-purple-100 border border-purple-300 px-2 py-0.5 rounded-full ml-1">
+                    {postH} hrs post
+                  </span>
+                )}
+              </>
+            )
+          })()}
           {overlapAlert && (
             <div className="flex items-center gap-1.5 bg-orange-50 border border-orange-300 rounded-full px-2.5 py-0.5 ml-2">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5 text-orange-500 flex-shrink-0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
@@ -310,7 +495,7 @@ export function AvailabilityCalendar({
         </div>
         <div className="flex items-center gap-1.5">
           {viewMode === "day" && !selection && <span className="text-[10px] text-gray-400 mr-2">Clic en una hora para bloque de 8 hrs</span>}
-          {viewMode === "day" && selection && <span className="text-[10px] text-gray-400 mr-2">Arrastra las flechas ◀ ▶ para agregar horas extras</span>}
+          {viewMode === "day" && selection && <span className="text-[10px] text-gray-400 mr-2">Arrastra ◀ ▶ para extender el rango</span>}
           <div className="flex bg-white rounded-lg border border-blue-200 p-0.5 mr-2">
             {(["day", "week", "month"] as const).map((m) => (
               <button key={m} type="button" onClick={() => { setViewMode(m); setPreviousView(null); setHoverBlock(null) }}
@@ -327,7 +512,7 @@ export function AvailabilityCalendar({
 
       {/* Body */}
       <div className="overflow-y-auto overflow-x-hidden max-h-[420px]">
-        {viewMode === "day" && <DayView date={currentDate} salones={salones} getEventsForHourCell={getEventsForHourCell} hourHasRes={hourHasRes} onHourClick={handleHourClick} hoverBlock={hoverBlock} setHoverBlock={setHoverBlock} selection={selection} dragging={dragging} startDrag={startDrag} onDragMove={onDragMove} onClearSelection={() => { setSelection(null); setOverlapAlert(null) }} />}
+        {viewMode === "day" && <DayView date={currentDate} salones={salones} getEventsForHourCell={getEventsForHourCell} hourHasRes={hourHasRes} onHourClick={handleHourClick} hoverBlock={hoverBlock} setHoverBlock={setHoverBlock} selection={selection} dragging={dragging} startDrag={startDrag} onDragMove={onDragMove} onClearSelection={() => { setSelection(null); setOverlapAlert(null); lastEmittedRef.current = null; onSelectSlot("", "", "", "", "", "", 0) }} onAdjustPre={adjustPre} onAdjustPost={adjustPost} onEventClick={setEventDetail} />}
         {viewMode === "week" && <WeekView days={weekDays} salones={salones} getEventsForCell={getEventsForCell}
           onDayClick={handleDayClick}
           onRangeClick={handleDayRangeClick}
@@ -336,7 +521,7 @@ export function AvailabilityCalendar({
           startDayDrag={startDayDrag}
           onDayDragMove={onDayDragMove}
           onClearDaySel={() => setDaySel(null)}
-          isCellSel={isCellSel} isToday={isToday} isPast={isPast} hoveredCell={hoveredCell} setHoveredCell={setHoveredCell} />}
+          isCellSel={isCellSel} isToday={isToday} isPast={isPast} hoveredCell={hoveredCell} setHoveredCell={setHoveredCell} onEventClick={setEventDetail} />}
         {viewMode === "month" && <MonthView
           year={currentDate.getFullYear()}
           salones={salones}
@@ -365,6 +550,9 @@ export function AvailabilityCalendar({
         <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded bg-blue-200 border border-blue-400" /><span className="text-[10px] text-gray-600">Evento</span></div>
         <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded bg-teal-300 border border-teal-500" /><span className="text-[10px] text-gray-600">Hora extra</span></div>
       </div>
+
+      {/* Event Detail Modal */}
+      <EventDetailModal event={eventDetail} onClose={() => setEventDetail(null)} />
     </div>
   )
 }
@@ -372,7 +560,7 @@ export function AvailabilityCalendar({
 /* ==================================================
   Day View — with drag handles at range edges
 ================================================== */
-function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick, hoverBlock, setHoverBlock, selection, dragging, startDrag, onDragMove, onClearSelection }: {
+function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick, hoverBlock, setHoverBlock, selection, dragging, startDrag, onDragMove, onClearSelection, onAdjustPre, onAdjustPost, onEventClick }: {
   date: Date; salones: ddlItem[]
   getEventsForHourCell: (s: string, d: string, h: number) => CalendarEvent[]
   hourHasRes: (s: string, d: string, h: number) => boolean
@@ -380,10 +568,13 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
   hoverBlock: { salonId: string; startIdx: number } | null
   setHoverBlock: (v: { salonId: string; startIdx: number } | null) => void
   selection: SelectionState | null
-  dragging: "left" | "right" | null
-  startDrag: (side: "left" | "right", mouseIdx: number) => void
+  dragging: "left" | "right" | "pre" | "post" | null
+  startDrag: (side: "left" | "right" | "pre" | "post", mouseIdx: number) => void
   onDragMove: (hoverIdx: number) => void
   onClearSelection: () => void
+  onAdjustPre: (delta: number) => void
+  onAdjustPost: (delta: number) => void
+  onEventClick: (ev: CalendarEvent) => void
 }) {
   const dateStr = toDateStr(date)
   const isPastDay = date < new Date(new Date().setHours(0, 0, 0, 0))
@@ -398,14 +589,40 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
       const fs = cs - selection.extrasBefore, fe = ce + selection.extrasAfter
       if (hIdx < fs || hIdx > fe) return null
 
-      // Primera hora del rango completo = pre-montaje (extra+pre si hay extras, pre si no)
-      if (hIdx === fs) return selection.extrasBefore > 0 ? "extra-pre" : "pre"
-      // Última hora del rango completo = post-montaje (extra+post si hay extras, post si no)
-      if (hIdx === fe) return selection.extrasAfter > 0 ? "extra-post" : "post"
-      // Horas extra intermedias (entre extra-pre y el core, o entre core y extra-post)
-      if (hIdx > fs && hIdx < cs) return "extra"
-      if (hIdx > ce && hIdx < fe) return "extra"
-      // Todo lo demás entre pre y post = evento (incluye old pre/post absorbidos)
+      const preH = selection.preHours ?? 1, postH = selection.postHours ?? 1
+
+      // Calcular extras con prioridad al lado más extendido
+      const leftExt = Math.max(0, selection.extrasBefore)
+      const rightExt = Math.max(0, selection.extrasAfter)
+      const rawInner = fe - fs - 1 // celdas internas con pre=1, post=1
+      const rawTotalExtras = Math.max(0, rawInner - MAX_EVENT_HOURS)
+      const { leftExtras: rawLE, rightExtras: rawRE } = calcSideExtras(leftExt, rightExt, rawTotalExtras)
+
+      // Posiciones absolutas de extras: izq pegadas a fs+1, der pegadas a fe-1
+      const isExtraPos = (idx: number) => {
+        const pLeft = idx - fs        // 1-based desde fs
+        const pRight = fe - idx       // 1-based desde fe
+        if (rawLE > 0 && pLeft >= 1 && pLeft <= rawLE) return true
+        if (rawRE > 0 && pRight >= 1 && pRight <= rawRE) return true
+        return false
+      }
+
+      // Bloque PRE
+      if (hIdx < fs + preH) return isExtraPos(hIdx) ? "extra-pre" : "pre"
+      // Bloque POST
+      if (hIdx > fe - postH) return isExtraPos(hIdx) ? "extra-post" : "post"
+
+      // Celdas internas entre bloques PRE y POST
+      const innerStart = fs + preH
+      const innerEnd = fe - postH
+      const totalInner = innerEnd - innerStart + 1
+      if (totalInner <= MAX_EVENT_HOURS) return "event"
+
+      // Extras en zona interna
+      const posFromLeft = hIdx - fs
+      const posFromRight = fe - hIdx
+      if (rawLE > 0 && posFromLeft >= 1 && posFromLeft <= rawLE) return "extra"
+      if (rawRE > 0 && posFromRight >= 1 && posFromRight <= rawRE) return "extra"
       return "event"
     }
     if (hoverBlock && hoverBlock.salonId === sId) {
@@ -457,6 +674,11 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
 
               const isLeftEdge = isSalonSel && hIdx === selFullStart
               const isRightEdge = isSalonSel && hIdx === selFullEnd
+              // Bordes interiores de PRE y POST para flechas de extensión de montaje
+              const preH = selection?.preHours ?? 1
+              const postH = selection?.postHours ?? 1
+              const isPreInnerEdge = isSalonSel && (ct === "pre" || ct === "extra-pre") && hIdx === selFullStart + preH - 1
+              const isPostInnerEdge = isSalonSel && (ct === "post" || ct === "extra-post") && hIdx === selFullEnd - postH + 1
 
               let bg = "", bd = ""
               switch (ct) {
@@ -495,8 +717,8 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
                   }}
                   onMouseLeave={() => { if (!dragging) setHoverBlock(null) }}
                   title={
-                    ct === "extra-pre" ? "Hora extra + Pre-Montaje (clic derecho para quitar)"
-                    : ct === "extra-post" ? "Hora extra + Post-Montaje (clic derecho para quitar)"
+                    ct === "extra-pre" ? "Hora extra + Pre-Montaje"
+                    : ct === "extra-post" ? "Hora extra + Post-Montaje"
                     : ct === "extra" ? "Hora extra (clic derecho para quitar)"
                     : ct === "pre" || ct === "hover-pre" ? "Pre-Montaje (clic derecho para quitar)"
                     : ct === "post" || ct === "hover-post" ? "Post-Montaje (clic derecho para quitar)"
@@ -514,7 +736,8 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
                     const insetR = pos === "end" || pos === "single" ? "right-0.5" : "right-0"
                     const showLabel = pos === "start" || pos === "single"
                     return (
-                      <div className={`absolute top-1 bottom-1 ${insetL} ${insetR} ${roundL} ${roundR} ${getEventBarColor(primary)} ${hasRes ? "opacity-85" : "opacity-50"}`}>
+                      <div className={`absolute top-1 bottom-1 ${insetL} ${insetR} ${roundL} ${roundR} ${getEventBarColor(primary)} ${hasRes ? "opacity-85" : "opacity-50"} cursor-pointer hover:opacity-100 transition-opacity`}
+                        onClick={(e) => { e.stopPropagation(); onEventClick(primary) }}>
                         {showLabel && (
                           <div className="absolute inset-0 flex items-center pl-1.5">
                             <span className={`text-[9px] font-bold truncate ${hasRes ? "text-white" : "text-amber-900"}`}>{primary.nombreevento?.slice(0, 12)}</span>
@@ -524,11 +747,53 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
                     )
                   })()}
 
-                  {/* Labels */}
-                  {(ct === "pre" || ct === "hover-pre") && !primary && <div className="absolute inset-0 flex items-center justify-center"><span className="text-[8px] font-bold text-purple-700">PRE</span></div>}
-                  {(ct === "post" || ct === "hover-post") && !primary && <div className="absolute inset-0 flex items-center justify-center"><span className="text-[8px] font-bold text-purple-700">POST</span></div>}
-                  {ct === "extra-pre" && <div className="absolute inset-0 flex flex-col items-center justify-center leading-none"><span className="text-[7px] font-bold text-teal-700">EXTRA</span><span className="text-[7px] font-bold text-purple-700">+PRE</span></div>}
-                  {ct === "extra-post" && <div className="absolute inset-0 flex flex-col items-center justify-center leading-none"><span className="text-[7px] font-bold text-teal-700">EXTRA</span><span className="text-[7px] font-bold text-purple-700">+POST</span></div>}
+                  {/* Labels + handles arrastrables de montaje */}
+                  {(ct === "pre" || ct === "hover-pre") && !primary && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-[8px] font-bold text-purple-700">PRE</span>
+                      {isPreInnerEdge && ct === "pre" && (
+                        <div className="absolute right-0 top-0 bottom-0 w-3 flex items-center justify-center cursor-ew-resize z-20 group/handle hover:bg-purple-400/30 rounded-r"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startDrag("pre", hIdx) }}>
+                          <div className="w-1 h-5 rounded-full bg-purple-600 group-hover/handle:bg-purple-800 group-hover/handle:w-1.5 transition-all shadow-sm" />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {ct === "extra-pre" && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
+                      <span className="text-[7px] font-bold text-teal-700">EXTRA</span>
+                      <span className="text-[7px] font-bold text-purple-700">+PRE</span>
+                      {isPreInnerEdge && (
+                        <div className="absolute right-0 top-0 bottom-0 w-3 flex items-center justify-center cursor-ew-resize z-20 group/handle hover:bg-purple-400/30 rounded-r"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startDrag("pre", hIdx) }}>
+                          <div className="w-1 h-5 rounded-full bg-purple-600 group-hover/handle:bg-purple-800 group-hover/handle:w-1.5 transition-all shadow-sm" />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {(ct === "post" || ct === "hover-post") && !primary && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      {isPostInnerEdge && ct === "post" && (
+                        <div className="absolute left-0 top-0 bottom-0 w-3 flex items-center justify-center cursor-ew-resize z-20 group/handle hover:bg-purple-400/30 rounded-l"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startDrag("post", hIdx) }}>
+                          <div className="w-1 h-5 rounded-full bg-purple-600 group-hover/handle:bg-purple-800 group-hover/handle:w-1.5 transition-all shadow-sm" />
+                        </div>
+                      )}
+                      <span className="text-[8px] font-bold text-purple-700">POST</span>
+                    </div>
+                  )}
+                  {ct === "extra-post" && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
+                      {isPostInnerEdge && (
+                        <div className="absolute left-0 top-0 bottom-0 w-3 flex items-center justify-center cursor-ew-resize z-20 group/handle hover:bg-purple-400/30 rounded-l"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startDrag("post", hIdx) }}>
+                          <div className="w-1 h-5 rounded-full bg-purple-600 group-hover/handle:bg-purple-800 group-hover/handle:w-1.5 transition-all shadow-sm" />
+                        </div>
+                      )}
+                      <span className="text-[7px] font-bold text-teal-700">EXTRA</span>
+                      <span className="text-[7px] font-bold text-purple-700">+POST</span>
+                    </div>
+                  )}
                   {ct === "extra" && <div className="absolute inset-0 flex items-center justify-center"><span className="text-[8px] font-bold text-teal-700">EXTRA</span></div>}
                   {(ct === "event" || ct === "hover-event") && !primary && <div className="absolute inset-0 flex items-center justify-center"><div className="w-1.5 h-1.5 rounded-full bg-blue-500 opacity-50" /></div>}
 
@@ -560,7 +825,7 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
 /* ==================================================
   Week View — with day range selection + drag handles
 ================================================== */
-function WeekView({ days, salones, getEventsForCell, onDayClick, onRangeClick, daySel, dayDragging, startDayDrag, onDayDragMove, onClearDaySel, isCellSel, isToday, isPast, hoveredCell, setHoveredCell }: {
+function WeekView({ days, salones, getEventsForCell, onDayClick, onRangeClick, daySel, dayDragging, startDayDrag, onDayDragMove, onClearDaySel, isCellSel, isToday, isPast, hoveredCell, setHoveredCell, onEventClick }: {
   days: Date[]; salones: ddlItem[]; getEventsForCell: (s: string, d: string) => CalendarEvent[]
   onDayClick: (d: Date, s: string) => void
   onRangeClick: () => void
@@ -571,6 +836,7 @@ function WeekView({ days, salones, getEventsForCell, onDayClick, onRangeClick, d
   onClearDaySel: () => void
   isCellSel: (s: string, d: string) => boolean
   isToday: (d: Date) => boolean; isPast: (d: Date) => boolean; hoveredCell: string | null; setHoveredCell: (v: string | null) => void
+  onEventClick: (ev: CalendarEvent) => void
 }) {
   // Compute day selection range
   function getDayCellType(salonId: string, dateStr: string, colIdx: number): "selected" | "range" | null {
@@ -634,9 +900,9 @@ function WeekView({ days, salones, getEventsForCell, onDayClick, onRangeClick, d
               onMouseLeave={() => { if (!dayDragging) setHoveredCell(null) }}>
 
               {/* Events */}
-              {res.slice(0, 2).map(r => <div key={`r-${r.id}`} className="rounded px-1.5 py-0.5 mb-0.5 border text-[10px] leading-tight truncate bg-purple-100 border-purple-400 text-purple-900"><div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-purple-900 flex-shrink-0" /><span className="font-semibold truncate">{r.nombreevento?.slice(0, 10)}</span></div><div className="text-[9px] text-purple-600 opacity-70">{r.horainicio?.slice(0, 5)} – {r.horafin?.slice(0, 5)}</div></div>)}
+              {res.slice(0, 2).map(r => <div key={`r-${r.id}`} className="rounded px-1.5 py-0.5 mb-0.5 border text-[10px] leading-tight truncate bg-purple-100 border-purple-400 text-purple-900 cursor-pointer hover:bg-purple-200 transition-colors" onClick={(e) => { e.stopPropagation(); onEventClick(r) }}><div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-purple-900 flex-shrink-0" /><span className="font-semibold truncate">{r.nombreevento?.slice(0, 10)}</span></div><div className="text-[9px] text-purple-600 opacity-70">{r.horainicio?.slice(0, 5)} – {r.horafin?.slice(0, 5)}</div></div>)}
               {res.length > 2 && <div className="text-[9px] text-purple-700 pl-1">+{res.length - 2}</div>}
-              {cot.slice(0, 2).map(c => <div key={`c-${c.id}`} className="rounded px-1.5 py-0.5 mb-0.5 border text-[10px] leading-tight truncate bg-amber-50 border-amber-200 text-amber-800"><div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" /><span className="font-semibold truncate">{c.nombreevento?.slice(0, 10)}</span></div><div className="text-[9px] text-amber-600 opacity-70">{c.horainicio?.slice(0, 5)} – {c.horafin?.slice(0, 5)}</div></div>)}
+              {cot.slice(0, 2).map(c => <div key={`c-${c.id}`} className="rounded px-1.5 py-0.5 mb-0.5 border text-[10px] leading-tight truncate bg-amber-50 border-amber-200 text-amber-800 cursor-pointer hover:bg-amber-100 transition-colors" onClick={(e) => { e.stopPropagation(); onEventClick(c) }}><div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" /><span className="font-semibold truncate">{c.nombreevento?.slice(0, 10)}</span></div><div className="text-[9px] text-amber-600 opacity-70">{c.horainicio?.slice(0, 5)} – {c.horafin?.slice(0, 5)}</div></div>)}
               {cot.length > 2 && <div className="text-[9px] text-amber-500 pl-1">+{cot.length - 2}</div>}
               {evts.length === 0 && !past && !isInRange && <div className="h-full flex items-center justify-center opacity-0 group-hover:opacity-30"><span className="text-[10px] text-blue-400">Disponible</span></div>}
 
@@ -758,5 +1024,69 @@ function MonthView({ year, salones, events, onMonthClick }: {
         ))}
       </tbody>
     </table>
+  )
+}
+
+/* ==================================================
+  Event Detail Modal
+================================================== */
+function EventDetailModal({ event, onClose }: { event: CalendarEvent | null; onClose: () => void }) {
+  if (!event) return null
+  const isRes = event.tipo === "reservacion"
+  const statusColor = (() => {
+    const s = event.estatus?.toLowerCase() || ""
+    if (s.includes("confirm")) return "bg-green-100 text-green-800 border-green-300"
+    if (s.includes("cancel")) return "bg-red-100 text-red-800 border-red-300"
+    if (s.includes("pendiente")) return "bg-yellow-100 text-yellow-800 border-yellow-300"
+    return "bg-gray-100 text-gray-700 border-gray-300"
+  })()
+
+  return (
+    <Dialog open={!!event} onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className="sm:max-w-[360px] p-0 gap-0 overflow-hidden">
+        <div className={`px-4 py-3 ${isRes ? "bg-purple-900" : "bg-amber-400"}`}>
+          <DialogHeader>
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${isRes ? "bg-white" : "bg-amber-900"}`} />
+              <span className={`text-[10px] font-semibold uppercase tracking-wider ${isRes ? "text-purple-200" : "text-amber-800"}`}>
+                {isRes ? "Reservación" : "Cotización"}
+              </span>
+            </div>
+            <DialogTitle className={`text-base font-bold mt-1 ${isRes ? "text-white" : "text-amber-900"}`}>
+              {event.nombreevento}
+            </DialogTitle>
+          </DialogHeader>
+        </div>
+        <div className="px-4 py-3 space-y-3">
+          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${statusColor}`}>
+            {event.estatus || "Sin estatus"}
+          </span>
+          <div className="space-y-2.5">
+            <div className="flex items-center gap-2.5">
+              <MapPin className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+              <div><div className="text-[10px] text-gray-400 uppercase">Salón</div><div className="text-sm font-medium text-gray-800">{event.salonName}</div></div>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <User className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+              <div><div className="text-[10px] text-gray-400 uppercase">Cliente</div><div className="text-sm font-medium text-gray-800">{event.cliente || "—"}</div></div>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <Calendar className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+              <div><div className="text-[10px] text-gray-400 uppercase">Fecha</div><div className="text-sm font-medium text-gray-800">{event.fechainicio === event.fechafin ? event.fechainicio : `${event.fechainicio} → ${event.fechafin}`}</div></div>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <Clock className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+              <div><div className="text-[10px] text-gray-400 uppercase">Horario</div><div className="text-sm font-medium text-gray-800">{event.horainicio?.slice(0, 5) || "—"} – {event.horafin?.slice(0, 5) || "—"}</div></div>
+            </div>
+            {event.numeroinvitados > 0 && (
+              <div className="flex items-center gap-2.5">
+                <Users className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                <div><div className="text-[10px] text-gray-400 uppercase">Invitados</div><div className="text-sm font-medium text-gray-800">{event.numeroinvitados}</div></div>
+              </div>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

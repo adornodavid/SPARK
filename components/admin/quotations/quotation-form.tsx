@@ -1801,6 +1801,9 @@ export function QuotationForm() {
       formDataToSubmit.append("totalmonto", formData.totalMonto)
       formDataToSubmit.append("horainicio", formData.horaInicio)
       formDataToSubmit.append("horafin", formData.horaFin)
+      formDataToSubmit.append("horapremontaje", formData.horaPreMontaje)
+      formDataToSubmit.append("horapostmontaje", formData.horaPostMontaje)
+      formDataToSubmit.append("horasextras", formData.horasExtras)
       formDataToSubmit.append("subtotal", formData.subtotal)
       formDataToSubmit.append("impuestos", formData.impuestos)
       formDataToSubmit.append("porcentajedescuento", formData.descuentoPorcentaje)
@@ -2261,11 +2264,11 @@ export function QuotationForm() {
                   ...prev,
                   // Solo actualizar fechas si viene fecha (selección de día), no cuando solo cambian horas
                   ...(fecha ? { fechaInicial: fecha, fechaFinal: fechaFin2 || fecha } : {}),
-                  salon: salonId,
-                  ...(horaPreMontaje ? { horaPreMontaje } : {}),
-                  ...(horaInicio ? { horaInicio } : {}),
-                  ...(horaFin ? { horaFin } : {}),
-                  ...(horaPostMontaje ? { horaPostMontaje } : {}),
+                  ...(salonId ? { salon: salonId } : {}),
+                  ...(horaPreMontaje !== undefined ? { horaPreMontaje } : {}),
+                  ...(horaInicio !== undefined ? { horaInicio } : {}),
+                  ...(horaFin !== undefined ? { horaFin } : {}),
+                  ...(horaPostMontaje !== undefined ? { horaPostMontaje } : {}),
                   horasExtras: (horasExtras ?? 0).toString(),
                 }))
                 if (fecha) {

@@ -237,6 +237,11 @@ export async function obtenerCotizacionesPorHotel(
 // Función: crearCotizacion / insCotizacion: Función para insertar en tabla eventos
 export async function crearCotizacion(formData: FormData) {
   try {
+    // Obtener sesión del usuario
+    const { obtenerSesion } = await import("@/app/actions/session")
+    const sesion = await obtenerSesion()
+    const usuarioId = sesion?.UsuarioId ? Number(sesion.UsuarioId) : null
+
     // Paso 1: Recibir variables
     const nombreevento = formData.get("nombreevento") as string
     const tipoevento = formData.get("tipoevento") as string
@@ -249,6 +254,9 @@ export async function crearCotizacion(formData: FormData) {
     const montajeid = formData.get("montajeid") as string
     const horainicio = formData.get("horainicio") as string
     const horafin = formData.get("horafin") as string
+    const horapremontaje = formData.get("horapremontaje") as string
+    const horapostmontaje = formData.get("horapostmontaje") as string
+    const horasextras = formData.get("horasextras") as string
     const numeroinvitados = formData.get("numeroinvitados") as string
     const adultos = formData.get("adultos") as string
     const ninos = formData.get("ninos") as string
@@ -320,10 +328,6 @@ export async function crearCotizacion(formData: FormData) {
       fechainicio,
       fechafin,
       totalmonto: totalmonto || null,
-      salonid: salonid || null,
-      montajeid: montajeid || null,
-      horainicio: horainicio || null,
-      horafin: horafin || null,
       numeroinvitados: numeroinvitados || null,
       adultos: adultos ? Number(adultos) : null,
       ninos: ninos ? Number(ninos) : null,
@@ -334,7 +338,7 @@ export async function crearCotizacion(formData: FormData) {
       porcentajedescuento: porcentajedescuento ? Number(porcentajedescuento) : null,
       montodescuento: montodescuento ? Number(montodescuento) : null,
       activo: true,
-      tiporegistro: "Cotizacion",
+      tiporegistroid: 1,
     }
 
     // Paso 4: Ejecutar Query de INSERT en tabla eventos
@@ -348,6 +352,28 @@ export async function crearCotizacion(formData: FormData) {
 
     if (!data) {
       return { success: false, error: "No se pudo obtener el ID del evento creado" }
+    }
+
+    // Paso 5: Insertar en eventoxreservaciones
+    const eventoReservacion: any = {
+      eventoid: data.id,
+      salonid: salonid ? Number(salonid) : null,
+      montajeid: montajeid ? Number(montajeid) : null,
+      fechainicio: fechainicio || null,
+      fechafin: fechafin || null,
+      horainicio: horainicio || null,
+      horafin: horafin || null,
+      horapremontaje: horapremontaje || null,
+      horapostmontaje: horapostmontaje || null,
+      horasextras: horasextras ? Number(horasextras) : 0,
+      fechacreacion: new Date().toISOString(),
+      activo: true,
+      creadopor: usuarioId,
+    }
+
+    const { error: errReservacion } = await supabase.from("eventoxreservaciones").insert(eventoReservacion)
+    if (errReservacion) {
+      console.error("Error insertando en eventoxreservaciones:", errReservacion)
     }
 
     revalidatePath("/cotizaciones")
