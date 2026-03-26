@@ -58,7 +58,7 @@ export async function objetoCalendario(
   fecharangofin = "2100-01-01",
 ): Promise<{ success: boolean; error: string; data: any | null }> {
   try {
-    let query = supabase.from("vw_ocalendarios").select("*")
+    let query = supabase.from("vw_oeventos").select("*")
 
     // Agregar filtros condicionales
     if (id !== -1) {
@@ -77,7 +77,7 @@ export async function objetoCalendario(
       query = query.eq("estatus", estatus)
     }
     if (tipo !== "") {
-      query = query.eq("tipo", tipo)
+      query = query.eq("tiporegistro", tipo)
     }
     if (fecharangoinicio !== "1900-01-01") {
       query = query.eq("fechainicio", fecharangoinicio)
@@ -98,7 +98,8 @@ export async function objetoCalendario(
       }
     }
 
-    return { success: true, error: "", data: data }
+    const mapped = data ? { ...data, tipo: data.tiporegistro === "Reservacion" ? "Reservacion" : "Cotizacion" } : data
+    return { success: true, error: "", data: mapped }
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion objetoCalendario: " + errorMessage, data: null }
@@ -116,7 +117,7 @@ export async function objetoCalendarios(
   fecharangofin = "2100-01-01",
 ): Promise<{ success: boolean; error: string; data: any[] | null }> {
   try {
-    let query = supabase.from("vw_ocalendarios").select("*")
+    let query = supabase.from("vw_oeventos").select("*")
 
     if (nombreevento !== "") {
       query = query.ilike("nombreevento", `%${nombreevento}%`)
@@ -131,7 +132,7 @@ export async function objetoCalendarios(
       query = query.eq("estatus", estatus)
     }
     if (tipo !== "") {
-      query = query.eq("tipo", tipo)
+      query = query.eq("tiporegistro", tipo)
     }
     if (fecharangoinicio !== "1900-01-01") {
       query = query.eq("fechainicio", fecharangoinicio)
@@ -151,7 +152,8 @@ export async function objetoCalendarios(
       }
     }
 
-    return { success: true, error: "", data: data }
+    const mapped = (data || []).map((e: any) => ({ ...e, tipo: e.tiporegistro === "Reservacion" ? "Reservacion" : "Cotizacion" }))
+    return { success: true, error: "", data: mapped }
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion objetoCalendarios: " + errorMessage, data: null }
@@ -179,7 +181,7 @@ export async function obtenerCalendarios(
 ): Promise<{ success: boolean; error: string; data: unknown }> {
   try {
     // Query principal
-    let query = supabase.from("vw_ocalendarios").select("*")
+    let query = supabase.from("vw_oeventos").select("*")
 
     if (id !== -1) {
       query = query.eq("id", id)
@@ -197,7 +199,7 @@ export async function obtenerCalendarios(
       query = query.eq("estatus", estatus)
     }
     if (tipo !== "") {
-      query = query.eq("tipo", tipo)
+      query = query.eq("tiporegistro", tipo)
     }
     if (fecharangoinicio !== "1900-01-01") {
       query = query.eq("fechainicio", fecharangoinicio)
@@ -219,8 +221,9 @@ export async function obtenerCalendarios(
       }
     }
 
-    // Regreso de data
-    return { success: true, error: "", data: data }
+    // Regreso de data con mapeo de tiporegistro a tipo
+    const mapped = (data || []).map((e: any) => ({ ...e, tipo: e.tiporegistro === "Reservacion" ? "Reservacion" : "Cotizacion" }))
+    return { success: true, error: "", data: mapped }
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion obtenerCalendarios: " + errorMessage, data: null }
@@ -238,11 +241,10 @@ export async function obtenerCalendariosPorRango(
   salonid = -1,
 ): Promise<{ success: boolean; error: string; data: unknown }> {
   try {
-    // Query principal — solo eventos que se solapan con el rango solicitado
-    let query = supabase.from("vw_ocalendarios").select("*")
+    // Query principal — obtener eventos desde vw_oeventos
+    let query = supabase.from("vw_oeventos").select("*")
 
     // Filtro de rango: evento.fechainicio <= rangoFin AND evento.fechafin >= rangoInicio
-    // Esto captura eventos que inician antes del fin del rango Y terminan despues del inicio del rango
     query = query.lte("fechainicio", rangoFin)
     query = query.gte("fechafin", rangoInicio)
 
@@ -268,8 +270,13 @@ export async function obtenerCalendariosPorRango(
       }
     }
 
-    // Regreso de data
-    return { success: true, error: "", data: data }
+    // Mapear tiporegistro a tipo para compatibilidad con el frontend
+    const mapped = (data || []).map((e: any) => ({
+      ...e,
+      tipo: e.tiporegistro === "Reservacion" ? "Reservacion" : "Cotizacion",
+    }))
+
+    return { success: true, error: "", data: mapped }
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion obtenerCalendariosPorRango: " + errorMessage, data: null }
@@ -284,7 +291,7 @@ export async function obtenerEventosPorDia(
   salonid = -1,
 ): Promise<{ success: boolean; error: string; data: unknown }> {
   try {
-    let query = supabase.from("vw_ocalendarios").select("*")
+    let query = supabase.from("vw_oeventos").select("*")
 
     // Un evento esta activo en esta fecha si: fechainicio <= fecha AND fechafin >= fecha
     query = query.lte("fechainicio", fecha)
@@ -309,7 +316,13 @@ export async function obtenerEventosPorDia(
       }
     }
 
-    return { success: true, error: "", data: data }
+    // Mapear tiporegistro a tipo para compatibilidad con el frontend
+    const mapped = (data || []).map((e: any) => ({
+      ...e,
+      tipo: e.tiporegistro === "Reservacion" ? "Reservacion" : "Cotizacion",
+    }))
+
+    return { success: true, error: "", data: mapped }
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion obtenerEventosPorDia: " + errorMessage, data: null }

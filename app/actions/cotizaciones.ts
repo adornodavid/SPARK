@@ -182,6 +182,31 @@ export async function objetoCotizaciones(
   }
 }
 // Función: obtenerCotizacionesPorHotel: Obtiene cotizaciones de un hotel en un rango de fechas
+// Función: obtenerEventosPorHotel: obtiene eventos (cotizaciones y reservaciones) desde vw_oeventos
+export async function obtenerEventosPorHotel(
+  hotelId: number,
+  fechaInicio: string,
+  fechaFin: string,
+): Promise<{ success: boolean; error: string; data: any[] | null }> {
+  try {
+    const { data, error } = await supabase
+      .from("vw_oeventos")
+      .select("id, nombreevento, salon, salonid, fechainicio, fechafin, horainicio, horafin, estatus, cliente, numeroinvitados, tiporegistro")
+      .eq("hotelid", hotelId)
+      .lte("fechainicio", fechaFin)
+      .gte("fechafin", fechaInicio)
+
+    if (error) {
+      return { success: false, error: "Error en obtenerEventosPorHotel: " + error.message, data: null }
+    }
+
+    return { success: true, error: "", data: data ?? [] }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error en obtenerEventosPorHotel: " + errorMessage, data: null }
+  }
+}
+
 export async function obtenerCotizacionesPorHotel(
   hotelId: number,
   fechaInicio: string,
@@ -209,7 +234,7 @@ export async function obtenerCotizacionesPorHotel(
 /*==================================================
     INSERTS: CREATE / CREAR / INSERT
 ================================================== */
-// Función: crearCotizacion / insCotizacion: Función para insertar
+// Función: crearCotizacion / insCotizacion: Función para insertar en tabla eventos
 export async function crearCotizacion(formData: FormData) {
   try {
     // Paso 1: Recibir variables
@@ -225,6 +250,8 @@ export async function crearCotizacion(formData: FormData) {
     const horainicio = formData.get("horainicio") as string
     const horafin = formData.get("horafin") as string
     const numeroinvitados = formData.get("numeroinvitados") as string
+    const adultos = formData.get("adultos") as string
+    const ninos = formData.get("ninos") as string
     const estatusid = formData.get("estatusid") as string
     const categoriaevento = formData.get("categoriaevento") as string
     const subtotal = formData.get("subtotal") as string
@@ -254,7 +281,7 @@ export async function crearCotizacion(formData: FormData) {
     // Paso 2.2: Buscar todos los folios con el patrón de este hotel
     const folioPattern = `${acronimo}-E-%`
     const { data: existingFolios, error: folioError } = await supabase
-      .from("cotizaciones")
+      .from("eventos")
       .select("folio")
       .like("folio", folioPattern)
       .order("folio", { ascending: false })
@@ -298,6 +325,8 @@ export async function crearCotizacion(formData: FormData) {
       horainicio: horainicio || null,
       horafin: horafin || null,
       numeroinvitados: numeroinvitados || null,
+      adultos: adultos ? Number(adultos) : null,
+      ninos: ninos ? Number(ninos) : null,
       estatusid: estatusid ? Number(estatusid) : null,
       categoriaevento: categoriaevento || null,
       subtotal: subtotal ? Number(subtotal) : null,
@@ -305,19 +334,20 @@ export async function crearCotizacion(formData: FormData) {
       porcentajedescuento: porcentajedescuento ? Number(porcentajedescuento) : null,
       montodescuento: montodescuento ? Number(montodescuento) : null,
       activo: true,
+      tiporegistro: "Cotizacion",
     }
 
-    // Paso 4: Ejecutar Query de INSERT
-    const { data, error } = await supabase.from("cotizaciones").insert(insertData).select("id").single()
+    // Paso 4: Ejecutar Query de INSERT en tabla eventos
+    const { data, error } = await supabase.from("eventos").insert(insertData).select("id").single()
 
     // Return error
     if (error) {
-      console.error("Error insertando cotizacion en query en crearCotizacion de actions/cotizaciones:", error)
+      console.error("Error insertando evento en query en crearCotizacion de actions/cotizaciones:", error)
       return { success: false, error: error.message }
     }
 
     if (!data) {
-      return { success: false, error: "No se pudo obtener el ID de la cotizacion creada" }
+      return { success: false, error: "No se pudo obtener el ID del evento creado" }
     }
 
     revalidatePath("/cotizaciones")
@@ -547,21 +577,20 @@ export async function estatusActivoCotizacion(
   }
 }
 
-// Función: listaCategoriaEvento: obtiene valores distintos de categoriaevento para el dropdownlist
+// Función: listaCategoriaEvento: obtiene categorías de evento desde la tabla categoriaeventos
 export async function listaCategoriaEvento() {
   try {
     const { data, error } = await supabase
-      .from("cotizaciones")
-      .select("categoriaevento")
-      .not("categoriaevento", "is", null)
-      .order("categoriaevento", { ascending: true })
+      .from("categoriaeventos")
+      .select("id, nombre")
+      .order("nombre", { ascending: true })
 
     if (error) {
       console.error("Error obteniendo categorías de evento:", error)
       return { success: false, error: error.message }
     }
 
-    const categorias: string[] = [...new Set((data || []).map((r: any) => r.categoriaevento).filter(Boolean))]
+    const categorias = (data || []).map((r: any) => ({ id: r.id, nombre: r.nombre }))
     return { success: true, data: categorias }
   } catch (error) {
     console.error("Error en listaCategoriaEvento:", error)

@@ -1,7 +1,8 @@
 "use client"
 
 import { CardDescription } from "@/components/ui/card"
-import { listaDesplegableClientes, objetoCliente } from "@/app/actions/clientes"
+import { listaDesplegableClientes, objetoCliente, crearCliente } from "@/app/actions/clientes"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { listaDesplegableHoteles } from "@/app/actions/hoteles"
 import { listaDesplegableSalones, objetoSalon, objetoSalones } from "@/app/actions/salones"
 import { crearCotizacion, actualizarCotizacion, objetoCotizacion } from "@/app/actions/cotizaciones"
@@ -9,7 +10,7 @@ import { obtenerDisponibilidadSalon, obtenerReservacionesPorDia } from "@/app/ac
 import { AvailabilityCalendar } from "./availability-calendar"
 import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, agregarElementoACotizacion, buscarLugaresPorHotel, modificarLugarCotizacion, listaEstatusCotizacion, obtenerDocumentoPDF, obtenerPlatillosCotizacion, buscarPlatillosItems, obtenerFormatoCotizacion, obtenerUsuarioSesionActual, obtenerEmpresaPorCliente, obtenerGrupoEmpresa, obtenerComplementosPorHotel, obtenerPlatilloItemPorId, obtenerAudiovisualPorHotel } from "@/app/actions/catalogos"
 import { listaCategoriaEvento } from "@/app/actions/cotizaciones"
-import { Users, MapPin, DollarSign, User, Mail, Phone, Building2, Check, X, CalendarIcon, FileText } from "lucide-react"
+import { Users, MapPin, DollarSign, User, Mail, Phone, Building2, Check, X, CalendarIcon, FileText, UserPlus } from "lucide-react"
 import { Calendar } from "@/components/ui/calendar"
 import type { DateRange } from "react-day-picker"
 
@@ -113,14 +114,28 @@ export function QuotationForm() {
   const [pendingSalonId, setPendingSalonId] = useState<string | null>(null)
   const [pendingMontajeId, setPendingMontajeId] = useState<string | null>(null)
   const [pendingTipoEventoId, setPendingTipoEventoId] = useState<string | null>(null)
-  const [clientes, setClientes] = useState<Array<{ value: string; text: string }>>([])
-  const [filteredClientes, setFilteredClientes] = useState<Array<{ value: string; text: string }>>([])
+  const [clientes, setClientes] = useState<Array<{ value: string; text: string; email: string; telefono: string }>>([])
+  const [filteredClientes, setFilteredClientes] = useState<Array<{ value: string; text: string; email: string; telefono: string }>>([])
   const [showClienteDropdown, setShowClienteDropdown] = useState(false)
   const [selectedClienteId, setSelectedClienteId] = useState<string>("")
+  const [showNuevoClienteModal, setShowNuevoClienteModal] = useState(false)
+  const [nuevoClienteLoading, setNuevoClienteLoading] = useState(false)
+  const [nuevoClienteForm, setNuevoClienteForm] = useState({
+    tipo: "",
+    nombre: "",
+    apellidopaterno: "",
+    apellidomaterno: "",
+    email: "",
+    telefono: "",
+    celular: "",
+    direccion: "",
+    empresa: "",
+  })
+  const [nuevoClienteError, setNuevoClienteError] = useState("")
   const [showPackageSection, setShowPackageSection] = useState(false)
   const [cotizacionId, setCotizacionId] = useState<number | null>(null)
   const [tiposEvento, setTiposEvento] = useState<ddlItem[]>([])
-  const [categoriasEvento, setCategoriasEvento] = useState<string[]>([])
+  const [categoriasEvento, setCategoriasEvento] = useState<{ id: number; nombre: string }[]>([])
   const [estatusList, setEstatusList] = useState<ddlItem[]>([])
   const [pendingEstatusId, setPendingEstatusId] = useState<string | null>(null)
   const [showPaqueteModal, setShowPaqueteModal] = useState(false)
@@ -201,6 +216,8 @@ export function QuotationForm() {
     categoriaEvento: "",
     tipoEvento: "",
     estatusId: "",
+    adultos: "",
+    ninos: "",
     numeroInvitados: "",
     numeroHabitaciones: "",
     hospedajeFechaInicio: "",
@@ -221,7 +238,7 @@ export function QuotationForm() {
   useEffect(() => {
     loadHoteles()
     loadClientes()
-    listaCategoriaEvento().then(r => { if (r.success && r.data) setCategoriasEvento(r.data) })
+    listaCategoriaEvento().then(r => { if (r.success && r.data) setCategoriasEvento(r.data as { id: number; nombre: string }[]) })
     listaEstatusCotizacion().then(r => {
       if (r.success && r.data) {
         const lista = r.data as ddlItem[]
@@ -1607,7 +1624,7 @@ export function QuotationForm() {
     if (result.success && result.data) {
       // En creación, pre-llenar No. Invitados con capacidadminima del salón
       if (!esModoEdicion && result.data.capacidadminima != null) {
-        setFormData(prev => ({ ...prev, numeroInvitados: result.data!.capacidadminima!.toString() }))
+        setFormData(prev => ({ ...prev, adultos: result.data!.capacidadminima!.toString(), ninos: "", numeroInvitados: result.data!.capacidadminima!.toString() }))
       }
 
       // Cargar montajes
@@ -1656,6 +1673,53 @@ export function QuotationForm() {
     }
   }
 
+  async function handleRegistrarCliente() {
+    setNuevoClienteError("")
+    if (!nuevoClienteForm.tipo) { setNuevoClienteError("El tipo de cliente es requerido"); return }
+    if (!nuevoClienteForm.nombre.trim()) { setNuevoClienteError("El nombre es requerido"); return }
+    if (!nuevoClienteForm.apellidopaterno.trim()) { setNuevoClienteError("El apellido paterno es requerido"); return }
+    if (!nuevoClienteForm.email.trim()) { setNuevoClienteError("El email es requerido"); return }
+    if (!nuevoClienteForm.telefono.trim()) { setNuevoClienteError("El teléfono es requerido"); return }
+    if (nuevoClienteForm.tipo === "Empresarial" && !nuevoClienteForm.empresa.trim()) { setNuevoClienteError("El nombre de empresa es requerido"); return }
+
+    setNuevoClienteLoading(true)
+    try {
+      const fd = new FormData()
+      fd.set("nombre", nuevoClienteForm.nombre.trim())
+      fd.set("apellidopaterno", nuevoClienteForm.apellidopaterno.trim())
+      fd.set("apellidomaterno", nuevoClienteForm.apellidomaterno.trim())
+      fd.set("email", nuevoClienteForm.email.trim())
+      fd.set("telefono", nuevoClienteForm.telefono.trim())
+      fd.set("celular", nuevoClienteForm.celular.trim())
+      fd.set("direccion", nuevoClienteForm.direccion.trim())
+      fd.set("tipo", nuevoClienteForm.tipo)
+      if (nuevoClienteForm.tipo === "Empresarial") {
+        fd.set("notas", `Empresa: ${nuevoClienteForm.empresa.trim()}`)
+      }
+
+      const result = await crearCliente(fd)
+      if (result.success) {
+        await loadClientes()
+        const nombreCompleto = `${nuevoClienteForm.nombre} ${nuevoClienteForm.apellidopaterno} ${nuevoClienteForm.apellidomaterno}`.trim()
+        setFormData(prev => ({
+          ...prev,
+          nombreCliente: nombreCompleto,
+          email: nuevoClienteForm.email,
+          telefono: nuevoClienteForm.telefono,
+        }))
+        setSelectedClienteId(result.data?.toString() ?? "")
+        setShowNuevoClienteModal(false)
+        setNuevoClienteForm({ tipo: "", nombre: "", apellidopaterno: "", apellidomaterno: "", email: "", telefono: "", celular: "", direccion: "", empresa: "" })
+      } else {
+        setNuevoClienteError(result.error ?? "Error al registrar cliente")
+      }
+    } catch (error) {
+      setNuevoClienteError("Error inesperado al registrar cliente")
+    } finally {
+      setNuevoClienteLoading(false)
+    }
+  }
+
   const handleClienteInputChange = (value: string) => {
     setSelectedClienteId("") // invalidar selección al tipear manualmente
     if (value.trim() === "") {
@@ -1668,7 +1732,11 @@ export function QuotationForm() {
 
     setFormData(prev => ({ ...prev, nombreCliente: value }))
     const searchTerm = value.toLowerCase()
-    const filtered = clientes.filter((cliente) => cliente.text.toLowerCase().includes(searchTerm))
+    const filtered = clientes.filter((cliente) =>
+      cliente.text.toLowerCase().includes(searchTerm) ||
+      cliente.email.toLowerCase().includes(searchTerm) ||
+      cliente.telefono.includes(searchTerm)
+    )
 
     setFilteredClientes(filtered)
     setShowClienteDropdown(filtered.length > 0)
@@ -1727,6 +1795,8 @@ export function QuotationForm() {
       formDataToSubmit.append("fechainicio", formData.fechaInicial)
       formDataToSubmit.append("fechafin", formData.fechaFinal)
       formDataToSubmit.append("numeroinvitados", formData.numeroInvitados)
+      formDataToSubmit.append("adultos", formData.adultos)
+      formDataToSubmit.append("ninos", formData.ninos)
       formDataToSubmit.append("tipoevento", formData.tipoEvento)
       formDataToSubmit.append("totalmonto", formData.totalMonto)
       formDataToSubmit.append("horainicio", formData.horaInicio)
@@ -1898,23 +1968,50 @@ export function QuotationForm() {
                   onFocus={() => {
                     if (filteredClientes.length > 0) setShowClienteDropdown(true)
                   }}
+                  onBlur={() => {
+                    setTimeout(() => setShowClienteDropdown(false), 200)
+                  }}
                   placeholder="Escribe para buscar cliente..."
                   className={`border-blue-200 focus:ring-blue-500 ${formData.nombreCliente && !selectedClienteId ? "border-red-400 focus:ring-red-400" : ""}`}
                   autoComplete="off"
                 />
-                {formData.nombreCliente && !selectedClienteId && (
-                  <p className="text-xs text-red-500 mt-1">Cliente no válido. Debes seleccionar uno del listado.</p>
+                {formData.nombreCliente && !selectedClienteId && !showClienteDropdown && (
+                  <div className="flex items-start gap-2 mt-1">
+                    <p className="text-xs text-red-500 leading-tight line-clamp-2">Cliente no encontrado en contactos, regístralo haciendo clic aquí →</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowNuevoClienteModal(true)}
+                      className="h-6 text-[11px] gap-1 border-blue-300 text-blue-700 hover:bg-blue-50 hover:text-blue-800 flex-shrink-0"
+                    >
+                      <UserPlus className="h-3 w-3" />
+                      Registrar
+                    </Button>
+                  </div>
                 )}
                 {showClienteDropdown && filteredClientes.length > 0 && (
-                  <div className="absolute z-50 w-full mt-1 bg-white border border-blue-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-blue-300 rounded-lg shadow-lg max-h-60 overflow-y-auto min-w-[480px]">
                     {filteredClientes.map((cliente) => (
                       <button
                         key={cliente.value}
                         type="button"
                         onClick={() => handleClienteSelect(cliente)}
-                        className="w-full text-left px-4 py-2 hover:bg-blue-50 transition-colors border-b border-blue-100 last:border-b-0"
+                        className="w-full text-left px-4 py-2.5 hover:bg-blue-50 transition-colors border-b border-blue-100 last:border-b-0"
                       >
-                        <span className="text-sm text-gray-800">{cliente.text}</span>
+                        <div className="text-sm font-medium text-gray-800">{cliente.text}</div>
+                        <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
+                          {cliente.email && (
+                            <span className="flex items-center gap-1">
+                              <Mail className="h-3 w-3 text-blue-400" />{cliente.email}
+                            </span>
+                          )}
+                          {cliente.telefono && (
+                            <span className="flex items-center gap-1">
+                              <Phone className="h-3 w-3 text-blue-400" />{cliente.telefono}
+                            </span>
+                          )}
+                        </div>
                       </button>
                     ))}
                   </div>
@@ -1953,7 +2050,7 @@ export function QuotationForm() {
                 />
               </div>
 
-              {formData.categoriaEvento?.toUpperCase() === "EMPRESARIAL" && (
+              {categoriasEvento.find(c => c.id.toString() === formData.categoriaEvento)?.nombre?.toUpperCase() === "EMPRESARIAL" && (
                 <>
                   <div className="space-y-2">
                     <Label htmlFor="empresa" className="text-sm font-medium flex items-center gap-2">
@@ -2000,6 +2097,7 @@ export function QuotationForm() {
                 <Select
                   value={formData.categoriaEvento}
                   onValueChange={(v) => {
+                    const cat = categoriasEvento.find(c => c.id.toString() === v)
                     setFormData(prev => ({ ...prev, categoriaEvento: v, tipoEvento: "" }))
                     setTiposEvento([])
                     loadTiposEvento(v)
@@ -2010,7 +2108,7 @@ export function QuotationForm() {
                   </SelectTrigger>
                   <SelectContent>
                     {categoriasEvento.map((cat) => (
-                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                      <SelectItem key={cat.id} value={cat.id.toString()}>{cat.nombre}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -2032,6 +2130,60 @@ export function QuotationForm() {
                 </Select>
               </div>
 
+              <div className="space-y-1 w-28">
+                <Label htmlFor="adultos" className="text-xs font-medium">
+                  Adultos
+                </Label>
+                <Input
+                  id="adultos"
+                  type="number"
+                  min="0"
+                  max="999"
+                  value={formData.adultos}
+                  onChange={(e) => {
+                    const val = e.target.value.slice(0, 3)
+                    const adultos = Number(val) || 0
+                    const ninos = Number(formData.ninos) || 0
+                    const total = adultos + ninos
+                    setFormData(prev => ({ ...prev, adultos: val, numeroInvitados: total.toString() }))
+                    setPresupuestoItems(prev => prev.map(p =>
+                      p.tipo === "Platillo" || p.tipo === "Complemento"
+                        ? { ...p, cantidad: total, total: p.subtotal * total }
+                        : p
+                    ))
+                  }}
+                  placeholder="0"
+                  className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
+                />
+              </div>
+
+              <div className="space-y-1 w-28">
+                <Label htmlFor="ninos" className="text-xs font-medium">
+                  Niños
+                </Label>
+                <Input
+                  id="ninos"
+                  type="number"
+                  min="0"
+                  max="999"
+                  value={formData.ninos}
+                  onChange={(e) => {
+                    const val = e.target.value.slice(0, 3)
+                    const ninos = Number(val) || 0
+                    const adultos = Number(formData.adultos) || 0
+                    const total = adultos + ninos
+                    setFormData(prev => ({ ...prev, ninos: val, numeroInvitados: total.toString() }))
+                    setPresupuestoItems(prev => prev.map(p =>
+                      p.tipo === "Platillo" || p.tipo === "Complemento"
+                        ? { ...p, cantidad: total, total: p.subtotal * total }
+                        : p
+                    ))
+                  }}
+                  placeholder="0"
+                  className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
+                />
+              </div>
+
               <div className="space-y-1 w-36">
                 <Label htmlFor="numeroInvitados" className="text-xs font-medium">
                   No. Invitados <span className="text-red-500">*</span>
@@ -2039,26 +2191,17 @@ export function QuotationForm() {
                 <Input
                   id="numeroInvitados"
                   type="number"
-                  min="1"
-                  max="999"
-                  maxLength={3}
                   value={formData.numeroInvitados}
-                  onChange={(e) => {
-                    const val = e.target.value.slice(0, 3)
-                    setFormData(prev => ({ ...prev, numeroInvitados: val }))
-                    const numVal = Number(val) || 0
-                    setPresupuestoItems(prev => prev.map(p =>
-                      p.tipo === "Platillo" || p.tipo === "Complemento"
-                        ? { ...p, cantidad: numVal, total: p.subtotal * numVal }
-                        : p
-                    ))
-                  }}
-                  placeholder="Ej: 150"
-                  className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
+                  placeholder="0"
+                  className="border-blue-200 focus:ring-blue-500 h-8 text-sm bg-gray-50"
+                  disabled
                   required
                 />
               </div>
 
+            </div>
+
+            <div className="mt-3">
               <div className="space-y-1 w-64">
                 <Label htmlFor="nombreEvento" className="text-xs font-medium">
                   Nombre del Evento <span className="text-red-500">*</span>
@@ -3528,6 +3671,182 @@ export function QuotationForm() {
         @keyframes loading-bar { 0% { width: 0% } 50% { width: 70% } 100% { width: 100% } }
       `}</style>
     </form>
+
+    {/* Modal Nuevo Cliente */}
+    <Dialog open={showNuevoClienteModal} onOpenChange={(open) => {
+      setShowNuevoClienteModal(open)
+      if (!open) {
+        setNuevoClienteForm({ tipo: "", nombre: "", apellidopaterno: "", apellidomaterno: "", email: "", telefono: "", celular: "", direccion: "", empresa: "" })
+        setNuevoClienteError("")
+      }
+    }}>
+      <DialogContent className="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-blue-900">
+            <UserPlus className="h-5 w-5" />
+            Registrar Nuevo Cliente
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 pt-2">
+          {nuevoClienteError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">
+              {nuevoClienteError}
+            </div>
+          )}
+
+          {/* Tipo de Cliente */}
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium">Tipo de Cliente <span className="text-red-500">*</span></Label>
+            <Select value={nuevoClienteForm.tipo} onValueChange={(v) => setNuevoClienteForm(prev => ({ ...prev, tipo: v, empresa: "" }))}>
+              <SelectTrigger className="border-blue-200">
+                <SelectValue placeholder="Selecciona tipo..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Individual">Individual</SelectItem>
+                <SelectItem value="Empresarial">Empresarial</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Empresa - solo si es Empresarial */}
+          {nuevoClienteForm.tipo === "Empresarial" && (
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium flex items-center gap-2">
+                <Building2 className="h-4 w-4 text-blue-600" />
+                Nombre Empresa <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                value={nuevoClienteForm.empresa}
+                onChange={(e) => setNuevoClienteForm(prev => ({ ...prev, empresa: e.target.value }))}
+                placeholder="Nombre de la empresa"
+                className="border-blue-200"
+              />
+            </div>
+          )}
+
+          {/* Nombre y Apellidos */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">Nombre <span className="text-red-500">*</span></Label>
+              <Input
+                value={nuevoClienteForm.nombre}
+                onChange={(e) => setNuevoClienteForm(prev => ({ ...prev, nombre: e.target.value }))}
+                placeholder="Nombre"
+                className="border-blue-200"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">Apellido Paterno <span className="text-red-500">*</span></Label>
+              <Input
+                value={nuevoClienteForm.apellidopaterno}
+                onChange={(e) => setNuevoClienteForm(prev => ({ ...prev, apellidopaterno: e.target.value }))}
+                placeholder="Apellido paterno"
+                className="border-blue-200"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">Apellido Materno</Label>
+              <Input
+                value={nuevoClienteForm.apellidomaterno}
+                onChange={(e) => setNuevoClienteForm(prev => ({ ...prev, apellidomaterno: e.target.value }))}
+                placeholder="Opcional"
+                className="border-blue-200"
+              />
+            </div>
+          </div>
+
+          {/* Email */}
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium flex items-center gap-2">
+              <Mail className="h-4 w-4 text-blue-600" />
+              Email <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              type="email"
+              value={nuevoClienteForm.email}
+              onChange={(e) => setNuevoClienteForm(prev => ({ ...prev, email: e.target.value }))}
+              placeholder="correo@ejemplo.com"
+              className="border-blue-200"
+            />
+          </div>
+
+          {/* Teléfono y Celular */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium flex items-center gap-2">
+                <Phone className="h-4 w-4 text-blue-600" />
+                Teléfono <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                type="tel"
+                value={nuevoClienteForm.telefono}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, "")
+                  setNuevoClienteForm(prev => ({ ...prev, telefono: val }))
+                }}
+                placeholder="Solo números"
+                className="border-blue-200"
+                inputMode="numeric"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium flex items-center gap-2">
+                <Phone className="h-4 w-4 text-blue-600" />
+                Celular
+              </Label>
+              <Input
+                type="tel"
+                value={nuevoClienteForm.celular}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, "")
+                  setNuevoClienteForm(prev => ({ ...prev, celular: val }))
+                }}
+                placeholder="Solo números"
+                className="border-blue-200"
+                inputMode="numeric"
+              />
+            </div>
+          </div>
+
+          {/* Dirección */}
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium flex items-center gap-2">
+              <MapPin className="h-4 w-4 text-blue-600" />
+              Dirección
+            </Label>
+            <Input
+              value={nuevoClienteForm.direccion}
+              onChange={(e) => setNuevoClienteForm(prev => ({ ...prev, direccion: e.target.value }))}
+              placeholder="Dirección del cliente"
+              className="border-blue-200"
+            />
+          </div>
+
+          {/* Botón Registrar */}
+          <div className="flex justify-end pt-2">
+            <Button
+              type="button"
+              onClick={handleRegistrarCliente}
+              disabled={nuevoClienteLoading}
+              className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
+            >
+              {nuevoClienteLoading ? (
+                <>
+                  <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Registrando...
+                </>
+              ) : (
+                <>
+                  <Check className="h-4 w-4" />
+                  Registrar Cliente
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
     </>
   )
 }

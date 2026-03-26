@@ -3,8 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { ChevronLeft, ChevronRight, Calendar, Clock, CalendarDays, CalendarRange, ArrowLeft, GripVertical } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { obtenerReservacionesPorHotel } from "@/app/actions/reservaciones"
-import { obtenerCotizacionesPorHotel } from "@/app/actions/cotizaciones"
+import { obtenerEventosPorHotel } from "@/app/actions/cotizaciones"
 import type { ddlItem } from "@/types/common"
 
 /* ==================================================
@@ -48,7 +47,7 @@ const HOURS = (() => {
   for (let i = 0; i <= 2; i++) { h.push({ value: `${i.toString().padStart(2, "0")}:00`, label: `${fmt(i)}-${fmt(i + 1)}`, hour24: i }) }
   return h
 })()
-const BLOCK_SIZE = 10 // 1 pre + 8 event + 1 post
+const BLOCK_SIZE = 6 // 1 pre + 4 event + 1 post
 const DAYS_ES = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"]
 const MONTHS_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
@@ -102,13 +101,27 @@ export function AvailabilityCalendar({
   const loadEvents = useCallback(async () => {
     if (!hotelId) return
     setLoading(true)
-    const [resR, cotR] = await Promise.all([
-      obtenerReservacionesPorHotel(Number(hotelId), toDateStr(dateRange.start), toDateStr(dateRange.end)),
-      obtenerCotizacionesPorHotel(Number(hotelId), toDateStr(dateRange.start), toDateStr(dateRange.end)),
-    ])
+    const result = await obtenerEventosPorHotel(Number(hotelId), toDateStr(dateRange.start), toDateStr(dateRange.end))
     const all: CalendarEvent[] = []
-    if (resR.success && resR.data) for (const r of resR.data) all.push({ id: r.id, nombreevento: r.nombreevento || "Reservación", salonName: r.salon || salonNameMap.get(String(r.salonid)) || "Salón", salonid: r.salonid, fechainicio: r.fechainicio, fechafin: r.fechafin, horainicio: r.horainicio || "", horafin: r.horafin || "", estatus: r.estatus || "", cliente: r.cliente || "", numeroinvitados: r.numeroinvitados || 0, tipo: "reservacion" })
-    if (cotR.success && cotR.data) for (const c of cotR.data) all.push({ id: c.id, nombreevento: c.nombreevento || "Cotización", salonName: salonNameMap.get(String(c.salonid)) || "Salón", salonid: c.salonid, fechainicio: c.fechainicio, fechafin: c.fechafin, horainicio: c.horainicio || "", horafin: c.horafin || "", estatus: c.estatus || "", cliente: c.cliente || "", numeroinvitados: c.numeroinvitados || 0, tipo: "cotizacion" })
+    if (result.success && result.data) {
+      for (const e of result.data) {
+        const tipo = String(e.tiporegistro).toLowerCase() === "reservacion" ? "reservacion" : "cotizacion"
+        all.push({
+          id: e.id,
+          nombreevento: e.nombreevento || (tipo === "reservacion" ? "Reservación" : "Cotización"),
+          salonName: e.salon || salonNameMap.get(String(e.salonid)) || "Salón",
+          salonid: e.salonid,
+          fechainicio: e.fechainicio,
+          fechafin: e.fechafin,
+          horainicio: e.horainicio || "",
+          horafin: e.horafin || "",
+          estatus: e.estatus || "",
+          cliente: e.cliente || "",
+          numeroinvitados: e.numeroinvitados || 0,
+          tipo,
+        })
+      }
+    }
     setEvents(all); setLoading(false)
   }, [hotelId, dateRange, salonNameMap])
 
@@ -313,7 +326,7 @@ export function AvailabilityCalendar({
       </div>
 
       {/* Body */}
-      <div className="overflow-auto max-h-[420px]">
+      <div className="overflow-y-auto overflow-x-hidden max-h-[420px]">
         {viewMode === "day" && <DayView date={currentDate} salones={salones} getEventsForHourCell={getEventsForHourCell} hourHasRes={hourHasRes} onHourClick={handleHourClick} hoverBlock={hoverBlock} setHoverBlock={setHoverBlock} selection={selection} dragging={dragging} startDrag={startDrag} onDragMove={onDragMove} onClearSelection={() => { setSelection(null); setOverlapAlert(null) }} />}
         {viewMode === "week" && <WeekView days={weekDays} salones={salones} getEventsForCell={getEventsForCell}
           onDayClick={handleDayClick}
@@ -425,15 +438,15 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
   }
 
   return (
-    <table className="w-full border-collapse text-[11px]">
+    <table className="w-full border-collapse text-[11px] table-fixed">
       <thead className="sticky top-0 z-10"><tr className="bg-blue-50">
-        <th className="text-left p-2 font-semibold text-blue-900 border-b border-r border-blue-200 min-w-[110px] sticky left-0 bg-blue-50 z-20">Salón</th>
-        {HOURS.map((h) => <th key={h.value} className="text-center p-1.5 font-medium text-blue-700 border-b border-r border-blue-100 min-w-[56px] whitespace-nowrap">{h.label}</th>)}
+        <th className="text-left p-2 font-semibold text-blue-900 border-b border-r border-blue-200 w-[100px] sticky left-0 bg-blue-50 z-20">Salón</th>
+        {HOURS.map((h) => <th key={h.value} className="text-center p-1 font-medium text-blue-700 border-b border-r border-blue-100 whitespace-nowrap text-[10px]">{h.label}</th>)}
       </tr></thead>
       <tbody>
         {salones.map((salon) => (
           <tr key={salon.value} className="group hover:bg-blue-50/20">
-            <td className="p-2 font-semibold text-gray-800 border-b border-r border-blue-100 sticky left-0 bg-white group-hover:bg-blue-50/20 z-10 truncate max-w-[130px]">{salon.text}</td>
+            <td className="p-2 font-semibold text-gray-800 border-b border-r border-blue-100 sticky left-0 bg-white group-hover:bg-blue-50/20 z-10 truncate w-[100px]">{salon.text}</td>
             {HOURS.map((h, hIdx) => {
               const evts = getEventsForHourCell(salon.value, dateStr, h.hour24)
               const hasRes = hourHasRes(salon.value, dateStr, h.hour24)
@@ -585,14 +598,14 @@ function WeekView({ days, salones, getEventsForCell, onDayClick, onRangeClick, d
   }
 
   return (
-    <table className="w-full border-collapse text-[11px]">
+    <table className="w-full border-collapse text-[11px] table-fixed">
       <thead className="sticky top-0 z-10"><tr className="bg-blue-50">
-        <th className="text-left p-2 font-semibold text-blue-900 border-b border-r border-blue-200 min-w-[110px] sticky left-0 bg-blue-50 z-20">Salón</th>
-        {days.map((d) => { const t = isToday(d); return <th key={toDateStr(d)} className={`text-center p-2 border-b border-r border-blue-100 min-w-[100px] ${t ? "bg-blue-600 text-white" : "text-blue-700"}`}><div className="text-[10px] uppercase tracking-wide">{DAYS_ES[d.getDay()]}</div><div className={`text-base font-bold ${t ? "text-white" : "text-blue-900"}`}>{d.getDate()}</div></th> })}
+        <th className="text-left p-2 font-semibold text-blue-900 border-b border-r border-blue-200 w-[100px] sticky left-0 bg-blue-50 z-20">Salón</th>
+        {days.map((d) => { const t = isToday(d); return <th key={toDateStr(d)} className={`text-center p-2 border-b border-r border-blue-100 ${t ? "bg-blue-600 text-white" : "text-blue-700"}`}><div className="text-[10px] uppercase tracking-wide">{DAYS_ES[d.getDay()]}</div><div className={`text-base font-bold ${t ? "text-white" : "text-blue-900"}`}>{d.getDate()}</div></th> })}
       </tr></thead>
       <tbody>{salones.map((salon) => (
         <tr key={salon.value} className="group">
-          <td className="p-2 font-semibold text-gray-800 border-b border-r border-blue-100 sticky left-0 bg-white group-hover:bg-blue-50/30 z-10 truncate max-w-[130px]">{salon.text}</td>
+          <td className="p-2 font-semibold text-gray-800 border-b border-r border-blue-100 sticky left-0 bg-white group-hover:bg-blue-50/30 z-10 truncate w-[100px]">{salon.text}</td>
           {days.map((d, colIdx) => {
             const ds = toDateStr(d), evts = getEventsForCell(salon.value, ds)
             const res = evts.filter(e => e.tipo === "reservacion"), cot = evts.filter(e => e.tipo === "cotizacion")
@@ -685,12 +698,12 @@ function MonthView({ year, salones, events, onMonthClick }: {
   const isCurrentMonth = (m: number) => year === currentYear && m === currentMonth
 
   return (
-    <table className="w-full border-collapse text-[11px]">
+    <table className="w-full border-collapse text-[11px] table-fixed">
       <thead className="sticky top-0 z-10">
         <tr className="bg-blue-50">
-          <th className="text-left p-2 font-semibold text-blue-900 border-b border-r border-blue-200 min-w-[110px] sticky left-0 bg-blue-50 z-20">Salón</th>
+          <th className="text-left p-2 font-semibold text-blue-900 border-b border-r border-blue-200 w-[100px] sticky left-0 bg-blue-50 z-20">Salón</th>
           {MONTHS_SHORT.map((m, i) => (
-            <th key={i} className={`text-center p-2 font-medium border-b border-r border-blue-100 min-w-[70px] ${
+            <th key={i} className={`text-center p-2 font-medium border-b border-r border-blue-100 ${
               isCurrentMonth(i) ? "bg-blue-600 text-white" : isPastMonth(i) ? "text-gray-400" : "text-blue-700"
             }`}>
               {m}
@@ -701,7 +714,7 @@ function MonthView({ year, salones, events, onMonthClick }: {
       <tbody>
         {salones.map((salon) => (
           <tr key={salon.value} className="group">
-            <td className="p-2 font-semibold text-gray-800 border-b border-r border-blue-100 sticky left-0 bg-white group-hover:bg-blue-50/30 z-10 truncate max-w-[130px]">
+            <td className="p-2 font-semibold text-gray-800 border-b border-r border-blue-100 sticky left-0 bg-white group-hover:bg-blue-50/30 z-10 truncate w-[100px]">
               {salon.text}
             </td>
             {MONTHS_SHORT.map((_, month) => {
