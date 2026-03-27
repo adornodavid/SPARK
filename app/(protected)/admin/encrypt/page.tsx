@@ -33,7 +33,7 @@ export default function EncryptPage() {
   useEffect(() => {
     async function checkAuthorization() {
       const session = await obtenerSesion()
-      if (!session || session.Rol !== "admin_principal") {
+      if (!session || session.Rol !== "SuperAdmin") {
         router.push("/admin")
         return
       }
