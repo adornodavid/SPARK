@@ -1,0 +1,34 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-03-27T18:52:51.046Z",
+  "status": "paused",
+  "branch": "main",
+  "last_commit": "e7d8e75",
+  "completed_tasks": [
+    {"id": 136, "name": "Migrar query a vw_oeventos con distinct", "status": "done", "commit": "e7d8e75"},
+    {"id": 137, "name": "Cards más compactas sin hora ni hotel", "status": "done", "commit": "e7d8e75"},
+    {"id": 138, "name": "Columna Seguimiento y objeciones", "status": "done", "commit": "e7d8e75"},
+    {"id": 139, "name": "Columna Reservaciones", "status": "done", "commit": "e7d8e75"},
+    {"id": 140, "name": "Grid 4 columnas sin scroll horizontal", "status": "done", "commit": "e7d8e75"},
+    {"id": 141, "name": "Filtros de búsqueda compactos con anchura fija", "status": "done", "commit": "e7d8e75"},
+    {"id": 142, "name": "Dropdown estatus por columna en header", "status": "done", "commit": "e7d8e75"},
+    {"id": 143, "name": "Doble clic en estatus pill para crear columna", "status": "done", "commit": "e7d8e75"},
+    {"id": 144, "name": "Push a main y deploy Vercel", "status": "done", "commit": "e7d8e75"}
+  ],
+  "remaining_tasks": [
+    {"id": "backlog", "name": "Integrar horaPreMontaje/PostMontaje/horasExtras en actualizarCotizacion", "status": "not_started"},
+    {"id": "backlog", "name": "Validaciones de solapamiento con reservaciones", "status": "not_started"},
+    {"id": "backlog", "name": "Sincronización calendario disponibilidad dashboard con DayDetailSheet", "status": "not_started"}
+  ],
+  "blockers": [],
+  "human_actions_pending": [],
+  "decisions": [
+    {"decision": "Usar vw_oeventos como fuente única del board", "rationale": "Contiene toda la info de eventos con salón, hotel, montaje"},
+    {"decision": "Distinct por id en frontend con Set", "rationale": "Supabase REST no soporta DISTINCT"},
+    {"decision": "Separar eventos por sección de estatus", "rationale": "Tabla estatus tiene campo seccion: Cotizacion, Seguimiento y objeciones, Reservacion"},
+    {"decision": "Grid 4 columnas fijo", "rationale": "Evitar scroll horizontal, caber en pantalla"}
+  ],
+  "uncommitted_files": [],
+  "next_action": "Continuar con requerimientos del usuario",
+  "context_notes": "Board completamente rediseñado con 4 columnas fijas + columnas dinámicas por estatus drag/doble-clic. Todo deployed."
+}
