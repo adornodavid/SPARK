@@ -19,6 +19,50 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey) // Declare the su
 	* LIST
     - listaDesplegableCatalogos / ddlCatalogos
 ================================================== */
+// Función: listaEstatusReservacion: obtiene id y nombre de estatus donde seccion = 'Reservacion'
+export async function listaEstatusReservacion() {
+  try {
+    const { data, error } = await supabase
+      .from("estatus")
+      .select("id, nombre")
+      .eq("seccion", "Reservacion")
+      .order("orden", { ascending: true })
+
+    if (error) {
+      console.error("Error obteniendo estatus de reservación:", error)
+      return { success: false, error: error.message }
+    }
+
+    const lista = (data || []).map((r: any) => ({ value: r.id.toString(), text: r.nombre }))
+    return { success: true, data: lista }
+  } catch (error) {
+    console.error("Error en listaEstatusReservacion:", error)
+    return { success: false, error: "Error interno del servidor" }
+  }
+}
+
+// Función: listaEstatusSeguimiento: obtiene id y nombre de estatus donde seccion = 'Seguimiento y objeciones'
+export async function listaEstatusSeguimiento() {
+  try {
+    const { data, error } = await supabase
+      .from("estatus")
+      .select("id, nombre")
+      .eq("seccion", "Seguimiento y objeciones")
+      .order("orden", { ascending: true })
+
+    if (error) {
+      console.error("Error obteniendo estatus de seguimiento:", error)
+      return { success: false, error: error.message }
+    }
+
+    const lista = (data || []).map((r: any) => ({ value: r.id.toString(), text: r.nombre }))
+    return { success: true, data: lista }
+  } catch (error) {
+    console.error("Error en listaEstatusSeguimiento:", error)
+    return { success: false, error: "Error interno del servidor" }
+  }
+}
+
 // Función: listaEstatusCotizacion: obtiene id y nombre de estatus donde seccion = 'Cotizacion'
 export async function listaEstatusCotizacion() {
   try {

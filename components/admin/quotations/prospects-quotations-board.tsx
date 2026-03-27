@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { createBrowserClient } from "@/lib/supabase/client"
 import { listaDesplegableHoteles } from "@/app/actions/hoteles"
 import { listaDesplegableSalones } from "@/app/actions/salones"
-import { listaEstatusCotizacion } from "@/app/actions/catalogos"
+import { listaEstatusCotizacion, listaEstatusSeguimiento, listaEstatusReservacion } from "@/app/actions/catalogos"
 import type { ddlItem } from "@/types/common"
 
 /* ==================================================
@@ -24,11 +24,13 @@ interface BoardItem {
   id: number; folio: string; cliente: string; nombreevento: string; tipoevento: string
   numeroinvitados: number; fechainicio: string; fechafin: string
   hotelid?: number; salonid?: number; estatus?: string
+  hotel?: string; salon?: string; montaje?: string; categoriaevento?: string
+  tiporegistro?: string; horainicio?: string; horafin?: string
 }
 
 interface ColumnDef {
   id: string; title: string; color: string
-  type: "prospecto" | "cotizacion" | "estatus"
+  type: "prospecto" | "cotizacion" | "estatus" | "seguimiento" | "reservacion"
   estatusFilter?: string
 }
 
@@ -64,10 +66,15 @@ export function ProspectsQuotationsBoard() {
   const supabase = createBrowserClient()
   const [prospectos, setProspectos] = useState<BoardItem[]>([])
   const [cotizaciones, setCotizaciones] = useState<BoardItem[]>([])
+  const [seguimiento, setSeguimiento] = useState<BoardItem[]>([])
+  const [reservaciones, setReservaciones] = useState<BoardItem[]>([])
   const [loading, setLoading] = useState(true)
 
   // Estatus from DB
   const [estatusList, setEstatusList] = useState<ddlItem[]>([])
+  const [seguimientoEstatusList, setSeguimientoEstatusList] = useState<ddlItem[]>([])
+  const [reservacionEstatusList, setReservacionEstatusList] = useState<ddlItem[]>([])
+  const [seguimientoEstatusIds, setSeguimientoEstatusIds] = useState<Set<number>>(new Set())
 
   // All column IDs in order
   const [columnOrder, setColumnOrder] = useState<string[]>(["prospectos", "cotizaciones"])
@@ -87,6 +94,9 @@ export function ProspectsQuotationsBoard() {
 
   const [debouncedSearch, setDebouncedSearch] = useState("")
 
+  // Filtro de estatus por columna
+  const [colEstatusFilter, setColEstatusFilter] = useState<Record<string, string>>({})
+
   useEffect(() => { listaDesplegableHoteles().then((r) => { if (r.success && r.data) setHotels(r.data) }) }, [])
   useEffect(() => {
     const hId = filters.hotel_id && filters.hotel_id !== "all" ? Number(filters.hotel_id) : -1
@@ -94,18 +104,42 @@ export function ProspectsQuotationsBoard() {
   }, [filters.hotel_id])
   useEffect(() => {
     listaEstatusCotizacion().then((r) => { if (r.success && r.data) setEstatusList(r.data) })
+    listaEstatusSeguimiento().then((r) => {
+      if (r.success && r.data) {
+        setSeguimientoEstatusList(r.data)
+        setSeguimientoEstatusIds(new Set(r.data.map((e: ddlItem) => Number(e.value))))
+      }
+    })
+    listaEstatusReservacion().then((r) => {
+      if (r.success && r.data) setReservacionEstatusList(r.data)
+    })
   }, [])
   useEffect(() => { loadData() }, [])
   useEffect(() => { const t = setTimeout(() => setDebouncedSearch(filters.search), 400); return () => clearTimeout(t) }, [filters.search])
 
   async function loadData() {
     setLoading(true)
-    const [pRes, cRes] = await Promise.all([
+    const [pRes, eRes, segRes, resRes] = await Promise.all([
       supabase.from("vw_oprospectos").select("id, folio, cliente, nombreevento, tipoevento, numeroinvitados, fechainicio, fechafin, hotelid").order("id", { ascending: false }),
-      supabase.from("vw_ocotizaciones").select("id, folio, cliente, nombreevento, tipoevento, numeroinvitados, fechainicio, fechafin, hotelid, salonid, estatus").order("id", { ascending: false }),
+      supabase.from("vw_oeventos").select("*").order("id", { ascending: false }),
+      listaEstatusSeguimiento(),
+      listaEstatusReservacion(),
     ])
     setProspectos(pRes.data || [])
-    setCotizaciones(cRes.data || [])
+    // IDs de estatus por sección
+    const segIds = new Set((segRes.success && segRes.data ? segRes.data : []).map((e: ddlItem) => Number(e.value)))
+    const resIds = new Set((resRes.success && resRes.data ? resRes.data : []).map((e: ddlItem) => Number(e.value)))
+    // Distinct por id — quedarse con la primera fila de cada evento
+    const seen = new Set<number>()
+    const uniqueEventos = (eRes.data || []).filter((row: any) => {
+      if (seen.has(row.id)) return false
+      seen.add(row.id)
+      return true
+    })
+    // Separar por sección de estatus
+    setCotizaciones(uniqueEventos.filter((e: any) => e.tiporegistro === "Cotizacion" && !segIds.has(e.estatusid) && !resIds.has(e.estatusid)))
+    setSeguimiento(uniqueEventos.filter((e: any) => e.tiporegistro === "Cotizacion" && segIds.has(e.estatusid)))
+    setReservaciones(uniqueEventos.filter((e: any) => resIds.has(e.estatusid)))
 
     const saved = localStorage.getItem("spark-board-column-order")
     if (saved) {
@@ -149,9 +183,23 @@ export function ProspectsQuotationsBoard() {
   }
 
   function getColumnItems(col: ColumnDef): BoardItem[] {
-    if (col.type === "prospecto") return filterItems(prospectos)
-    if (col.type === "cotizacion") return filterItems(cotizaciones)
-    if (col.type === "estatus" && col.estatusFilter) return filterItems(cotizaciones.filter((c) => c.estatus === col.estatusFilter))
+    let items: BoardItem[] = []
+    if (col.type === "prospecto") items = filterItems(prospectos)
+    else if (col.type === "cotizacion") items = filterItems(cotizaciones)
+    else if (col.type === "seguimiento") items = filterItems(seguimiento)
+    else if (col.type === "reservacion") items = filterItems(reservaciones)
+    else if (col.type === "estatus" && col.estatusFilter) items = filterItems(cotizaciones.filter((c) => c.estatus === col.estatusFilter))
+    // Aplicar filtro de estatus por columna
+    const colFilter = colEstatusFilter[col.id]
+    if (colFilter && colFilter !== "all") items = items.filter((i) => i.estatus === colFilter)
+    return items
+  }
+
+  function getEstatusListForColumn(colId: string): ddlItem[] {
+    if (colId === "prospectos") return []
+    if (colId === "cotizaciones") return estatusList
+    if (colId === "seguimiento") return seguimientoEstatusList
+    if (colId === "reservaciones") return reservacionEstatusList
     return []
   }
 
@@ -202,33 +250,33 @@ export function ProspectsQuotationsBoard() {
     <div className="space-y-4">
       {/* Filters */}
       <Card>
-        <CardContent className="pt-6 space-y-4">
-          <div className="flex flex-wrap gap-3">
-            <div className="w-[180px] space-y-2">
-              <Label>Buscar</Label>
+        <CardContent className="py-1 space-y-1">
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="w-[250px] space-y-1">
+              <Label className="text-xs">Buscar</Label>
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input placeholder="Folio, cliente, evento..." value={filters.search} onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))} className="pl-9" />
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input placeholder="Folio, cliente, evento..." value={filters.search} onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))} className="pl-8 h-8 text-xs" />
               </div>
             </div>
-            <div className="w-[220px] space-y-2">
-              <Label>Hotel</Label>
+            <div className="w-[270px] space-y-1">
+              <Label className="text-xs">Hotel</Label>
               <Select value={filters.hotel_id} onValueChange={(v) => setFilters((p) => ({ ...p, hotel_id: v, salon_id: "" }))}>
-                <SelectTrigger><SelectValue placeholder="Todos los hoteles" /></SelectTrigger>
+                <SelectTrigger className="w-full h-8 text-xs truncate"><SelectValue placeholder="Todos los hoteles" /></SelectTrigger>
                 <SelectContent><SelectItem value="all">Todos los hoteles</SelectItem>{hotels.map((h) => <SelectItem key={h.value} value={h.value}>{h.text}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div className="w-[220px] space-y-2">
-              <Label>Salon</Label>
+            <div className="w-[180px] space-y-1">
+              <Label className="text-xs">Salon</Label>
               <Select value={filters.salon_id} onValueChange={(v) => setFilters((p) => ({ ...p, salon_id: v }))}>
-                <SelectTrigger><SelectValue placeholder="Todos los salones" /></SelectTrigger>
+                <SelectTrigger className="w-full h-8 text-xs truncate"><SelectValue placeholder="Todos los salones" /></SelectTrigger>
                 <SelectContent><SelectItem value="all">Todos los salones</SelectItem>{salones.map((s) => <SelectItem key={s.value} value={s.value}>{s.text}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div className="w-[200px] space-y-2">
-              <Label>Estatus</Label>
+            <div className="w-[170px] space-y-1">
+              <Label className="text-xs">Estatus</Label>
               <Select value={filters.estatus} onValueChange={(v) => setFilters((p) => ({ ...p, estatus: v }))}>
-                <SelectTrigger><SelectValue placeholder="Todos los estatus" /></SelectTrigger>
+                <SelectTrigger className="w-full h-8 text-xs truncate"><SelectValue placeholder="Todos los estatus" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos los estatus</SelectItem>
                   {estatusList.map((e) => <SelectItem key={e.value} value={e.text}>{e.text}</SelectItem>)}
@@ -239,20 +287,21 @@ export function ProspectsQuotationsBoard() {
 
           {/* Estatus pills — draggable */}
           <div>
-            <Label className="text-xs text-muted-foreground mb-2 block">Arrastra un estatus al tablero para crear una columna</Label>
-            <div className="flex flex-wrap gap-2">
+            <Label className="text-[10px] text-muted-foreground mb-1 block">Arrastra un estatus al tablero para crear una columna</Label>
+            <div className="flex flex-wrap gap-1.5">
               {estatusList.map((est, idx) => {
                 const colors = getEstatusColor(idx)
                 const isActive = activeEstatus.includes(est.text)
                 return (
                   <div key={est.value} draggable={!isActive}
                     onDragStart={(e) => !isActive && onEstDragStart(e, est.text)} onDragEnd={onEstDragEnd}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold transition-all select-none ${
+                    onDoubleClick={() => { if (!isActive) { const colId = `estatus-${est.text}`; saveOrder([...columnOrder, colId]) } }}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-semibold transition-all select-none ${
                       isActive ? `${colors.bg} ${colors.border} opacity-50 cursor-default` : "bg-white border-gray-200 hover:border-gray-300 hover:shadow-sm cursor-grab active:cursor-grabbing"
                     } ${draggedEstatus === est.text ? "opacity-40 scale-95" : ""}`}>
-                    <div className={`w-2.5 h-2.5 rounded-full ${colors.color}`} />
+                    <div className={`w-2 h-2 rounded-full ${colors.color}`} />
                     {est.text}
-                    {isActive && <span className="text-[9px] opacity-60 ml-0.5">(activo)</span>}
+                    {isActive && <span className="text-[8px] opacity-60 ml-0.5">(activo)</span>}
                   </div>
                 )
               })}
@@ -266,7 +315,7 @@ export function ProspectsQuotationsBoard() {
         className={`transition-all rounded-xl min-h-[200px] ${dropZoneActive ? "ring-2 ring-dashed ring-blue-400 bg-blue-50/50 p-2" : ""}`}>
         {dropZoneActive && <div className="text-center py-4 text-sm text-blue-500 font-medium animate-pulse">Suelta aquí para crear columna</div>}
 
-        <div className="flex gap-4 overflow-x-auto pb-4 justify-center">
+        <div className="grid grid-cols-4 gap-3 pb-4">
           {allColumnDefs.map((col) => {
             const items = getColumnItems(col)
             const isOver = dragOverColId === col.id
@@ -278,36 +327,111 @@ export function ProspectsQuotationsBoard() {
                 onDragStart={(e) => onColDragStart(e, col.id)} onDragEnd={onColDragEnd}
                 onDragOver={(e) => onColDragOver(e, col.id)} onDragLeave={onColDragLeave}
                 onDrop={(e) => onColDrop(e, col.id)}
-                className={`flex-shrink-0 w-[calc(25%-12px)] min-w-[260px] rounded-xl border transition-all ${
+                className={`min-w-0 rounded-xl border transition-all ${
                   isOver ? "border-primary bg-primary/5 shadow-lg scale-[1.01]"
                   : isEstatus && colors ? `${colors.border} ${colors.bg}`
                   : "border-border/50 bg-muted/30"
                 }`}>
-                <div className={`p-4 border-b cursor-grab active:cursor-grabbing ${isEstatus && colors ? colors.border : "border-border/50"}`}>
+                <div className={`p-2 border-b cursor-grab active:cursor-grabbing ${isEstatus && colors ? colors.border : "border-border/50"}`}>
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <GripVertical className="h-4 w-4 text-muted-foreground/50" />
-                      <div className={`h-3 w-3 rounded-full ${col.color}`} />
-                      <span className="text-sm font-bold uppercase tracking-wide">{col.title}</span>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <GripVertical className="h-3.5 w-3.5 text-muted-foreground/50 flex-shrink-0" />
+                      <div className={`h-2.5 w-2.5 rounded-full flex-shrink-0 ${col.color}`} />
+                      <span className="text-[10px] font-bold uppercase tracking-wide truncate">{col.title}</span>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <Badge variant="secondary" className="text-xs font-semibold">{items.length}</Badge>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      {(() => {
+                        const colEstList = getEstatusListForColumn(col.id)
+                        if (colEstList.length === 0) return null
+                        return (
+                          <Select value={colEstatusFilter[col.id] || "all"} onValueChange={(v) => setColEstatusFilter((p) => ({ ...p, [col.id]: v }))}>
+                            <SelectTrigger className="h-5 w-[90px] text-[9px] px-1.5 gap-0.5"><SelectValue placeholder="Todos" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">Todos</SelectItem>
+                              {colEstList.map((e) => <SelectItem key={e.value} value={e.text}>{e.text}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        )
+                      })()}
+                      <Badge variant="secondary" className="text-[10px] font-semibold px-1.5">{items.length}</Badge>
                       {isEstatus && (
                         <button type="button" onClick={() => removeColumn(col.id)}
                           className="p-0.5 rounded-md text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors" title="Cerrar columna">
-                          <X className="h-3.5 w-3.5" />
+                          <X className="h-3 w-3" />
                         </button>
                       )}
                     </div>
                   </div>
                 </div>
-                <div className="p-3 space-y-3 max-h-[calc(100vh-440px)] overflow-y-auto">
+                <div className="p-2 space-y-2 max-h-[calc(100vh-440px)] overflow-y-auto">
                   {items.length === 0 && <div className="text-center py-12 text-muted-foreground text-sm">Sin {col.title.toLowerCase()}</div>}
-                  {items.map((item) => <BoardCard key={`${col.id}-${item.id}`} item={item} type={col.type} formatDate={formatDate} estatusList={estatusList} />)}
+                  {items.map((item) => <BoardCard key={`${col.id}-${item.id}`} item={item} type={col.type} formatDate={formatDate} estatusList={[...estatusList, ...seguimientoEstatusList, ...reservacionEstatusList]} />)}
                 </div>
               </div>
             )
           })}
+
+          {/* Columna fija: Seguimiento y objeciones */}
+          {(() => {
+            const segItems = getColumnItems({ id: "seguimiento", title: "Seguimiento y objeciones", color: "bg-orange-500", type: "seguimiento" })
+            return (
+              <div className="min-w-0 rounded-xl border border-orange-300 bg-orange-50/50 transition-all">
+                <div className="p-2 border-b border-orange-300">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <div className="h-2.5 w-2.5 rounded-full bg-orange-500 flex-shrink-0" />
+                      <span className="text-[10px] font-bold uppercase tracking-wide truncate">Seguimiento</span>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <Select value={colEstatusFilter["seguimiento"] || "all"} onValueChange={(v) => setColEstatusFilter((p) => ({ ...p, seguimiento: v }))}>
+                        <SelectTrigger className="h-5 w-[90px] text-[9px] px-1.5 gap-0.5"><SelectValue placeholder="Todos" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todos</SelectItem>
+                          {seguimientoEstatusList.map((e) => <SelectItem key={e.value} value={e.text}>{e.text}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <Badge variant="secondary" className="text-[10px] font-semibold px-1.5 flex-shrink-0">{segItems.length}</Badge>
+                    </div>
+                  </div>
+                </div>
+                <div className="p-2 space-y-2 max-h-[calc(100vh-440px)] overflow-y-auto">
+                  {segItems.length === 0 && <div className="text-center py-12 text-muted-foreground text-sm">Sin seguimiento</div>}
+                  {segItems.map((item) => <BoardCard key={`seg-${item.id}`} item={item} type="seguimiento" formatDate={formatDate} estatusList={[...estatusList, ...seguimientoEstatusList, ...reservacionEstatusList]} />)}
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* Columna fija: Reservaciones */}
+          {(() => {
+            const resItems = getColumnItems({ id: "reservaciones", title: "Reservaciones", color: "bg-violet-500", type: "reservacion" })
+            return (
+              <div className="min-w-0 rounded-xl border border-violet-300 bg-violet-50/50 transition-all">
+                <div className="p-2 border-b border-violet-300">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <div className="h-2.5 w-2.5 rounded-full bg-violet-500 flex-shrink-0" />
+                      <span className="text-[10px] font-bold uppercase tracking-wide truncate">Reservaciones</span>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <Select value={colEstatusFilter["reservaciones"] || "all"} onValueChange={(v) => setColEstatusFilter((p) => ({ ...p, reservaciones: v }))}>
+                        <SelectTrigger className="h-5 w-[90px] text-[9px] px-1.5 gap-0.5"><SelectValue placeholder="Todos" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todos</SelectItem>
+                          {reservacionEstatusList.map((e) => <SelectItem key={e.value} value={e.text}>{e.text}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <Badge variant="secondary" className="text-[10px] font-semibold px-1.5 flex-shrink-0">{resItems.length}</Badge>
+                    </div>
+                  </div>
+                </div>
+                <div className="p-2 space-y-2 max-h-[calc(100vh-440px)] overflow-y-auto">
+                  {resItems.length === 0 && <div className="text-center py-12 text-muted-foreground text-sm">Sin reservaciones</div>}
+                  {resItems.map((item) => <BoardCard key={`res-${item.id}`} item={item} type="reservacion" formatDate={formatDate} estatusList={[...estatusList, ...seguimientoEstatusList, ...reservacionEstatusList]} />)}
+                </div>
+              </div>
+            )
+          })()}
         </div>
       </div>
     </div>
@@ -317,7 +441,7 @@ export function ProspectsQuotationsBoard() {
 /* ==================================================
   Card Component
 ================================================== */
-function BoardCard({ item, type, formatDate, estatusList }: { item: BoardItem; type: "prospecto" | "cotizacion" | "estatus"; formatDate: (d: string) => string; estatusList: ddlItem[] }) {
+function BoardCard({ item, type, formatDate, estatusList }: { item: BoardItem; type: "prospecto" | "cotizacion" | "estatus" | "seguimiento" | "reservacion"; formatDate: (d: string) => string; estatusList: ddlItem[] }) {
   const router = useRouter()
   const href = type === "prospecto" ? `/cotizaciones/new` : `/cotizaciones/${item.id}`
   const editHref = `/cotizaciones/new?editId=${item.id}`
@@ -327,30 +451,30 @@ function BoardCard({ item, type, formatDate, estatusList }: { item: BoardItem; t
 
   return (
     <Link href={href}>
-      <div className="rounded-lg border border-border/60 bg-card px-3 py-2 hover:shadow-md hover:border-border transition-all cursor-pointer">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-sm font-semibold truncate flex-1">{item.nombreevento || "Sin nombre de evento"}</p>
+      <div className="rounded-lg border border-border/60 bg-card px-2.5 py-1.5 hover:shadow-md hover:border-border transition-all cursor-pointer">
+        <div className="flex items-center justify-between gap-1">
+          <p className="text-xs font-semibold truncate flex-1">{item.nombreevento || "Sin nombre de evento"}</p>
           {item.estatus && estColors && (
-            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${estColors.bg} ${estColors.border} flex-shrink-0`}>
-              <span className={`inline-block w-1.5 h-1.5 rounded-full ${estColors.color} mr-1`} />
+            <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${estColors.bg} ${estColors.border} flex-shrink-0`}>
+              <span className={`inline-block w-1.5 h-1.5 rounded-full ${estColors.color} mr-0.5`} />
               {item.estatus}
             </span>
           )}
-          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(editHref) }} className="p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors flex-shrink-0" title="Editar">
-            <Pencil className="h-3.5 w-3.5" />
+          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(editHref) }} className="p-0.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors flex-shrink-0" title="Editar">
+            <Pencil className="h-3 w-3" />
           </button>
         </div>
-        <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <span className="truncate">{item.cliente || "—"}</span>
           <span className="text-border">|</span>
-          <PartyPopper className="h-3 w-3 flex-shrink-0" />
+          <PartyPopper className="h-2.5 w-2.5 flex-shrink-0" />
           <span>{item.tipoevento || "—"}</span>
           <span className="text-border">|</span>
-          <Users className="h-3 w-3 flex-shrink-0" />
+          <Users className="h-2.5 w-2.5 flex-shrink-0" />
           <span>{item.numeroinvitados ?? "—"}</span>
         </div>
-        <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-          <Calendar className="h-3 w-3 flex-shrink-0" />
+        <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+          <Calendar className="h-2.5 w-2.5 flex-shrink-0" />
           <span>{formatDate(item.fechainicio)}</span>
           <span className="text-muted-foreground/50">→</span>
           <span>{formatDate(item.fechafin)}</span>
