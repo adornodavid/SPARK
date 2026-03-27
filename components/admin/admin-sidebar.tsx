@@ -11,6 +11,7 @@ import {
   BedDouble,
   Users,
   FileText,
+  PartyPopper,
   Calendar,
   Handshake,
   BarChart3,
@@ -25,6 +26,7 @@ import {
   Kanban,
   ClipboardList,
   ChevronDown,
+  ShieldCheck,
 } from "lucide-react"
 import { eliminarSesionCookies } from "@/app/actions/session"
 import { Button } from "@/components/ui/button"
@@ -121,13 +123,13 @@ const quickAccessItems = [
   {
     title: "Eventos",
     href: "/cotizaciones",
-    icon: FileText,
+    icon: PartyPopper,
   },
-  {
-    title: "Salones",
-    href: "/salones",
-    icon: Building2,
-  },
+  // {
+  //   title: "Salones",
+  //   href: "/salones",
+  //   icon: Building2,
+  // },
   {
     title: "CRM",
     href: "/crm",
@@ -135,12 +137,13 @@ const quickAccessItems = [
   },
 ]
 
-export function AdminSidebar() {
+export function AdminSidebar({ userRole }: { userRole: string }) {
   const pathname = usePathname()
   const router = useRouter()
   const { theme } = useTheme()
   const [isOffcanvasOpen, setIsOffcanvasOpen] = useState(false)
   const [isCRMExpanded, setIsCRMExpanded] = useState(pathname?.startsWith("/crm") || false)
+  const isAdminRole = userRole === "SuperAdmin" || userRole === "Admin"
 
   const handleLogout = async () => {
     await eliminarSesionCookies()
@@ -187,6 +190,22 @@ export function AdminSidebar() {
               </Link>
             )
           })}
+
+          {/* Admin — solo visible para SuperAdmin y Admin */}
+          {isAdminRole && (
+            <Link
+              href="/admin"
+              className={cn(
+                "flex w-full flex-col items-center gap-1 rounded-lg p-2 transition-all duration-200",
+                pathname === "/admin" || pathname?.startsWith("/admin/")
+                  ? "bg-sidebar-primary text-sidebar-primary-foreground spark-sidebar-active"
+                  : "text-sidebar-foreground/60 hover:bg-white/5 hover:text-sidebar-foreground",
+              )}
+            >
+              <ShieldCheck className="h-6 w-6" />
+              <span className="text-[10px] text-center leading-tight">Admin</span>
+            </Link>
+          )}
         </nav>
 
         {/* Logout button at bottom */}
@@ -287,6 +306,25 @@ export function AdminSidebar() {
               </div>
             )}
           </div>
+
+          {/* Admin — solo visible para SuperAdmin y Admin */}
+          {isAdminRole && (
+            <div className="pt-3 mt-3 border-t border-sidebar-border">
+              <Link
+                href="/admin"
+                onClick={() => setIsOffcanvasOpen(false)}
+                className={cn(
+                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all duration-200",
+                  pathname === "/admin" || pathname?.startsWith("/admin/")
+                    ? "bg-sidebar-primary text-sidebar-primary-foreground font-medium spark-sidebar-active"
+                    : "text-sidebar-foreground/70 hover:bg-white/5 hover:text-sidebar-foreground",
+                )}
+              >
+                <ShieldCheck className="h-4 w-4" />
+                Admin
+              </Link>
+            </div>
+          )}
         </nav>
       </aside>
     </>

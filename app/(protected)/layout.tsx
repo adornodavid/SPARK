@@ -20,7 +20,7 @@ export default async function ProtectedLayout({
   return (
     <QuotationsProvider>
       <div className="flex min-h-svh w-full">
-        <AdminSidebar />
+        <AdminSidebar userRole={session.Rol} />
         <div className="ml-[100px] flex flex-1 flex-col">
           <AdminHeader user={session} />
           <main className="flex-1 overflow-y-auto bg-background p-6">{children}</main>
