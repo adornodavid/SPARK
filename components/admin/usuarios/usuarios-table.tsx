@@ -186,7 +186,8 @@ export function UsuariosTable({ usuarios, loading, onUpdate }: UsuariosTableProp
                       </AlertDialogContent>
                     </AlertDialog>
 
-                    {/* Eliminar */}
+                    {/* Eliminar - oculto por ahora */}
+                    {false && (
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <button
@@ -215,6 +216,7 @@ export function UsuariosTable({ usuarios, loading, onUpdate }: UsuariosTableProp
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>
+                    )}
                   </div>
                 </TableCell>
               </TableRow>

@@ -4,23 +4,30 @@ import { useEffect, useState } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, KeyRound, User, Mail, Phone, Shield, Building2, Pencil, CalendarDays } from "lucide-react"
-import { obtenerUsuarioDetalle } from "@/app/actions/usuarios"
+import { ArrowLeft, KeyRound, User, Mail, Phone, Shield, Building2, Pencil, CalendarDays, Smartphone, Briefcase } from "lucide-react"
+import { objetoUsuario, obtenerUsuariosXHotel } from "@/app/actions/usuarios"
 import { toast } from "sonner"
 
-interface UsuarioDetalle {
+interface UsuarioData {
   usuarioid: number
   nombrecompleto: string
   usuario: string
   email: string
   telefono: string | null
+  celular: string | null
+  puesto: string | null
   imgurl: string | null
   rol: string
   rolid: number
-  activo: boolean | string
+  activo: boolean | null
   ultimoingreso: string | null
   fechacreacion: string | null
-  hoteles: { hotelid: number; nombre: string }[]
+}
+
+interface HotelAsignado {
+  idrec: number
+  hotelid: number
+  hotel: string
 }
 
 export default function VerUsuarioPage() {
@@ -28,7 +35,8 @@ export default function VerUsuarioPage() {
   const router = useRouter()
   const id = Number(searchParams.get("id"))
 
-  const [usuario, setUsuario] = useState<UsuarioDetalle | null>(null)
+  const [usuario, setUsuario] = useState<UsuarioData | null>(null)
+  const [hoteles, setHoteles] = useState<HotelAsignado[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -37,18 +45,27 @@ export default function VerUsuarioPage() {
       return
     }
 
-    async function loadUsuario() {
-      const result = await obtenerUsuarioDetalle(id)
-      if (result.success && result.data) {
-        setUsuario(result.data)
+    async function loadData() {
+      const [resultUsuario, resultHoteles] = await Promise.all([
+        objetoUsuario(id),
+        obtenerUsuariosXHotel(id),
+      ])
+
+      if (resultUsuario.success && resultUsuario.data) {
+        setUsuario(resultUsuario.data as unknown as UsuarioData)
       } else {
-        toast.error(result.error || "Error al cargar usuario")
+        toast.error(resultUsuario.error || "Error al cargar usuario")
         router.push("/admin/usuarios")
       }
+
+      if (resultHoteles.success && resultHoteles.data) {
+        setHoteles(resultHoteles.data)
+      }
+
       setLoading(false)
     }
 
-    loadUsuario()
+    loadData()
   }, [id, router])
 
   if (loading) {
@@ -64,7 +81,7 @@ export default function VerUsuarioPage() {
 
   if (!usuario) return null
 
-  const esActivo = usuario.activo === true || usuario.activo === "true"
+  const esActivo = usuario.activo === true
 
   return (
     <div className="space-y-6">
@@ -149,6 +166,13 @@ export default function VerUsuarioPage() {
               </div>
             </div>
             <div className="flex items-center gap-3">
+              <Briefcase className="h-4 w-4 text-muted-foreground" />
+              <div>
+                <p className="text-xs text-muted-foreground">Puesto</p>
+                <p className="font-medium">{usuario.puesto || "Sin puesto"}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
               <Phone className="h-4 w-4 text-muted-foreground" />
               <div>
                 <p className="text-xs text-muted-foreground">Teléfono</p>
@@ -156,10 +180,10 @@ export default function VerUsuarioPage() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <Mail className="h-4 w-4 text-muted-foreground" />
+              <Smartphone className="h-4 w-4 text-muted-foreground" />
               <div>
-                <p className="text-xs text-muted-foreground">Email</p>
-                <p className="font-medium">{usuario.email}</p>
+                <p className="text-xs text-muted-foreground">Celular</p>
+                <p className="font-medium">{usuario.celular || "Sin celular"}</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -205,17 +229,17 @@ export default function VerUsuarioPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {usuario.hoteles.length === 0 ? (
+            {hoteles.length === 0 ? (
               <p className="text-muted-foreground text-sm">Sin hoteles asignados</p>
             ) : (
               <div className="space-y-2">
-                {usuario.hoteles.map((hotel) => (
+                {hoteles.map((hotel) => (
                   <div
-                    key={hotel.hotelid}
+                    key={hotel.idrec}
                     className="flex items-center gap-3 rounded-lg border border-border/50 p-3"
                   >
                     <Building2 className="h-4 w-4 text-muted-foreground" />
-                    <p className="text-sm font-medium">{hotel.nombre}</p>
+                    <p className="text-sm font-medium">{hotel.hotel}</p>
                   </div>
                 ))}
               </div>

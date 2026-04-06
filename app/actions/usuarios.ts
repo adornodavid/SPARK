@@ -151,6 +151,8 @@ export async function crearUsuario(formData: FormData) {
     const email = formData.get("email") as string
     const password = formData.get("password") as string
     const telefono = formData.get("telefono") as string
+    const celular = formData.get("celular") as string
+    const puesto = formData.get("puesto") as string
     const usuario = formData.get("usuario") as string
     const rolid = Number.parseInt(formData.get("rolid") as string)
     const fecha = new Date().toISOString().split("T")[0] // Formato YYYY-MM-DD
@@ -217,6 +219,8 @@ export async function crearUsuario(formData: FormData) {
         email,
         password: passwordhash,
         telefono,
+        celular,
+        puesto,
         usuario,
         rolid,
         imgurl: imagenurl,

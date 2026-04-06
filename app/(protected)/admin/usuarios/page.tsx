@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { RefreshCw } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { RefreshCw, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { obtenerUsuarios } from "@/app/actions/usuarios"
 import { UsuariosTable } from "@/components/admin/usuarios/usuarios-table"
@@ -23,6 +24,7 @@ interface UsuarioRow {
 }
 
 export default function UsuariosPage() {
+  const router = useRouter()
   const [usuarios, setUsuarios] = useState<UsuarioRow[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -58,6 +60,10 @@ export default function UsuariosPage() {
         <div className="flex items-center gap-2">
           <Button variant="outline" size="icon" onClick={loadUsuarios} title="Actualizar">
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          </Button>
+          <Button onClick={() => router.push("/admin/usuarios/crear")} className="gap-2">
+            <Plus className="h-4 w-4" />
+            Nuevo Usuario
           </Button>
         </div>
       </div>
