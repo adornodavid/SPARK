@@ -256,7 +256,7 @@ export async function obtenerUsuarios(
 ): Promise<{ success: boolean; error: string; data: unknown }> {
   try {
     // Query principal
-    let query = supabase.from("vw_usuarios").select("*")
+    let query = supabase.from("vw_ousuarios").select("*")
 
     // Filtros
     if (id !== -1) {
@@ -419,6 +419,194 @@ export async function actualizarUsuario(formData: FormData) {
   }
 }
 
+// Función: obtenerUsuarioDetalle: Obtiene un usuario individual con sus hoteles asignados (nombres)
+export async function obtenerUsuarioDetalle(id: number): Promise<{
+  success: boolean
+  error: string
+  data: {
+    usuarioid: number
+    nombrecompleto: string
+    usuario: string
+    email: string
+    telefono: string | null
+    celular: string | null
+    puesto: string | null
+    imgurl: string | null
+    rol: string
+    rolid: number
+    activo: boolean
+    ultimoingreso: string | null
+    fechacreacion: string | null
+    hoteles: { hotelid: number; nombre: string }[]
+  } | null
+}> {
+  try {
+    // Obtener datos del usuario
+    const { data: usuarioData, error: errorUsuario } = await supabase
+      .from("vw_ousuarios")
+      .select("*")
+      .eq("usuarioid", id)
+      .maybeSingle()
+
+    if (errorUsuario) {
+      return { success: false, error: "Error al obtener usuario: " + errorUsuario.message, data: null }
+    }
+
+    if (!usuarioData) {
+      return { success: false, error: "Usuario no encontrado", data: null }
+    }
+
+    // Obtener columna activo de la tabla usuarios (no está en la vista)
+    const { data: activoData } = await supabase
+      .from("usuarios")
+      .select("activo")
+      .eq("id", id)
+      .maybeSingle()
+
+    // Obtener hoteles asignados
+    const { data: hotelesData, error: errorHoteles } = await supabase
+      .from("usuariosxhotel")
+      .select("hotelid, hoteles(nombre)")
+      .eq("usuarioid", id)
+
+    const hoteles = (hotelesData || []).map((h: any) => ({
+      hotelid: h.hotelid,
+      nombre: h.hoteles?.nombre || "Sin nombre",
+    }))
+
+    return {
+      success: true,
+      error: "",
+      data: {
+        usuarioid: usuarioData.usuarioid,
+        nombrecompleto: usuarioData.nombrecompleto,
+        usuario: usuarioData.usuario,
+        email: usuarioData.email,
+        telefono: usuarioData.telefono,
+        celular: usuarioData.celular,
+        puesto: usuarioData.puesto,
+        imgurl: usuarioData.imgurl,
+        rol: usuarioData.rol,
+        rolid: usuarioData.rolid,
+        activo: activoData?.activo ?? false,
+        ultimoingreso: usuarioData.ultimoingreso,
+        fechacreacion: usuarioData.fechacreacion,
+        hoteles,
+      },
+    }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error en obtenerUsuarioDetalle: " + errorMessage, data: null }
+  }
+}
+
+// Función: actualizarAccesoUsuario: Actualiza usuario, email y rol validando unicidad
+export async function actualizarAccesoUsuario(
+  id: number,
+  usuario: string,
+  email: string,
+  rolid: number,
+): Promise<{ success: boolean; error: string }> {
+  try {
+    if (!usuario.trim() && !email.trim()) {
+      return { success: false, error: "Al menos Usuario o Email debe tener datos" }
+    }
+
+    // Validar unicidad excluyendo el usuario actual
+    const conditions: string[] = []
+    if (usuario.trim()) conditions.push(`usuario.eq.${usuario}`)
+    if (email.trim()) conditions.push(`email.eq.${email}`)
+
+    const { data: duplicado, error: errorDuplicado } = await supabase
+      .from("usuarios")
+      .select("id")
+      .or(conditions.join(","))
+      .neq("id", id)
+      .maybeSingle()
+
+    if (errorDuplicado) {
+      return { success: false, error: "Error al validar duplicados: " + errorDuplicado.message }
+    }
+
+    if (duplicado) {
+      return { success: false, error: "El usuario o email ya están registrados por otro usuario" }
+    }
+
+    const { error } = await supabase
+      .from("usuarios")
+      .update({ usuario, email, rolid })
+      .eq("id", id)
+
+    if (error) {
+      return { success: false, error: "Error al actualizar: " + error.message }
+    }
+
+    revalidatePath("/admin/usuarios")
+    return { success: true, error: "" }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error en actualizarAccesoUsuario: " + errorMessage }
+  }
+}
+
+// Función: actualizarInfoBasicaUsuario: Actualiza nombrecompleto, puesto, telefono y celular
+export async function actualizarInfoBasicaUsuario(
+  id: number,
+  nombrecompleto: string,
+  puesto: string,
+  telefono: string,
+  celular: string,
+): Promise<{ success: boolean; error: string }> {
+  try {
+    if (!nombrecompleto.trim()) {
+      return { success: false, error: "El nombre completo es requerido" }
+    }
+
+    const { error } = await supabase
+      .from("usuarios")
+      .update({ nombrecompleto: nombrecompleto.trim(), puesto: puesto.trim(), telefono: telefono.trim(), celular: celular.trim() })
+      .eq("id", id)
+
+    if (error) {
+      return { success: false, error: "Error al actualizar: " + error.message }
+    }
+
+    revalidatePath("/admin/usuarios")
+    return { success: true, error: "" }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error en actualizarInfoBasicaUsuario: " + errorMessage }
+  }
+}
+
+// Función: actualizarPasswordUsuario: Actualiza la contraseña hasheada
+export async function actualizarPasswordUsuario(
+  id: number,
+  password: string,
+): Promise<{ success: boolean; error: string }> {
+  try {
+    if (!password.trim()) {
+      return { success: false, error: "La contraseña no puede estar vacía" }
+    }
+
+    const passwordHash = await HashData(password)
+
+    const { error } = await supabase
+      .from("usuarios")
+      .update({ password: passwordHash })
+      .eq("id", id)
+
+    if (error) {
+      return { success: false, error: "Error al actualizar contraseña: " + error.message }
+    }
+
+    return { success: true, error: "" }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error en actualizarPasswordUsuario: " + errorMessage }
+  }
+}
+
 /*==================================================
   * DELETES: DROP / ELIMINAR / DELETE
 ================================================== */
@@ -494,5 +682,131 @@ export async function listaDesplegableUsuarios(id = -1, descripcion = "") {
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error obteniendo lista desplegable de usuarios: " + errorMessage }
+  }
+}
+
+/*==================================================
+  RELACIONES: USUARIOS x HOTEL
+================================================== */
+
+// Función: obtenerUsuariosXHotel: Obtiene relaciones usuario-hotel con joins a usuarios y hoteles
+export async function obtenerUsuariosXHotel(
+  usuarioid = -1,
+  hotelid = -1,
+): Promise<{
+  success: boolean
+  error: string
+  data: {
+    idrec: number
+    usuarioid: number
+    usuario: string
+    hotelid: number
+    acronimo: string
+    hotel: string
+    activo: boolean
+  }[] | null
+}> {
+  try {
+    let query = supabase
+      .from("usuariosxhotel")
+      .select("idrec, usuarioid, hotelid, activo")
+
+    if (usuarioid > 0) {
+      query = query.eq("usuarioid", usuarioid)
+    }
+    if (hotelid > 0) {
+      query = query.eq("hotelid", hotelid)
+    }
+
+    const { data, error } = await query
+
+    if (error) {
+      return { success: false, error: "Error en obtenerUsuariosXHotel: " + error.message, data: null }
+    }
+
+    if (!data || data.length === 0) {
+      return { success: true, error: "", data: [] }
+    }
+
+    // Obtener ids únicos para los JOINs manuales
+    const usuarioIds = [...new Set(data.map((r: any) => r.usuarioid))]
+    const hotelIds = [...new Set(data.map((r: any) => r.hotelid))]
+
+    const [resUsuarios, resHoteles] = await Promise.all([
+      supabase.from("usuarios").select("id, nombrecompleto").in("id", usuarioIds),
+      supabase.from("hoteles").select("id, acronimo, nombre").in("id", hotelIds),
+    ])
+
+    const usuariosMap = new Map((resUsuarios.data || []).map((u: any) => [u.id, u.nombrecompleto]))
+    const hotelesMap = new Map((resHoteles.data || []).map((h: any) => [h.id, { acronimo: h.acronimo, nombre: h.nombre }]))
+
+    const mapped = data.map((row: any) => ({
+      idrec: row.idrec,
+      usuarioid: row.usuarioid,
+      usuario: usuariosMap.get(row.usuarioid) || "",
+      hotelid: row.hotelid,
+      acronimo: hotelesMap.get(row.hotelid)?.acronimo || "",
+      hotel: hotelesMap.get(row.hotelid)?.nombre || "",
+      activo: row.activo,
+    }))
+
+    return { success: true, error: "", data: mapped }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error en obtenerUsuariosXHotel: " + errorMessage, data: null }
+  }
+}
+
+// Función: agregarUsuarioXHotel: Inserta relación usuario-hotel
+export async function agregarUsuarioXHotel(
+  usuarioid: number,
+  hotelid: number,
+): Promise<{ success: boolean; error: string }> {
+  try {
+    // Validar que no exista ya la relación
+    const { data: existente } = await supabase
+      .from("usuariosxhotel")
+      .select("idrec")
+      .eq("usuarioid", usuarioid)
+      .eq("hotelid", hotelid)
+      .maybeSingle()
+
+    if (existente) {
+      return { success: false, error: "El usuario ya tiene asignado este hotel" }
+    }
+
+    const { error } = await supabase
+      .from("usuariosxhotel")
+      .insert({ usuarioid, hotelid, activo: true, fechacreacion: new Date().toISOString().split("T")[0] })
+
+    if (error) {
+      return { success: false, error: "Error al agregar hotel: " + error.message }
+    }
+
+    revalidatePath("/admin/usuarios")
+    return { success: true, error: "" }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error en agregarUsuarioXHotel: " + errorMessage }
+  }
+}
+
+// Función: eliminarUsuarioXHotel: Elimina relación usuario-hotel por idrec
+export async function eliminarUsuarioXHotel(idrec: number): Promise<{ success: boolean; error: string }> {
+  try {
+    const { error } = await supabase
+      .from("usuariosxhotel")
+      .delete()
+      .eq("idrec", idrec)
+
+    if (error) {
+      return { success: false, error: "Error al eliminar relación: " + error.message }
+    }
+
+    revalidatePath("/admin/usuarios")
+    return { success: true, error: "" }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error en eliminarUsuarioXHotel: " + errorMessage }
   }
 }
