@@ -62,7 +62,12 @@ export async function objetoSalon(
   activo = "Todos",
 ): Promise<{ success: boolean; error: string; data: oSalon | null }> {
   try {
-    let query = supabase.from("vw_osalones").select("*")
+    const supabaseClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+
+    let query = supabaseClient.from("vw_osalones").select("*")
 
     // Agregar filtros condicionales
     if (id !== -1) {
@@ -98,7 +103,7 @@ export async function objetoSalon(
 
     // Si preciopordia es null, obtener costo directamente de la tabla salones
     if (data && !data.preciopordia && data.id) {
-      const { data: salonBase } = await supabase
+      const { data: salonBase } = await supabaseClient
         .from("salones")
         .select("costo")
         .eq("id", data.id)

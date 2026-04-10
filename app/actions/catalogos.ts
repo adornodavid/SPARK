@@ -88,12 +88,17 @@ export async function listaEstatusCotizacion() {
 // Función: listaDesplegableTipoEvento: obtiene id y nombre de la tabla tipoevento
 export async function listaDesplegableTipoEvento(categoriaevento = "") {
   try {
-    let query = supabase
+    const supabaseClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+
+    let query = supabaseClient
       .from("tipoevento")
       .select("id, nombre")
 
     if (categoriaevento !== "") {
-      query = query.eq("categoriaevento", categoriaevento)
+      query = query.eq("categoriaevento", Number(categoriaevento))
     }
 
     const { data: resultados, error } = await query.order("nombre", { ascending: true })
