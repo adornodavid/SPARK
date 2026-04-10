@@ -6,21 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
-import { ArrowLeft, KeyRound, Lock, Save, Hotel, Plus, Trash2, User } from "lucide-react"
-import { crearUsuario, agregarUsuarioXHotel, eliminarUsuarioXHotel, obtenerUsuariosXHotel } from "@/app/actions/usuarios"
+import { ArrowLeft, KeyRound, Lock, Save, Hotel, User, CheckCircle2, XCircle } from "lucide-react"
+import { crearUsuario, validarUsuarioUnico, agregarUsuarioXHotel } from "@/app/actions/usuarios"
 import { obtenerRoles } from "@/app/actions/configuraciones"
 import { listaDesplegableHoteles } from "@/app/actions/hoteles"
 import { toast } from "sonner"
@@ -30,19 +19,9 @@ interface Rol {
   nombre: string
 }
 
-interface HotelDdl {
+interface HotelItem {
   value: string
   text: string
-}
-
-interface UsuarioXHotel {
-  idrec: number
-  usuarioid: number
-  usuario: string
-  hotelid: number
-  acronimo: string
-  hotel: string
-  activo: boolean
 }
 
 export default function CrearUsuarioPage() {
@@ -50,8 +29,8 @@ export default function CrearUsuarioPage() {
 
   const [loading, setLoading] = useState(true)
   const [roles, setRoles] = useState<Rol[]>([])
+  const [hoteles, setHoteles] = useState<HotelItem[]>([])
   const [saving, setSaving] = useState(false)
-  const [usuarioCreado, setUsuarioCreado] = useState<number | null>(null)
 
   // Info básica
   const [inputNombre, setInputNombre] = useState("")
@@ -64,20 +43,22 @@ export default function CrearUsuarioPage() {
   const [inputEmail, setInputEmail] = useState("")
   const [inputRolId, setInputRolId] = useState("")
 
+  // Validaciones usuario/email
+  const [usuarioValidado, setUsuarioValidado] = useState<null | boolean>(null) // null=sin validar, true=ok, false=duplicado
+  const [emailValidado, setEmailValidado] = useState<null | boolean>(null)
+  const [validandoUsuario, setValidandoUsuario] = useState(false)
+  const [validandoEmail, setValidandoEmail] = useState(false)
+
   // Contraseña
   const [password1, setPassword1] = useState("")
   const [password2, setPassword2] = useState("")
 
-  // Hoteles
-  const [hotelesUsuario, setHotelesUsuario] = useState<UsuarioXHotel[]>([])
-  const [hotelesDisponibles, setHotelesDisponibles] = useState<HotelDdl[]>([])
-  const [selectedHotelId, setSelectedHotelId] = useState("")
-  const [addingHotel, setAddingHotel] = useState(false)
-  const [removingId, setRemovingId] = useState<number | null>(null)
+  // Hoteles seleccionados
+  const [hotelesSeleccionados, setHotelesSeleccionados] = useState<string[]>([])
 
   useEffect(() => {
     async function loadData() {
-      const [resultRoles, resultDdlHoteles] = await Promise.all([
+      const [resultRoles, resultHoteles] = await Promise.all([
         obtenerRoles(),
         listaDesplegableHoteles(),
       ])
@@ -85,9 +66,8 @@ export default function CrearUsuarioPage() {
       if (resultRoles.success && resultRoles.data) {
         setRoles(resultRoles.data)
       }
-
-      if (resultDdlHoteles.success && resultDdlHoteles.data) {
-        setHotelesDisponibles(resultDdlHoteles.data)
+      if (resultHoteles.success && resultHoteles.data) {
+        setHoteles(resultHoteles.data)
       }
 
       setLoading(false)
@@ -96,36 +76,92 @@ export default function CrearUsuarioPage() {
     loadData()
   }, [])
 
-  async function loadHoteles(id: number) {
-    const result = await obtenerUsuariosXHotel(id)
-    if (result.success && result.data) {
-      setHotelesUsuario(result.data)
+  // Reset validación cuando cambia el input
+  useEffect(() => { setUsuarioValidado(null) }, [inputUsuario])
+  useEffect(() => { setEmailValidado(null) }, [inputEmail])
+
+  async function handleValidarUsuario() {
+    if (inputUsuario.trim().length < 3) {
+      toast.error("El usuario debe tener al menos 3 caracteres")
+      return
     }
+    setValidandoUsuario(true)
+    const result = await validarUsuarioUnico("usuario", inputUsuario.trim())
+    if (result.success) {
+      setUsuarioValidado(!result.existe)
+    } else {
+      toast.error(result.error)
+    }
+    setValidandoUsuario(false)
   }
 
+  async function handleValidarEmail() {
+    if (inputEmail.trim().length < 3) {
+      toast.error("El email debe tener al menos 3 caracteres")
+      return
+    }
+    setValidandoEmail(true)
+    const result = await validarUsuarioUnico("email", inputEmail.trim())
+    if (result.success) {
+      setEmailValidado(!result.existe)
+    } else {
+      toast.error(result.error)
+    }
+    setValidandoEmail(false)
+  }
+
+  function handleToggleHotel(hotelId: string) {
+    setHotelesSeleccionados((prev) =>
+      prev.includes(hotelId) ? prev.filter((id) => id !== hotelId) : [...prev, hotelId]
+    )
+  }
+
+  // Validaciones para el botón Crear
+  const passwordsCoinciden = password1 === password2
+  const passwordIngresada = password1.trim().length > 0 && password2.trim().length > 0
+  const tieneUsuarioOEmail = inputUsuario.trim().length >= 3 || inputEmail.trim().length >= 3
+  const usuarioDuplicado = usuarioValidado === false
+  const emailDuplicado = emailValidado === false
+  const usuarioNecesitaValidar = inputUsuario.trim().length >= 3 && usuarioValidado === null
+  const emailNecesitaValidar = inputEmail.trim().length >= 3 && emailValidado === null
+
+  const puedeCrear =
+    inputNombre.trim().length > 0 &&
+    !!inputRolId &&
+    tieneUsuarioOEmail &&
+    !usuarioDuplicado &&
+    !emailDuplicado &&
+    !usuarioNecesitaValidar &&
+    !emailNecesitaValidar &&
+    passwordIngresada &&
+    passwordsCoinciden
+
   async function handleCrear() {
-    // Validaciones
     if (!inputNombre.trim()) {
       toast.error("El nombre completo es requerido")
-      return
-    }
-    if (!inputUsuario.trim()) {
-      toast.error("El usuario es requerido")
-      return
-    }
-    if (!inputEmail.trim()) {
-      toast.error("El email es requerido")
       return
     }
     if (!inputRolId) {
       toast.error("El rol es requerido")
       return
     }
-    if (!password1.trim() || !password2.trim()) {
-      toast.error("Ambos campos de contraseña son requeridos")
+    if (!tieneUsuarioOEmail) {
+      toast.error("Al menos Usuario o Email debe tener un dato válido (mínimo 3 caracteres)")
       return
     }
-    if (password1 !== password2) {
+    if (usuarioNecesitaValidar || emailNecesitaValidar) {
+      toast.error("Debes validar el usuario y/o email antes de crear")
+      return
+    }
+    if (usuarioDuplicado || emailDuplicado) {
+      toast.error("Hay campos duplicados, verifica usuario y email")
+      return
+    }
+    if (!passwordIngresada) {
+      toast.error("La contraseña es requerida")
+      return
+    }
+    if (!passwordsCoinciden) {
       toast.error("Las contraseñas no coinciden")
       return
     }
@@ -145,46 +181,23 @@ export default function CrearUsuarioPage() {
     const result = await crearUsuario(formData)
 
     if (result.success && result.data) {
+      const nuevoUsuarioId = result.data
+
+      // Insertar relaciones usuario x hotel
+      if (hotelesSeleccionados.length > 0) {
+        const promesas = hotelesSeleccionados.map((hotelId) =>
+          agregarUsuarioXHotel(nuevoUsuarioId, Number(hotelId))
+        )
+        await Promise.all(promesas)
+      }
+
       toast.success("Usuario creado correctamente")
-      setUsuarioCreado(result.data)
+      router.push(`/admin/usuarios/ver?id=${nuevoUsuarioId}`)
     } else {
       toast.error(result.error || "Error al crear usuario")
     }
 
     setSaving(false)
-  }
-
-  async function handleAgregarHotel() {
-    if (!selectedHotelId || !usuarioCreado) {
-      toast.error("Selecciona un hotel")
-      return
-    }
-
-    setAddingHotel(true)
-    const result = await agregarUsuarioXHotel(usuarioCreado, Number(selectedHotelId))
-
-    if (result.success) {
-      toast.success("Hotel agregado correctamente")
-      setSelectedHotelId("")
-      await loadHoteles(usuarioCreado)
-    } else {
-      toast.error(result.error)
-    }
-    setAddingHotel(false)
-  }
-
-  async function handleEliminarHotel(idrec: number) {
-    if (!usuarioCreado) return
-    setRemovingId(idrec)
-    const result = await eliminarUsuarioXHotel(idrec)
-
-    if (result.success) {
-      toast.success("Hotel removido correctamente")
-      await loadHoteles(usuarioCreado)
-    } else {
-      toast.error(result.error)
-    }
-    setRemovingId(null)
   }
 
   if (loading) {
@@ -197,11 +210,6 @@ export default function CrearUsuarioPage() {
       </div>
     )
   }
-
-  // Filtrar hoteles que ya tiene asignados
-  const hotelesParaAgregar = hotelesDisponibles.filter(
-    (h) => !hotelesUsuario.some((hu) => hu.hotelid === Number(h.value))
-  )
 
   return (
     <div className="space-y-6">
@@ -233,7 +241,6 @@ export default function CrearUsuarioPage() {
                 value={inputNombre}
                 onChange={(e) => setInputNombre(e.target.value)}
                 placeholder="Nombre completo"
-                disabled={!!usuarioCreado}
               />
             </div>
             <div className="space-y-2">
@@ -243,7 +250,6 @@ export default function CrearUsuarioPage() {
                 value={inputPuesto}
                 onChange={(e) => setInputPuesto(e.target.value)}
                 placeholder="Puesto"
-                disabled={!!usuarioCreado}
               />
             </div>
             <div className="space-y-2">
@@ -253,7 +259,6 @@ export default function CrearUsuarioPage() {
                 value={inputTelefono}
                 onChange={(e) => setInputTelefono(e.target.value)}
                 placeholder="Teléfono"
-                disabled={!!usuarioCreado}
               />
             </div>
             <div className="space-y-2">
@@ -263,7 +268,6 @@ export default function CrearUsuarioPage() {
                 value={inputCelular}
                 onChange={(e) => setInputCelular(e.target.value)}
                 placeholder="Celular"
-                disabled={!!usuarioCreado}
               />
             </div>
           </div>
@@ -280,30 +284,74 @@ export default function CrearUsuarioPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Usuario con validar */}
             <div className="space-y-2">
-              <Label htmlFor="usuario">Usuario *</Label>
-              <Input
-                id="usuario"
-                value={inputUsuario}
-                onChange={(e) => setInputUsuario(e.target.value)}
-                placeholder="Nombre de usuario"
-                disabled={!!usuarioCreado}
-              />
+              <Label htmlFor="usuario">Usuario</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="usuario"
+                  value={inputUsuario}
+                  onChange={(e) => setInputUsuario(e.target.value)}
+                  placeholder="Nombre de usuario"
+                  className={usuarioValidado === false ? "border-red-500" : usuarioValidado === true ? "border-emerald-500" : ""}
+                />
+                <Button
+                  type="button"
+                  variant={usuarioValidado === false ? "destructive" : "outline"}
+                  size="sm"
+                  onClick={handleValidarUsuario}
+                  disabled={validandoUsuario || inputUsuario.trim().length < 3}
+                  className="shrink-0"
+                >
+                  {validandoUsuario ? "..." : "Validar"}
+                </Button>
+              </div>
+              {usuarioValidado === false && (
+                <p className="text-xs text-red-500">Este usuario ya existe en el sistema</p>
+              )}
+              {usuarioValidado === true && (
+                <p className="text-xs text-emerald-600 flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3" /> Usuario disponible
+                </p>
+              )}
             </div>
+
+            {/* Email con validar */}
             <div className="space-y-2">
-              <Label htmlFor="email">Email *</Label>
-              <Input
-                id="email"
-                type="email"
-                value={inputEmail}
-                onChange={(e) => setInputEmail(e.target.value)}
-                placeholder="Correo electrónico"
-                disabled={!!usuarioCreado}
-              />
+              <Label htmlFor="email">Email</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="email"
+                  type="email"
+                  value={inputEmail}
+                  onChange={(e) => setInputEmail(e.target.value)}
+                  placeholder="Correo electrónico"
+                  className={emailValidado === false ? "border-red-500" : emailValidado === true ? "border-emerald-500" : ""}
+                />
+                <Button
+                  type="button"
+                  variant={emailValidado === false ? "destructive" : "outline"}
+                  size="sm"
+                  onClick={handleValidarEmail}
+                  disabled={validandoEmail || inputEmail.trim().length < 3}
+                  className="shrink-0"
+                >
+                  {validandoEmail ? "..." : "Validar"}
+                </Button>
+              </div>
+              {emailValidado === false && (
+                <p className="text-xs text-red-500">Este email ya existe en el sistema</p>
+              )}
+              {emailValidado === true && (
+                <p className="text-xs text-emerald-600 flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3" /> Email disponible
+                </p>
+              )}
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="rol">Rol *</Label>
-              <Select value={inputRolId} onValueChange={setInputRolId} disabled={!!usuarioCreado}>
+              <Select value={inputRolId} onValueChange={setInputRolId}>
                 <SelectTrigger id="rol">
                   <SelectValue placeholder="Seleccionar rol" />
                 </SelectTrigger>
@@ -338,7 +386,6 @@ export default function CrearUsuarioPage() {
                 value={password1}
                 onChange={(e) => setPassword1(e.target.value)}
                 placeholder="Ingresa la contraseña"
-                disabled={!!usuarioCreado}
               />
             </div>
             <div className="space-y-2">
@@ -349,137 +396,65 @@ export default function CrearUsuarioPage() {
                 value={password2}
                 onChange={(e) => setPassword2(e.target.value)}
                 placeholder="Repite la contraseña"
-                disabled={!!usuarioCreado}
+                className={password2.length > 0 ? (passwordsCoinciden ? "border-emerald-500" : "border-red-500") : ""}
               />
+              {password2.length > 0 && (
+                passwordsCoinciden ? (
+                  <p className="text-xs text-emerald-600 flex items-center gap-1">
+                    <CheckCircle2 className="h-3 w-3" /> Las contraseñas coinciden
+                  </p>
+                ) : (
+                  <p className="text-xs text-red-500 flex items-center gap-1">
+                    <XCircle className="h-3 w-3" /> Las contraseñas no coinciden
+                  </p>
+                )
+              )}
             </div>
           </div>
         </CardContent>
       </Card>
 
+      {/* Bloque: Hoteles */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Hotel className="h-5 w-5 text-primary" />
+            Hoteles
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {hoteles.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No hay hoteles disponibles</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {hoteles.map((hotel) => (
+                <label
+                  key={hotel.value}
+                  className={`flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                    hotelesSeleccionados.includes(hotel.value)
+                      ? "border-primary bg-primary/5"
+                      : "border-border/50 hover:border-border"
+                  }`}
+                >
+                  <Checkbox
+                    checked={hotelesSeleccionados.includes(hotel.value)}
+                    onCheckedChange={() => handleToggleHotel(hotel.value)}
+                  />
+                  <span className="text-sm font-medium">{hotel.text}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Botón Crear */}
-      {!usuarioCreado && (
-        <div className="flex justify-end">
-          <Button onClick={handleCrear} disabled={saving} className="gap-2">
-            <Save className="h-4 w-4" />
-            {saving ? "Creando..." : "Crear Usuario"}
-          </Button>
-        </div>
-      )}
-
-      {/* Bloque: Hoteles - solo visible después de crear */}
-      {usuarioCreado && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Hotel className="h-5 w-5 text-primary" />
-              Hoteles Asignados
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Agregar hotel */}
-            <div className="flex items-end gap-3">
-              <div className="space-y-2 flex-1 max-w-sm">
-                <Label htmlFor="hotel">Agregar hotel</Label>
-                <Select value={selectedHotelId} onValueChange={setSelectedHotelId}>
-                  <SelectTrigger id="hotel">
-                    <SelectValue placeholder="Seleccionar hotel" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {hotelesParaAgregar.map((hotel) => (
-                      <SelectItem key={hotel.value} value={hotel.value}>
-                        {hotel.text}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button onClick={handleAgregarHotel} disabled={addingHotel || !selectedHotelId} className="gap-2">
-                <Plus className="h-4 w-4" />
-                {addingHotel ? "Agregando..." : "Agregar"}
-              </Button>
-            </div>
-
-            {/* Tabla de hoteles */}
-            <div className="rounded-xl border border-border/50 overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-border/50">
-                    <TableHead>Acrónimo</TableHead>
-                    <TableHead>Hotel</TableHead>
-                    <TableHead>Estatus</TableHead>
-                    <TableHead className="text-center">Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {hotelesUsuario.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
-                        No tiene hoteles asignados
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    hotelesUsuario.map((h) => (
-                      <TableRow key={h.idrec} className="border-border/50">
-                        <TableCell className="font-medium">{h.acronimo}</TableCell>
-                        <TableCell>{h.hotel}</TableCell>
-                        <TableCell>
-                          <span
-                            className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
-                              h.activo
-                                ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800"
-                                : "bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800"
-                            }`}
-                          >
-                            {h.activo ? "Activo" : "Inactivo"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <button
-                                className="flex flex-col items-center gap-0.5 text-muted-foreground hover:text-destructive transition-colors mx-auto"
-                                title="Quitar hotel"
-                                disabled={removingId === h.idrec}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                                <span className="text-[10px]">Quitar</span>
-                              </button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Quitar hotel</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  ¿Estás seguro de quitar el hotel <strong>{h.hotel}</strong> de este usuario?
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                <AlertDialogAction
-                                  onClick={() => handleEliminarHotel(h.idrec)}
-                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                >
-                                  Quitar
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-
-            {/* Botón finalizar */}
-            <div className="flex justify-end">
-              <Button onClick={() => router.push(`/admin/usuarios/ver?id=${usuarioCreado}`)} className="gap-2">
-                Ver Usuario
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <div className="flex justify-end">
+        <Button onClick={handleCrear} disabled={saving || !puedeCrear} className="gap-2">
+          <Save className="h-4 w-4" />
+          {saving ? "Creando..." : "Crear Usuario"}
+        </Button>
+      </div>
     </div>
   )
 }

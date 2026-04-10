@@ -38,7 +38,7 @@ function fmtDate(d: string | null | undefined): string {
 async function obtenerDatosCotizacionPDF(cotizacionId: number) {
   // Obtener cotizacion desde la vista
   const { data: cotizacion, error: errCot } = await supabase
-    .from("vw_ocotizaciones")
+    .from("vw_oeventos")
     .select("*")
     .eq("id", cotizacionId)
     .maybeSingle()

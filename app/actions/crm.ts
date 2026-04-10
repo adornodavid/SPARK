@@ -88,7 +88,7 @@ export async function obtenerDashboardCRM(
 
     // 1. KPIs — Cotizaciones del mes
     let queryCotMes = supabase
-      .from("vw_ocotizaciones")
+      .from("vw_oeventos")
       .select("*")
       .eq("activo", true)
       .gte("fechacreacion", inicioMes)
@@ -102,7 +102,7 @@ export async function obtenerDashboardCRM(
 
     // 2. All active cotizaciones for pipeline summary
     let queryAllCot = supabase
-      .from("vw_ocotizaciones")
+      .from("vw_oeventos")
       .select("*")
       .eq("activo", true)
 
@@ -147,7 +147,7 @@ export async function obtenerDashboardCRM(
     const en7diasStr = en7dias.toISOString().split("T")[0]
 
     let queryCotVencer = supabase
-      .from("vw_ocotizaciones")
+      .from("vw_oeventos")
       .select("*")
       .eq("activo", true)
       .in("estatus", ["Borrador", "Enviada", "Aceptada"])
@@ -291,7 +291,7 @@ export async function obtenerPipeline(
 ): Promise<{ success: boolean; error: string; data: Record<EtapaPipelineId, oOportunidad[]> | null }> {
   try {
     let query = supabase
-      .from("vw_ocotizaciones")
+      .from("vw_oeventos")
       .select("*")
       .eq("activo", true)
       .order("fechacreacion", { ascending: false })
@@ -464,7 +464,7 @@ export async function obtenerCliente360(
 
     // 2. Client's cotizaciones
     const { data: cotizaciones } = await supabase
-      .from("vw_ocotizaciones")
+      .from("vw_oeventos")
       .select("*")
       .eq("clienteid", clienteId)
       .eq("activo", true)
@@ -846,7 +846,7 @@ export async function busquedaGlobal(
 
     // Search cotizaciones
     const { data: cotizaciones } = await supabase
-      .from("vw_ocotizaciones")
+      .from("vw_oeventos")
       .select("id, folio, nombreevento, cliente, hotel, estatus")
       .eq("activo", true)
       .or(`folio.ilike.%${term}%,nombreevento.ilike.%${term}%,cliente.ilike.%${term}%`)

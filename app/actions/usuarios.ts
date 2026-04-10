@@ -141,6 +141,36 @@ export async function objetoUsuarios(
   }
 }
 /*==================================================
+    VALIDACIONES
+================================================== */
+// Función: validarUsuarioUnico: Verifica si un usuario o email ya existe en la tabla usuarios
+export async function validarUsuarioUnico(
+  campo: "usuario" | "email",
+  valor: string,
+): Promise<{ success: boolean; existe: boolean; error: string }> {
+  try {
+    if (!valor || valor.trim().length < 3) {
+      return { success: false, existe: false, error: "El valor debe tener al menos 3 caracteres" }
+    }
+
+    const { data, error } = await supabase
+      .from("usuarios")
+      .select("id")
+      .eq(campo, valor.trim())
+      .maybeSingle()
+
+    if (error) {
+      return { success: false, existe: false, error: "Error al validar: " + error.message }
+    }
+
+    return { success: true, existe: !!data, error: "" }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, existe: false, error: "Error en validarUsuarioUnico: " + errorMessage }
+  }
+}
+
+/*==================================================
     INSERTS: CREATE / CREAR / INSERT
 ================================================== */
 // Función: crearUsuario / insUsuario: Función para insertar
@@ -218,9 +248,9 @@ export async function crearUsuario(formData: FormData) {
         nombrecompleto,
         email,
         password: passwordhash,
-        telefono,
-        celular,
-        puesto,
+        telefono: telefono || null,
+        celular: celular || null,
+        puesto: puesto || null,
         usuario,
         rolid,
         imgurl: imagenurl,
@@ -252,9 +282,7 @@ export async function crearUsuario(formData: FormData) {
 // Función: obtenerUsuarios / selUsuarios: Función para obtener
 export async function obtenerUsuarios(
   id = -1,
-  nombrecompleto = "",
-  usuario = "",
-  email = "",
+  busqueda = "",
   rolid = -1,
   activo = "Todos",
 ): Promise<{ success: boolean; error: string; data: unknown }> {
@@ -266,14 +294,8 @@ export async function obtenerUsuarios(
     if (id !== -1) {
       query = query.eq("usuarioid", id)
     }
-    if (nombrecompleto !== "") {
-      query = query.ilike("nombrecompleto", `%${nombrecompleto}%`)
-    }
-    if (usuario !== "") {
-      query = query.ilike("usuario", `%${usuario}%`)
-    }
-    if (email !== "") {
-      query = query.ilike("email", `%${email}%`)
+    if (busqueda !== "") {
+      query = query.or(`nombrecompleto.ilike.%${busqueda}%,usuario.ilike.%${busqueda}%,email.ilike.%${busqueda}%`)
     }
     if (rolid !== -1) {
       query = query.eq("rolid", rolid)

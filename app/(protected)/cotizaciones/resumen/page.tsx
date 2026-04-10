@@ -23,7 +23,7 @@ export default function ResumenCotizacionPage() {
     async function cargarDatos() {
       setLoading(true)
       const { data, error } = await supabase
-        .from("vw_ocotizaciones")
+        .from("vw_oeventos")
         .select("*")
         .eq("id", Number(cotizacionId))
         .single()

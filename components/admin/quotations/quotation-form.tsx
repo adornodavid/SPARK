@@ -284,6 +284,20 @@ export function QuotationForm() {
       const tid  = c.tipoeventoid?.toString() ?? c.tipoevento?.toString() ?? ""
       const mid  = c.montajeid?.toString()    ?? ""
 
+      // Resolver categoriaevento: vw_oeventos devuelve el nombre (ej: "Social"),
+      // pero el Select usa el ID numérico como value
+      let categoriaEventoId = ""
+      if (c.categoriaevento) {
+        const catRes = await listaCategoriaEvento()
+        if (catRes.success && catRes.data) {
+          setCategoriasEvento(catRes.data as { id: number; nombre: string }[])
+          const cat = (catRes.data as { id: number; nombre: string }[]).find(
+            (cat) => cat.nombre === c.categoriaevento || cat.id.toString() === c.categoriaevento
+          )
+          if (cat) categoriaEventoId = cat.id.toString()
+        }
+      }
+
       // Setear TODO el formData de una sola vez — sin llamar a ninguna función
       // que use el spread de formData para no pisar los valores
       const salonId = c.salonid?.toString() ?? ""
@@ -300,7 +314,7 @@ export function QuotationForm() {
         horaPostMontaje:     c.horapostmontaje?.slice(0, 5) ?? "",
         horasExtras:         c.horasextras?.toString() ?? "0",
         nombreEvento:        c.nombreevento              ?? "",
-        categoriaEvento:     c.categoriaevento           ?? "",
+        categoriaEvento:     categoriaEventoId,
         tipoEvento:          tid,
         estatusId:           c.estatusid?.toString()     ?? "",
         numeroInvitados:     c.numeroinvitados?.toString() ?? "",
@@ -333,9 +347,9 @@ export function QuotationForm() {
       }
 
       // Cargar tipos de evento por categoría — el useEffect de pendingTipoEventoId seteará el valor
-      if (c.categoriaevento) {
+      if (categoriaEventoId) {
         if (tid) setPendingTipoEventoId(tid)
-        loadTiposEvento(c.categoriaevento)
+        loadTiposEvento(categoriaEventoId)
       }
 
       // Cargar salones — los useEffects de pendingSalonId y pendingMontajeId setearán los valores

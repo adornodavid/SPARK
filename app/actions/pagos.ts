@@ -474,7 +474,7 @@ export async function confirmarReservacion(
   try {
     // Obtener datos completos de la cotizacion
     const { data: cotizacion, error: errCot } = await supabase
-      .from("vw_ocotizaciones")
+      .from("vw_oeventos")
       .select("*")
       .eq("id", cotizacionId)
       .maybeSingle()

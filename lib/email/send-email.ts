@@ -322,7 +322,7 @@ export async function enviarCotizacionPorEmail(
   try {
     // 1. Obtener datos de la cotizacion
     const { data: cotizacion, error: errCot } = await supabase
-      .from("vw_ocotizaciones")
+      .from("vw_oeventos")
       .select("*")
       .eq("id", cotizacionId)
       .maybeSingle()

@@ -233,10 +233,10 @@ export async function limpiarElementosCotizacion(cotizacionid: number) {
 // Mapa de tipoelemento (en minúsculas) al nombre real de la tabla en Supabase
 const TABLA_POR_TIPO: Record<string, string> = {
   lugar: "lugar",
-  alimento: "platillos",
-  alimentos: "platillos",
-  platillo: "platillositems",
-  platillos: "platillositems",
+  alimento: "menus",
+  alimentos: "menus",
+  platillo: "platillos",
+  platillos: "platillos",
   bebidas: "bebidas",
   bebida: "bebidas",
   mobiliario: "mobiliario",
@@ -740,7 +740,7 @@ export async function listaDesplegableCiudadesXHoteles(id = -1, descripcion = ""
 }
 
 // Función: obtenerPlatillosCotizacion: obtiene elementos de tipo 'Platillo' de una cotización
-// uniendo elementosxcotizacion con platillositems
+// uniendo elementosxcotizacion con platillos
 export async function obtenerPlatillosCotizacion(cotizacionid: number) {
   try {
     const { data: elemRows, error: elemError } = await supabase
@@ -758,12 +758,12 @@ export async function obtenerPlatillosCotizacion(cotizacionid: number) {
 
     const ids = elemRows.map((e: any) => e.elementoid).filter(Boolean)
     const { data: itemRows, error: itemError } = await supabase
-      .from("platillositems")
+      .from("platillos")
       .select("*")
       .in("id", ids)
 
     if (itemError) {
-      console.error("Error obteniendo platillositems:", itemError)
+      console.error("Error obteniendo platillos:", itemError)
       return { success: false, error: itemError.message }
     }
 
@@ -785,11 +785,11 @@ export async function obtenerPlatillosCotizacion(cotizacionid: number) {
   }
 }
 
-// Función: buscarPlatillosItems: obtiene todos los registros de platillositems para el dropdown de Agregar
+// Función: buscarPlatillosItems: obtiene todos los registros de platillos para el dropdown de Agregar
 export async function buscarPlatillosItems(platilloid = -1, hotelid = -1, tipo: string | null = null) {
   try {
     let query = supabase
-      .from("platillositems")
+      .from("platillos")
       .select("*")
 
     if (platilloid !== -1) {
@@ -805,7 +805,7 @@ export async function buscarPlatillosItems(platilloid = -1, hotelid = -1, tipo: 
     const { data, error } = await query.order("nombre", { ascending: true })
 
     if (error) {
-      console.error("Error buscando platillositems:", error)
+      console.error("Error buscando platillos:", error)
       return { success: false, error: error.message }
     }
 
@@ -935,11 +935,11 @@ export async function obtenerComplementosPorHotel(hotelid: number) {
   }
 }
 
-// Función: obtenerPlatilloItemPorId: obtiene nombre, descripcion y costo de un platillositems por id
+// Función: obtenerPlatilloItemPorId: obtiene nombre, descripcion y costo de un platillos por id
 export async function obtenerPlatilloItemPorId(id: number) {
   try {
     const { data, error } = await supabase
-      .from("platillositems")
+      .from("platillos")
       .select("id, nombre, descripcion, costo, horas")
       .eq("id", id)
       .maybeSingle()

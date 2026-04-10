@@ -63,7 +63,7 @@ export async function obtenerCotizacionesPorVencer(
 
     // Obtener cotizaciones activas en estatus Enviada o Aceptada con vigencia proxima
     const { data: cotizaciones, error } = await supabase
-      .from("vw_ocotizaciones")
+      .from("vw_oeventos")
       .select("*")
       .eq("activo", true)
       .in("estatus", ["Enviada", "Borrador"])
@@ -157,7 +157,7 @@ export async function enviarRecordatorio(
   try {
     // Obtener datos de la cotizacion
     const { data: cotizacion, error: errCot } = await supabase
-      .from("vw_ocotizaciones")
+      .from("vw_oeventos")
       .select("*")
       .eq("id", cotizacionId)
       .maybeSingle()

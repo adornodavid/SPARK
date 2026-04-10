@@ -56,7 +56,7 @@ export async function objetoCotizacion(
   fecharangofin = "2100-01-01",
 ): Promise<{ success: boolean; error: string; data: any | null }> {
   try {
-    let query = supabase.from("vw_ocotizaciones").select("*")
+    let query = supabase.from("vw_oeventos").select("*")
 
     // Agregar filtros condicionales
     if (id !== -1) {
@@ -102,19 +102,6 @@ export async function objetoCotizacion(
 
     const row = data?.[0] ?? null
 
-    // Complementar con campos no incluidos en la vista
-    if (row?.id) {
-      const { data: extra } = await supabase
-        .from("cotizaciones")
-        .select("categoriaevento, estatusid")
-        .eq("id", row.id)
-        .single()
-      if (extra) {
-        row.categoriaevento = extra.categoriaevento
-        row.estatusid = extra.estatusid
-      }
-    }
-
     return { success: true, error: "", data: row }
   } catch (error: unknown) {
     console.error("Error en app/actions/cotizaciones en objetoCotizacion (Individual): ", error)
@@ -134,7 +121,7 @@ export async function objetoCotizaciones(
   fecharangofin = "2100-01-01",
 ): Promise<{ success: boolean; error: string; data: any[] | null }> {
   try {
-    let query = supabase.from("vw_ocotizaciones").select("*")
+    let query = supabase.from("vw_oeventos").select("*")
 
     if (nombreevento !== "") {
       query = query.ilike("nombreevento", `%${nombreevento}%`)
@@ -214,7 +201,7 @@ export async function obtenerCotizacionesPorHotel(
 ): Promise<{ success: boolean; error: string; data: any[] | null }> {
   try {
     const { data, error } = await supabase
-      .from("vw_ocotizaciones")
+      .from("vw_oeventos")
       .select("id, nombreevento, salonid, fechainicio, fechafin, horainicio, horafin, estatus, cliente, numeroinvitados")
       .eq("hotelid", hotelId)
       .lte("fechainicio", fechaFin)
@@ -405,7 +392,7 @@ export async function obtenerCotizaciones(
 ): Promise<{ success: boolean; error: string; data: unknown }> {
   try {
     // Query principal
-    let query = supabase.from("vw_ocotizaciones").select("*")
+    let query = supabase.from("vw_oeventos").select("*")
 
     if (id !== -1) {
       query = query.eq("id", id)

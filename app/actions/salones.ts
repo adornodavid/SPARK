@@ -96,6 +96,18 @@ export async function objetoSalon(
       }
     }
 
+    // Si preciopordia es null, obtener costo directamente de la tabla salones
+    if (data && !data.preciopordia && data.id) {
+      const { data: salonBase } = await supabase
+        .from("salones")
+        .select("costo")
+        .eq("id", data.id)
+        .single()
+      if (salonBase?.costo) {
+        data.preciopordia = salonBase.costo
+      }
+    }
+
     return { success: true, error: "", data: data as oSalon }
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"

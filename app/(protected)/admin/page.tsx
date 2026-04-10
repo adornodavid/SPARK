@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
-import { Users, Lock, Settings } from "lucide-react"
+import { Users, Lock, Settings, CloudDownload } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { obtenerSesion } from "@/app/actions/session"
 
@@ -24,6 +24,12 @@ const modules = [
     description: "Gestión de configuraciones especiales de la base de datos",
     icon: Settings,
     href: "/configuraciones",
+  },
+  {
+    title: "Extracción Pipedrive",
+    description: "Extracción de datos desde Pipedrive CRM",
+    icon: CloudDownload,
+    href: "/admin/extraccion-pipedrive",
   },
 ]
 
