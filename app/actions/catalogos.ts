@@ -119,14 +119,15 @@ export async function listaDesplegableTipoEvento(categoriaevento = "") {
   }
 }
 
-// Función: listaDesplegablePaquetes: obtiene TODOS los paquetes de vw_paquetes
-// Enriquece con tipopaquete de la tabla paquetes
-export async function listaDesplegablePaquetes(_tipoeventoid?: number) {
+// Función: listaDesplegablePaquetes: obtiene paquetes de vw_paquetes
+// Si se pasa hotelid, filtra por esa columna. Enriquece con tipopaquete de la tabla paquetes.
+export async function listaDesplegablePaquetes(_tipoeventoid?: number, hotelid?: number) {
   try {
-    const { data: resultados, error } = await supabase
-      .from("vw_paquetes")
-      .select("*")
-      .order("nombre", { ascending: true })
+    let query = supabase.from("vw_paquetes").select("*").order("nombre", { ascending: true })
+    if (hotelid != null && Number.isFinite(hotelid) && hotelid > 0) {
+      query = query.eq("hotelid", hotelid)
+    }
+    const { data: resultados, error } = await query
 
     if (error) {
       console.error("Error obteniendo paquetes: ", error)
@@ -187,7 +188,52 @@ export async function obtenerElementosCotizacion(cotizacionid: number) {
       return { success: false, error: error.message }
     }
 
-    return { success: true, data: resultados || [] }
+    // La vista vw_elementocotizacion no incluye los registros con tipoelemento='Consumo'.
+    // Los obtenemos manualmente desde elementosxcotizacion y los unimos con la tabla bebidas
+    // para devolver nombre/descripcion/costo en la misma forma que los demás renglones.
+    const { data: consumoRows } = await supabase
+      .from("elementosxcotizacion")
+      .select("*")
+      .eq("reservacionid", cotizacionid)
+      .eq("tipoelemento", "Consumo")
+
+    let consumoEnriched: any[] = []
+    if (consumoRows && consumoRows.length > 0) {
+      const ids = consumoRows.map((r: any) => r.elementoid).filter(Boolean)
+      const { data: beb } = await supabase
+        .from("bebidas")
+        .select("id, nombre, descripcion, costo, menubebidaid, documentopdf")
+        .in("id", ids)
+      const bebMap = new Map((beb || []).map((b: any) => [Number(b.id), b]))
+
+      // Joinear bebidaprecios para los que tengan bebidaprecioid
+      const precioIds = consumoRows.map((r: any) => r.bebidaprecioid).filter(Boolean)
+      let precioMap = new Map<number, any>()
+      if (precioIds.length > 0) {
+        const { data: precios } = await supabase
+          .from("bebidaprecios")
+          .select("id, horas, precioporpersona")
+          .in("id", precioIds)
+        precioMap = new Map((precios || []).map((p: any) => [Number(p.id), p]))
+      }
+
+      consumoEnriched = consumoRows.map((r: any) => {
+        const b = bebMap.get(Number(r.elementoid)) as any
+        const p = r.bebidaprecioid ? (precioMap.get(Number(r.bebidaprecioid)) as any) : null
+        return {
+          ...r,
+          cotizacionid,
+          nombre: b?.nombre || "",
+          descripcion: b?.descripcion || "",
+          elemento: b?.nombre || b?.descripcion || "",
+          costo: b?.costo ?? null,
+          documentopdf: b?.documentopdf || null,
+          bebidaprecio: p ? { id: p.id, horas: p.horas, precioporpersona: p.precioporpersona } : null,
+        }
+      })
+    }
+
+    return { success: true, data: [...(resultados || []), ...consumoEnriched] }
   } catch (error) {
     console.error("Error en obtenerElementosCotizacion: ", error)
     return { success: false, error: "Error interno del servidor" }
@@ -391,9 +437,10 @@ export async function buscarElementosPorTabla(tipo: string) {
 }
 
 // Función: buscarConsumoPorMenu: busca bebidas filtrando por menubebidaid
+// Además, para cada bebida busca sus opciones de bebidaprecios (horas + precioporpersona)
 export async function buscarConsumoPorMenu(menubebidaid: number) {
   try {
-    const { data, error } = await supabase
+    const { data: bebidas, error } = await supabase
       .from("bebidas")
       .select("*")
       .eq("menubebidaid", menubebidaid)
@@ -404,7 +451,30 @@ export async function buscarConsumoPorMenu(menubebidaid: number) {
       return { success: false, error: error.message }
     }
 
-    return { success: true, data: data || [] }
+    if (!bebidas || bebidas.length === 0) return { success: true, data: [] }
+
+    const bebidaIds = bebidas.map((b: any) => b.id).filter(Boolean)
+    const { data: precios } = await supabase
+      .from("bebidaprecios")
+      .select("*")
+      .in("bebidaid", bebidaIds)
+
+    const preciosMap = new Map<number, any[]>()
+    for (const p of (precios || [])) {
+      const bid = Number((p as any).bebidaid)
+      if (!preciosMap.has(bid)) preciosMap.set(bid, [])
+      preciosMap.get(bid)!.push(p)
+    }
+    for (const [, arr] of preciosMap) {
+      arr.sort((a: any, b: any) => Number(a.horas || 0) - Number(b.horas || 0))
+    }
+
+    const enriched = bebidas.map((b: any) => ({
+      ...b,
+      precios: preciosMap.get(Number(b.id)) || [],
+    }))
+
+    return { success: true, data: enriched }
   } catch (error) {
     console.error("Error en buscarConsumoPorMenu: ", error)
     return { success: false, error: "Error interno del servidor" }
@@ -502,12 +572,15 @@ export async function obtenerPrecioPaquetePorPlatillo(paqueteId: number, platill
 }
 
 // Función: agregarElementoACotizacion: agrega un elemento a elementosxcotizacion
-export async function agregarElementoACotizacion(cotizacionid: number, hotelid: number, elementoid: number, tipoelemento: string) {
+// Para tipoelemento="Consumo" acepta opcionalmente bebidaprecioid (precio/horas elegido).
+export async function agregarElementoACotizacion(cotizacionid: number, hotelid: number, elementoid: number, tipoelemento: string, bebidaprecioid?: number) {
   const tipoCapitalizado = normalizarTipoElemento(tipoelemento)
   try {
+    const row: any = { reservacionid: cotizacionid, hotelid, elementoid, tipoelemento: tipoCapitalizado }
+    if (bebidaprecioid != null) row.bebidaprecioid = bebidaprecioid
     const { data, error } = await supabase
       .from("elementosxcotizacion")
-      .insert({ reservacionid: cotizacionid, hotelid, elementoid, tipoelemento: tipoCapitalizado })
+      .insert(row)
       .select()
 
     if (error) {

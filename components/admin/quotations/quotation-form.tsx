@@ -179,6 +179,10 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
   const [menuTipoActual, setMenuTipoActual] = useState<string | null>(null)
   // Grupos expandidos en la pestaña Alimento (agrupado por nombre)
   const [expandedAlimentoGroups, setExpandedAlimentoGroups] = useState<Set<string>>(new Set())
+  // Expansión de opciones de horas/precios por bebida (consumo). Key = bebidaid.
+  const [expandedConsumoBebidas, setExpandedConsumoBebidas] = useState<Set<number>>(new Set())
+  // Selección de precio por bebida en el modal de Consumo. Key = bebidaid, valor = bebidaprecioid elegido.
+  const [selectedBebidaPrecios, setSelectedBebidaPrecios] = useState<Record<number, number>>({})
   // Alimento "activo" al que se le están agregando platillos en el modal (permite multi-menú)
   const [selectedAlimentoParentId, setSelectedAlimentoParentId] = useState<number | null>(null)
   // Alimentos expandidos en la sección del paquete (muestra sus platillos)
@@ -375,15 +379,10 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
     setReservacionesDia(snap.reservacionesDia || [])
     setDiaSeleccionado(snap.diaSeleccionado ?? null)
     setShowPackageSection(!!snap.showPackageSection)
-    // Recargar opciones del Select de Montaje para el salón de esta reservación.
-    // Sin esto, el dropdown conserva los montajes del salón anterior; el value prop
-    // no matchea ninguna opción y Radix Select lo descarta → falso dirty al volver.
-    const snapSalon = snap.formData?.salon
-    if (snapSalon) {
-      loadMontajes(snapSalon, true)
-    } else {
-      setMontajes([])
-    }
+    // Nota: los montajes del nuevo salón deben cargarse ANTES de llamar applyTabSnapshot
+    // (ver performSwitchTab / handleDiscardAndSwitch). Si se cargaran aquí, entre setFormData
+    // y setMontajes React renderiza una vez con value=montaje nuevo y options=antiguos;
+    // Radix Select dispara onValueChange("") por falta de match y borra el valor.
     // Calendar range per-reservación: si el snapshot no lo trae, derivar de fechaInicial/fechaFinal
     if (snap.calendarRange) {
       setCalendarRange(snap.calendarRange)
@@ -597,6 +596,15 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
       snap = { ...snap, formData: reconciled }
       tabSnapshotsRef.current[nextIdx] = snap
     }
+    // IMPORTANTE: cargar montajes del nuevo salón ANTES de applyTabSnapshot.
+    // Sin esto, el render intermedio deja el <Select montaje> con value=X pero
+    // options del salón anterior → Radix dispara onValueChange("") y borra el montaje.
+    const snapSalon = snap?.formData?.salon
+    if (snapSalon) {
+      await loadMontajes(snapSalon, true)
+    } else {
+      setMontajes([])
+    }
     applyTabSnapshot(snap)
   }
 
@@ -657,6 +665,13 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
         }
         setLoadingEdit(false)
       }
+    }
+    // Cargar montajes del nuevo salón ANTES de applyTabSnapshot (ver nota en performSwitchTab)
+    const snapSalon2 = snap?.formData?.salon
+    if (snapSalon2) {
+      await loadMontajes(snapSalon2, true)
+    } else {
+      setMontajes([])
     }
     applyTabSnapshot(snap)
   }
@@ -1116,8 +1131,15 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
       // Cargar paquetes del tipo de evento SIN llamar handleTipoEventoChange
       if (tid) {
         setLoadingPaquetes(true)
-        listaDesplegablePaquetes(Number(tid)).then((res) => {
-          const paquetesList = res.success && res.data ? res.data : []
+        const hotelFilter = c.hotelid ? Number(c.hotelid) : undefined
+        listaDesplegablePaquetes(Number(tid), hotelFilter).then((res) => {
+          const rawList = res.success && res.data ? res.data : []
+          const seen = new Set<string>()
+          const paquetesList = (rawList as any[]).filter((p: any) => {
+            const k = String(p.paqueteid ?? p.id ?? "")
+            if (!k || seen.has(k)) return false
+            seen.add(k); return true
+          })
           setPaquetes(paquetesList)
           setLoadingPaquetes(false)
 
@@ -1410,9 +1432,17 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
 
     if (tipoeventoid) {
       setLoadingPaquetes(true)
-      const result = await listaDesplegablePaquetes(Number(tipoeventoid))
+      const hotelId = formData.hotel ? Number(formData.hotel) : undefined
+      const result = await listaDesplegablePaquetes(Number(tipoeventoid), hotelId)
       if (result.success && result.data) {
-        setPaquetes(result.data)
+        // Dedup por paqueteid/id para evitar keys duplicadas en Select
+        const seen = new Set<string>()
+        const unique = (result.data as any[]).filter((p: any) => {
+          const k = String(p.paqueteid ?? p.id ?? "")
+          if (!k || seen.has(k)) return false
+          seen.add(k); return true
+        })
+        setPaquetes(unique)
       }
       setLoadingPaquetes(false)
     }
@@ -2673,7 +2703,8 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
       // Batch: llamar a agregarElementoACotizacion por cada id
       let anyError: string | null = null
       for (const id of ids) {
-        const r = await agregarElementoACotizacion(cotizacionId, Number(formData.hotel), id, effectiveTipo)
+        const bpid = effectiveTipo === "consumo" ? selectedBebidaPrecios[id] : undefined
+        const r = await agregarElementoACotizacion(cotizacionId, Number(formData.hotel), id, effectiveTipo, bpid)
         if (!r.success) { anyError = r.error || "Error"; break }
       }
       result = anyError ? { success: false, error: anyError } : { success: true }
@@ -2689,6 +2720,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
       setShowAgregarModal(false)
       setSelectedElementoId("")
       setSelectedElementoIds(new Set())
+      setSelectedBebidaPrecios({})
       setPreviewElementoId(null)
       setPreviewElementoPdf("")
       setElementoSearch("")
@@ -2941,7 +2973,13 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
   async function loadSalones(hotelId: string) {
     const result = await listaDesplegableSalones(-1, "", Number(hotelId))
     if (result.success && result.data) {
-      setSalones(result.data)
+      const seen = new Set<string>()
+      const unique = (result.data as any[]).filter((s: any) => {
+        const k = String(s.value ?? "")
+        if (!k || seen.has(k)) return false
+        seen.add(k); return true
+      }) as any
+      setSalones(unique)
     }
   }
 
@@ -2954,14 +2992,19 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
         setFormData(prev => ({ ...prev, adultos: result.data!.capacidadminima!.toString(), ninos: "", numeroInvitados: result.data!.capacidadminima!.toString() }))
       }
 
-      // Cargar montajes
+      // Cargar montajes (dedup por id para evitar keys duplicadas en Select)
       if (result.data.montajes) {
+        const seen = new Set<string>()
         const montajesOptions = result.data.montajes
           .filter((m) => m.id && m.montaje)
           .map((m) => ({
             value: m.id!.toString(),
             text: m.montaje!,
           }))
+          .filter((m) => {
+            if (seen.has(m.value)) return false
+            seen.add(m.value); return true
+          })
         setMontajes(montajesOptions)
       }
 
@@ -4637,14 +4680,23 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                                         <div className="space-y-1">
                                           {misConsumos.map((item: any, i: number) => (
                                             <div key={i} className="flex items-center justify-between gap-2 group/con">
-                                              <button
-                                                type="button"
-                                                onClick={() => handleAbrirAgregar("consumo", null, bebId)}
-                                                className={`text-sm text-left underline decoration-dotted cursor-pointer break-words ${item.destacado ? "text-[#b87333] hover:text-[#b87333]/70" : "text-[#1a3d2e] hover:text-[#1a3d2e]/70"}`}
-                                                title="Editar consumo"
-                                              >
-                                                {item.nombre || item.descripcion || item.elemento || ""}
-                                              </button>
+                                              <div className="flex-1 min-w-0">
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleAbrirAgregar("consumo", null, bebId)}
+                                                  className={`text-sm text-left underline decoration-dotted cursor-pointer break-words ${item.destacado ? "text-[#b87333] hover:text-[#b87333]/70" : "text-[#1a3d2e] hover:text-[#1a3d2e]/70"}`}
+                                                  title="Editar consumo"
+                                                >
+                                                  {item.nombre || item.descripcion || item.elemento || ""}
+                                                </button>
+                                                {item.bebidaprecio && (
+                                                  <div className="text-[11px] text-gray-600 mt-0.5">
+                                                    <span className="font-semibold">{item.bebidaprecio.horas != null ? `${item.bebidaprecio.horas} hrs` : "—"}</span>
+                                                    <span className="text-gray-400 mx-1">·</span>
+                                                    <span>${item.bebidaprecio.precioporpersona != null ? Number(item.bebidaprecio.precioporpersona).toLocaleString("es-MX", { minimumFractionDigits: 2 }) : "0.00"} / persona</span>
+                                                  </div>
+                                                )}
+                                              </div>
                                               <button
                                                 type="button"
                                                 onClick={() => {
@@ -6311,8 +6363,9 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                     <p className="text-sm text-gray-400 text-center py-8">
                       {currentList.length === 0 ? "Todos ya están agregados" : "Sin resultados"}
                     </p>
-                  ) : (isAlimentoTab || isPlatilloTipoTab || isPlatillosMultiTab || (!isAlimentosFlow && agregarTipo === "platillos")) ? (() => {
+                  ) : (isAlimentoTab || isPlatilloTipoTab || isPlatillosMultiTab || (!isAlimentosFlow && agregarTipo === "platillos") || agregarTipo === "consumo") ? (() => {
                     const isPlatilloStandalone = !isAlimentosFlow && agregarTipo === "platillos"
+                    const isConsumoTab = agregarTipo === "consumo"
                     const grupos = new Map<string, any[]>()
                     for (const el of filtrados) {
                       const key = ((el.nombre || "") as string).trim() || "(sin nombre)"
@@ -6324,7 +6377,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                       : isPlatilloTipoTab
                         ? platillosSeleccion[activeTab as PlatilloTipo]
                         : null
-                    const multiSelIds = (isPlatillosMultiTab || isPlatilloStandalone) ? selectedElementoIds : null
+                    const multiSelIds = (isPlatillosMultiTab || isPlatilloStandalone || isConsumoTab) ? selectedElementoIds : null
                     const toggleGroup = (nombre: string) => {
                       setExpandedAlimentoGroups(prev => {
                         const next = new Set(prev)
@@ -6338,10 +6391,13 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                       // ahí mostramos la columna "horas" como etiqueta (cada variante es por horas).
                       const isPlatilloContext = isPlatilloTipoTab || isPlatillosMultiTab || isPlatilloStandalone
                       const horasLabel = el.horas != null ? (typeof el.horas === "number" || /^\d+(\.\d+)?$/.test(String(el.horas)) ? `${el.horas} horas` : String(el.horas)) : null
-                      const descripcion = isPlatilloContext
-                        ? (indent ? (horasLabel || el.descripcion || el.nombre || "") : (el.nombre || el.descripcion || ""))
-                        : (el.descripcion || el.nombre || el.name || "")
+                      const descripcion = isConsumoTab
+                        ? (indent ? (el.descripcion || el.nombre || "") : (el.nombre || el.descripcion || ""))
+                        : isPlatilloContext
+                          ? (indent ? (horasLabel || el.descripcion || el.nombre || "") : (el.nombre || el.descripcion || ""))
+                          : (el.descripcion || el.nombre || el.name || "")
                       const costo = el.costo != null ? Number(el.costo) : null
+                      const preciosList: any[] = isConsumoTab && Array.isArray(el.precios) ? el.precios : []
                       const isSelected = isAlimentoTab
                         ? currentSelId === id
                         : isPlatilloTipoTab
@@ -6354,6 +6410,16 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                         (selectedAlimentoParentId == null || Number(p.platilloid) === selectedAlimentoParentId)
                       )
                       const handleClick = () => {
+                        // Consumo con precios: clic en el card expande/colapsa en lugar de seleccionar.
+                        // La selección viene al elegir un precio específico en la lista expandida.
+                        if (isConsumoTab && preciosList.length > 0) {
+                          setExpandedConsumoBebidas(prev => {
+                            const next = new Set(prev)
+                            if (next.has(id)) next.delete(id); else next.add(id)
+                            return next
+                          })
+                          return
+                        }
                         if (isAlimentoTab) {
                           setSelectedElementoId(String(id))
                           setMenuTipoActual(el.tipomenu ? String(el.tipomenu) : null)
@@ -6419,13 +6485,20 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                           else alert(`Error al guardar platillos: ${r.error || ""}`)
                         }
                       }
+                      const isConsumoExpandable = isConsumoTab && preciosList.length > 0
+                      const isConsumoExpanded = isConsumoExpandable && expandedConsumoBebidas.has(id)
+                      const toggleConsumoExpand = (e: React.MouseEvent) => {
+                        e.stopPropagation()
+                        setExpandedConsumoBebidas(prev => {
+                          const next = new Set(prev)
+                          if (next.has(id)) next.delete(id); else next.add(id)
+                          return next
+                        })
+                      }
                       return (
                         <div
                           key={id}
-                          onClick={handleClick}
-                          onDoubleClick={handleDoubleClick}
-                          onMouseEnter={() => { if (supportsPreview && previewElementoId !== id) loadElementoPreview(el) }}
-                          className={`group relative cursor-pointer rounded-lg border-2 px-3 py-2.5 transition-all hover:shadow-md ${indent ? "ml-5" : ""} ${
+                          className={`group relative rounded-lg border-2 transition-all hover:shadow-md ${indent ? "ml-5" : ""} ${
                             isSelected
                               ? "border-[#1a3d2e] bg-emerald-50 shadow-sm"
                               : isPreviewing
@@ -6433,32 +6506,99 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                                 : "border-gray-200 bg-white hover:border-[#1a3d2e]/40"
                           }`}
                         >
-                          <div className="flex items-start gap-2.5">
-                            <div className={`flex-shrink-0 w-5 h-5 ${(isPlatillosMultiTab || isPlatilloStandalone) ? "rounded" : "rounded-full"} border-2 flex items-center justify-center mt-0.5 transition-colors ${
-                              isSelected ? "bg-[#1a3d2e] border-[#1a3d2e]" : "border-gray-300 bg-white group-hover:border-[#1a3d2e]/60"
-                            }`}>
-                              {isSelected && (
-                                (isPlatillosMultiTab || isPlatilloStandalone) ? (
-                                  <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" className="w-3 h-3">
-                                    <polyline points="20 6 9 17 4 12"/>
-                                  </svg>
-                                ) : (
-                                  <div className="w-2 h-2 bg-white rounded-full" />
-                                )
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className={`text-sm font-medium ${isSelected ? "text-[#1a3d2e]" : "text-gray-900"} break-words`}>
-                                {descripcion}
-                                {yaAgregado && <span className="ml-2 text-[10px] uppercase tracking-wide text-emerald-600 font-semibold">Ya agregado</span>}
-                              </p>
-                              {costo != null && costo > 0 && (
-                                <p className="text-xs text-gray-500 mt-0.5">
-                                  ${costo.toLocaleString("es-MX", { minimumFractionDigits: 2 })}
+                          <div
+                            onClick={handleClick}
+                            onDoubleClick={handleDoubleClick}
+                            onMouseEnter={() => { if (supportsPreview && previewElementoId !== id) loadElementoPreview(el) }}
+                            className="cursor-pointer px-3 py-2.5"
+                          >
+                            <div className="flex items-start gap-2.5">
+                              <div className={`flex-shrink-0 w-5 h-5 ${(isPlatillosMultiTab || isPlatilloStandalone) ? "rounded" : "rounded-full"} border-2 flex items-center justify-center mt-0.5 transition-colors ${
+                                isSelected ? "bg-[#1a3d2e] border-[#1a3d2e]" : "border-gray-300 bg-white group-hover:border-[#1a3d2e]/60"
+                              }`}>
+                                {isSelected && (
+                                  (isPlatillosMultiTab || isPlatilloStandalone) ? (
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" className="w-3 h-3">
+                                      <polyline points="20 6 9 17 4 12"/>
+                                    </svg>
+                                  ) : (
+                                    <div className="w-2 h-2 bg-white rounded-full" />
+                                  )
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-sm font-medium ${isSelected ? "text-[#1a3d2e]" : "text-gray-900"} break-words`}>
+                                  {descripcion}
+                                  {yaAgregado && <span className="ml-2 text-[10px] uppercase tracking-wide text-emerald-600 font-semibold">Ya agregado</span>}
                                 </p>
+                                {!isConsumoTab && costo != null && costo > 0 && (
+                                  <p className="text-xs text-gray-500 mt-0.5">
+                                    ${costo.toLocaleString("es-MX", { minimumFractionDigits: 2 })}
+                                  </p>
+                                )}
+                                {isConsumoTab && !isConsumoExpandable && costo != null && costo > 0 && (
+                                  <p className="text-xs text-gray-500 mt-0.5">
+                                    ${costo.toLocaleString("es-MX", { minimumFractionDigits: 2 })}
+                                  </p>
+                                )}
+                              </div>
+                              {isConsumoExpandable && (
+                                <button
+                                  type="button"
+                                  onClick={toggleConsumoExpand}
+                                  className="flex-shrink-0 p-1 rounded hover:bg-gray-100 text-gray-500 hover:text-[#1a3d2e] transition-colors"
+                                  title={isConsumoExpanded ? "Ocultar opciones" : "Ver opciones de horas"}
+                                >
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`w-4 h-4 transition-transform ${isConsumoExpanded ? "rotate-90" : ""}`}>
+                                    <polyline points="9 18 15 12 9 6"/>
+                                  </svg>
+                                </button>
                               )}
                             </div>
                           </div>
+                          {isConsumoExpanded && (
+                            <div className="border-t border-gray-200 bg-gray-50/50 px-3 py-2">
+                              <ul className="space-y-1">
+                                {preciosList.map((p: any, idx: number) => {
+                                  const precioId = Number(p.id)
+                                  const isPrecioSelected = selectedBebidaPrecios[id] === precioId
+                                  return (
+                                    <li
+                                      key={`${id}-p-${p.id ?? idx}`}
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        // Seleccionar la bebida padre + este precio
+                                        setSelectedElementoIds(prev => {
+                                          const next = new Set(prev)
+                                          next.add(id)
+                                          return next
+                                        })
+                                        setSelectedBebidaPrecios(prev => ({ ...prev, [id]: precioId }))
+                                      }}
+                                      className={`text-xs flex items-center gap-2 pl-7 py-1 rounded cursor-pointer transition-colors ${
+                                        isPrecioSelected
+                                          ? "bg-emerald-100 text-[#1a3d2e] font-semibold"
+                                          : "text-gray-700 hover:bg-gray-100"
+                                      }`}
+                                    >
+                                      <span className={`flex-shrink-0 w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
+                                        isPrecioSelected ? "border-[#1a3d2e] bg-[#1a3d2e]" : "border-gray-300 bg-white"
+                                      }`}>
+                                        {isPrecioSelected && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                                      </span>
+                                      <span className="font-semibold">
+                                        {p.horas != null ? `${p.horas} hrs` : "—"}
+                                      </span>
+                                      <span className="text-gray-400">·</span>
+                                      <span>
+                                        ${p.precioporpersona != null ? Number(p.precioporpersona).toLocaleString("es-MX", { minimumFractionDigits: 2 }) : "0.00"} / persona
+                                      </span>
+                                    </li>
+                                  )
+                                })}
+                              </ul>
+                            </div>
+                          )}
                         </div>
                       )
                     }
