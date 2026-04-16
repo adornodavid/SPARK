@@ -67,6 +67,128 @@ export async function listarEmpresasPaginado(
   }
 }
 
+export type CrearEmpresaPayload = {
+  nombre: string
+  descripcion: string
+  direccion: string
+  email: string
+  telefono: string
+  contactoclienteid: number | null
+}
+
+export async function crearEmpresaNueva(payload: CrearEmpresaPayload) {
+  try {
+    const nombre = (payload.nombre || "").trim()
+    if (!nombre) return { success: false, error: "El nombre es obligatorio." }
+
+    const { data: dup } = await supabase
+      .from("empresas")
+      .select("id")
+      .ilike("nombre", nombre)
+      .limit(1)
+      .maybeSingle()
+    if (dup) return { success: false, error: `Ya existe una empresa con el nombre "${nombre}".` }
+
+    const ahora = new Date().toISOString()
+    const { data, error } = await supabase
+      .from("empresas")
+      .insert({
+        nombre,
+        descripcion: (payload.descripcion || "").trim() || null,
+        direccion: (payload.direccion || "").trim() || null,
+        email: (payload.email || "").trim().toLowerCase() || null,
+        telefono: (payload.telefono || "").trim() || null,
+        contactoclienteid: payload.contactoclienteid,
+        activo: true,
+        fechacreacion: ahora,
+        fechamodificacion: ahora,
+      })
+      .select("id")
+      .single()
+
+    if (error) return { success: false, error: error.message }
+    revalidatePath("/empresas")
+    return { success: true, id: data?.id as number }
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error creando empresa: " + msg }
+  }
+}
+
+export type EmpresaDetalle = {
+  id: number
+  nombre: string
+  descripcion: string | null
+  direccion: string | null
+  email: string | null
+  telefono: string | null
+  contactoclienteid: number | null
+  contacto_nombre: string | null
+}
+
+export async function obtenerEmpresa(id: number) {
+  try {
+    const { data: empresa, error } = await supabase
+      .from("empresas")
+      .select("id, nombre, descripcion, direccion, email, telefono, contactoclienteid")
+      .eq("id", id)
+      .maybeSingle()
+    if (error) return { success: false, error: error.message }
+    if (!empresa) return { success: false, error: "Empresa no encontrada." }
+
+    let contacto_nombre: string | null = null
+    if (empresa.contactoclienteid) {
+      const { data: c } = await supabase
+        .from("clientes")
+        .select("nombre, apellidos")
+        .eq("id", empresa.contactoclienteid)
+        .maybeSingle()
+      if (c) {
+        const partes = [(c as { nombre?: string }).nombre, (c as { apellidos?: string }).apellidos]
+          .filter(Boolean)
+          .join(" ")
+          .trim()
+        contacto_nombre = partes || null
+      }
+    }
+    return { success: true, data: { ...empresa, contacto_nombre } as EmpresaDetalle }
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error obteniendo empresa: " + msg }
+  }
+}
+
+export type ActualizarEmpresaPayload = {
+  descripcion: string
+  direccion: string
+  email: string
+  telefono: string
+  contactoclienteid: number | null
+}
+
+export async function actualizarEmpresa(id: number, payload: ActualizarEmpresaPayload) {
+  try {
+    const { error } = await supabase
+      .from("empresas")
+      .update({
+        descripcion: (payload.descripcion || "").trim() || null,
+        direccion: (payload.direccion || "").trim() || null,
+        email: (payload.email || "").trim().toLowerCase() || null,
+        telefono: (payload.telefono || "").trim() || null,
+        contactoclienteid: payload.contactoclienteid,
+        fechamodificacion: new Date().toISOString(),
+      })
+      .eq("id", id)
+    if (error) return { success: false, error: error.message }
+    revalidatePath("/empresas")
+    revalidatePath(`/empresas/ver/${id}`)
+    return { success: true }
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error actualizando empresa: " + msg }
+  }
+}
+
 export async function buscarEmpresasPorNombre(termino: string): Promise<EmpresaSugerencia[]> {
   const q = (termino || "").trim()
   if (q.length < 2) return []

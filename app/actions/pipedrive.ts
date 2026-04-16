@@ -2465,3 +2465,98 @@ export async function validarClienteEnPipedrive(
     return { success: false, disponible: false, matches: [], mensaje: `Error consultando Pipedrive/clientes: ${err?.message || "desconocido"}` }
   }
 }
+
+/* ==================================================
+  Validación de empresa en Pipedrive + tabla empresas
+================================================== */
+export type MatchEmpresaPipedrive = {
+  id: number | string
+  nombre: string
+  direccion: string
+  fuente: "pipedrive" | "empresas"
+}
+
+export type ResultadoValidacionEmpresaPipedrive = {
+  success: boolean
+  disponible: boolean
+  matches: MatchEmpresaPipedrive[]
+  mensaje: string
+}
+
+async function buscarOrganizacionesEnPipedrive(nombre: string): Promise<MatchEmpresaPipedrive[]> {
+  const url = `${PIPEDRIVE_BASE_URL}/organizations/search?api_token=${PIPEDRIVE_API_TOKEN}&term=${encodeURIComponent(nombre)}&fields=name&exact_match=true&limit=20`
+  const res = await fetch(url)
+  const json = await res.json()
+  if (!json.success || !json.data?.items) return []
+  return json.data.items.map((it: any) => {
+    const item = it.item || {}
+    return {
+      id: item.id,
+      nombre: item.name || "",
+      direccion: item.address || "",
+      fuente: "pipedrive",
+    } as MatchEmpresaPipedrive
+  })
+}
+
+async function buscarEmpresasEnSupabase(nombre: string): Promise<MatchEmpresaPipedrive[]> {
+  const { data } = await supabase
+    .from("empresas")
+    .select("id, nombre, direccion")
+    .ilike("nombre", nombre)
+    .limit(20)
+  return (data || []).map((e: any) => ({
+    id: e.id,
+    nombre: e.nombre || "",
+    direccion: e.direccion || "",
+    fuente: "empresas",
+  }))
+}
+
+export async function validarEmpresaEnPipedrive(
+  nombre: string,
+): Promise<ResultadoValidacionEmpresaPipedrive> {
+  const nomClean = (nombre || "").trim()
+  if (!nomClean) {
+    return { success: false, disponible: false, matches: [], mensaje: "Ingresa el nombre de la empresa para validar." }
+  }
+  try {
+    const [enPip, enEmp] = await Promise.all([
+      buscarOrganizacionesEnPipedrive(nomClean),
+      buscarEmpresasEnSupabase(nomClean),
+    ])
+    const matches: MatchEmpresaPipedrive[] = []
+    const seen = new Set<string>()
+    for (const lista of [enPip, enEmp]) {
+      for (const m of lista) {
+        const key = `${m.fuente}:${m.id}`
+        if (!seen.has(key)) {
+          seen.add(key)
+          matches.push(m)
+        }
+      }
+    }
+    if (matches.length === 0) {
+      return {
+        success: true,
+        disponible: true,
+        matches: [],
+        mensaje: "No se encontraron coincidencias en Pipedrive ni en empresas. Puedes continuar con el alta.",
+      }
+    }
+    const esPip = matches.some((m) => m.fuente === "pipedrive")
+    const esEmp = matches.some((m) => m.fuente === "empresas")
+    let mensaje = `Se encontraron ${matches.length} coincidencia(s). `
+    if (esPip && esEmp) mensaje += `Existe en Pipedrive y en empresas. Usa "Actualizar con Pipedrive" en /empresas.`
+    else if (esPip) mensaje += `Existe en Pipedrive. Usa "Actualizar con Pipedrive" en /empresas para sincronizar.`
+    else mensaje += `Ya existe en la tabla empresas.`
+    return { success: true, disponible: false, matches, mensaje }
+  } catch (err: any) {
+    return {
+      success: false,
+      disponible: false,
+      matches: [],
+      mensaje: `Error consultando Pipedrive/empresas: ${err?.message || "desconocido"}`,
+    }
+  }
+}

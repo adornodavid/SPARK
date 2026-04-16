@@ -776,3 +776,31 @@ export async function listarClientesPaginado(
     return { success: false, error: "Error listando clientes: " + msg }
   }
 }
+
+export type ClienteContactoSugerencia = {
+  id: number
+  nombre: string | null
+  apellidos: string | null
+  email: string | null
+  telefono: string | null
+}
+
+export async function buscarClientesParaContacto(
+  termino: string,
+): Promise<ClienteContactoSugerencia[]> {
+  const q = (termino || "").trim()
+  if (q.length < 2) return []
+  const { data, error } = await supabase
+    .from("clientes")
+    .select("id, nombre, apellidos, email, telefono")
+    .or(
+      `nombre.ilike.%${q}%,apellidos.ilike.%${q}%,email.ilike.%${q}%,telefono.ilike.%${q}%`,
+    )
+    .order("nombre", { ascending: true })
+    .limit(20)
+  if (error) {
+    console.error("Error buscando clientes para contacto:", error.message)
+    return []
+  }
+  return (data as ClienteContactoSugerencia[]) || []
+}
