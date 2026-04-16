@@ -119,14 +119,13 @@ export async function listaDesplegableTipoEvento(categoriaevento = "") {
   }
 }
 
-// Función: listaDesplegablePaquetes: obtiene paquetes de vw_paquetes filtrado por tipoeventoid
+// Función: listaDesplegablePaquetes: obtiene TODOS los paquetes de vw_paquetes
 // Enriquece con tipopaquete de la tabla paquetes
-export async function listaDesplegablePaquetes(tipoeventoid: number) {
+export async function listaDesplegablePaquetes(_tipoeventoid?: number) {
   try {
     const { data: resultados, error } = await supabase
       .from("vw_paquetes")
       .select("*")
-      .eq("tipoeventoid", tipoeventoid)
       .order("nombre", { ascending: true })
 
     if (error) {
@@ -134,14 +133,16 @@ export async function listaDesplegablePaquetes(tipoeventoid: number) {
       return { success: false, error: error.message }
     }
 
-    // Enriquecer con tipopaquete de tabla paquetes
+    // Enriquecer con tipopaquete y precioporpersona de tabla paquetes
     if (resultados && resultados.length > 0) {
       const ids = resultados.map((r: any) => r.id)
-      const { data: paqData } = await supabase.from("paquetes").select("id, tipopaquete").in("id", ids)
+      const { data: paqData } = await supabase.from("paquetes").select("id, tipopaquete, precioporpersona").in("id", ids)
       if (paqData) {
-        const tipMap = new Map(paqData.map((p: any) => [p.id, p.tipopaquete]))
+        const paqMap = new Map(paqData.map((p: any) => [p.id, p]))
         for (const r of resultados) {
-          (r as any).tipopaquete = tipMap.get(r.id) || "Simple"
+          const p = paqMap.get(r.id) as any
+          (r as any).tipopaquete = p?.tipopaquete || "Simple"
+          ;(r as any).precioporpersona = p?.precioporpersona ?? null
         }
       }
     }
@@ -199,7 +200,7 @@ export async function eliminarElementoCotizacion(cotizacionid: number, tipoeleme
     const { error } = await supabase
       .from("elementosxcotizacion")
       .delete()
-      .eq("cotizacionid", cotizacionid)
+      .eq("reservacionid", cotizacionid)
       .eq("tipoelemento", tipoelemento)
       .eq("elementoid", id)
 
@@ -221,7 +222,7 @@ export async function limpiarElementosCotizacion(cotizacionid: number) {
     const { error } = await supabase
       .from("elementosxcotizacion")
       .delete()
-      .eq("cotizacionid", cotizacionid)
+      .eq("reservacionid", cotizacionid)
 
     if (error) {
       console.error("Error limpiando elementos de cotización: ", error)
@@ -242,8 +243,9 @@ const TABLA_POR_TIPO: Record<string, string> = {
   alimentos: "menus",
   platillo: "platillos",
   platillos: "platillos",
-  bebidas: "bebidas",
-  bebida: "bebidas",
+  bebidas: "menubebidas",
+  bebida: "menubebidas",
+  consumo: "bebidas",
   mobiliario: "mobiliario",
   servicio: "servicio",
   servicios: "servicios",
@@ -269,6 +271,7 @@ const TIPO_CANONICO: Record<string, string> = {
   platillos: "Platillo",
   bebidas: "Bebidas",
   bebida: "Bebidas",
+  consumo: "Consumo",
   cortesias: "Cortesias",
   cortesia: "Cortesias",
   servicios: "Servicio",
@@ -312,7 +315,7 @@ export async function modificarLugarCotizacion(cotizacionid: number, hotelid: nu
     const { data: existing, error: errorGet } = await supabase
       .from("elementosxcotizacion")
       .select("id")
-      .eq("cotizacionid", cotizacionid)
+      .eq("reservacionid", cotizacionid)
       .eq("tipoelemento", "Lugar")
       .limit(1)
 
@@ -325,7 +328,7 @@ export async function modificarLugarCotizacion(cotizacionid: number, hotelid: nu
       const { error } = await supabase
         .from("elementosxcotizacion")
         .update({ elementoid, hotelid })
-        .eq("cotizacionid", cotizacionid)
+        .eq("reservacionid", cotizacionid)
         .eq("tipoelemento", "Lugar")
 
       if (error) {
@@ -335,7 +338,7 @@ export async function modificarLugarCotizacion(cotizacionid: number, hotelid: nu
     } else {
       const { error } = await supabase
         .from("elementosxcotizacion")
-        .insert({ cotizacionid, hotelid, elementoid, tipoelemento: "Lugar" })
+        .insert({ reservacionid: cotizacionid, hotelid, elementoid, tipoelemento: "Lugar" })
 
       if (error) {
         console.error("Error insertando lugar: ", error)
@@ -387,13 +390,124 @@ export async function buscarElementosPorTabla(tipo: string) {
   }
 }
 
+// Función: buscarConsumoPorMenu: busca bebidas filtrando por menubebidaid
+export async function buscarConsumoPorMenu(menubebidaid: number) {
+  try {
+    const { data, error } = await supabase
+      .from("bebidas")
+      .select("*")
+      .eq("menubebidaid", menubebidaid)
+      .order("nombre", { ascending: true })
+
+    if (error) {
+      console.error("Error buscando consumo por menubebida: ", error)
+      return { success: false, error: error.message }
+    }
+
+    return { success: true, data: data || [] }
+  } catch (error) {
+    console.error("Error en buscarConsumoPorMenu: ", error)
+    return { success: false, error: "Error interno del servidor" }
+  }
+}
+
+// Función: duplicarElementosReservacion: copia todos los elementosxcotizacion de una reservación
+// fuente a una reservación destino (nuevo reservacionid).
+export async function duplicarElementosReservacion(sourceReservacionId: number, targetReservacionId: number) {
+  try {
+    const { data: srcRows, error: errSel } = await supabase
+      .from("elementosxcotizacion")
+      .select("*")
+      .eq("reservacionid", sourceReservacionId)
+    if (errSel) {
+      console.error("Error leyendo elementos fuente:", errSel)
+      return { success: false, error: errSel.message, inserted: 0 }
+    }
+    if (!srcRows || srcRows.length === 0) return { success: true, inserted: 0 }
+    const toInsert = srcRows.map((r: any) => {
+      // Quitar id para que el insert genere uno nuevo; sustituir reservacionid.
+      const { id: _id, ...rest } = r
+      return { ...rest, reservacionid: targetReservacionId }
+    })
+    const { error: errIns } = await supabase.from("elementosxcotizacion").insert(toInsert)
+    if (errIns) {
+      console.error("Error insertando elementos duplicados:", errIns)
+      return { success: false, error: errIns.message, inserted: 0 }
+    }
+    return { success: true, inserted: toInsert.length }
+  } catch (error: any) {
+    console.error("Error en duplicarElementosReservacion:", error)
+    return { success: false, error: error?.message || String(error), inserted: 0 }
+  }
+}
+
+// Función: asignarPaqueteAReservacion: actualiza eventoxreservaciones.paqueteid
+export async function asignarPaqueteAReservacion(reservacionId: number, paqueteId: number) {
+  try {
+    const { error } = await supabase
+      .from("eventoxreservaciones")
+      .update({ paqueteid: paqueteId })
+      .eq("id", reservacionId)
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error?.message || String(error) }
+  }
+}
+
+// Función: obtenerPrecioPaquetePorPlatillo: determina el precio del paquete.
+// 1) Si paquetes.precioporpersona > 0, lo usa.
+// 2) Si no, busca platillobaseid del platillo seleccionado y consulta paqueteprecios.
+// Además retorna info de debug para mostrar en el cliente si falla.
+export async function obtenerPrecioPaquetePorPlatillo(paqueteId: number, platilloId: number) {
+  const debug: any = { paqueteId, platilloId }
+  try {
+    // Paso 1: precio directo del paquete
+    const { data: paq, error: errPaq } = await supabase
+      .from("paquetes")
+      .select("precioporpersona")
+      .eq("id", paqueteId)
+      .maybeSingle()
+    debug.paquete_precioporpersona = paq?.precioporpersona ?? null
+    if (errPaq) debug.paquete_error = errPaq.message
+    const precioDirecto = Number(paq?.precioporpersona ?? 0)
+    if (precioDirecto > 0) return { success: true, precio: precioDirecto, debug }
+
+    // Paso 2: obtener platillobaseid del platillo seleccionado
+    const { data: platillo, error: errPlat } = await supabase
+      .from("platillos")
+      .select("platillobaseid")
+      .eq("id", platilloId)
+      .maybeSingle()
+    debug.platillo_platillobaseid = platillo?.platillobaseid ?? null
+    if (errPlat) debug.platillo_error = errPlat.message
+    const platilloBaseId = platillo?.platillobaseid
+    if (!platilloBaseId) return { success: true, precio: 0, debug }
+
+    // Paso 3: buscar en paqueteprecios por paqueteid + platobaseid (columna se llama "platobaseid" en esta tabla)
+    const { data: ppRows, error: errPp } = await supabase
+      .from("paqueteprecios")
+      .select("precioporpersona")
+      .eq("paqueteid", paqueteId)
+      .eq("platobaseid", platilloBaseId)
+      .limit(1)
+    debug.paqueteprecios_rows = ppRows
+    if (errPp) debug.paqueteprecios_error = errPp.message
+    const pp = (ppRows && ppRows.length > 0) ? ppRows[0] : null
+    return { success: true, precio: Number(pp?.precioporpersona ?? 0), debug }
+  } catch (error: any) {
+    debug.exception = error?.message || String(error)
+    return { success: false, precio: 0, debug }
+  }
+}
+
 // Función: agregarElementoACotizacion: agrega un elemento a elementosxcotizacion
 export async function agregarElementoACotizacion(cotizacionid: number, hotelid: number, elementoid: number, tipoelemento: string) {
   const tipoCapitalizado = normalizarTipoElemento(tipoelemento)
   try {
     const { data, error } = await supabase
       .from("elementosxcotizacion")
-      .insert({ cotizacionid, hotelid, elementoid, tipoelemento: tipoCapitalizado })
+      .insert({ reservacionid: cotizacionid, hotelid, elementoid, tipoelemento: tipoCapitalizado })
       .select()
 
     if (error) {
@@ -429,7 +543,7 @@ export async function asignarPaqueteACotizacion(cotizacionid: number, paqueteid:
     // Transformar los elementos para la tabla elementosxcotizacion
     // Solo se copian las columnas que existen en elementosxcotizacion
     const elementosACopiar = elementosPaquete.map((el: any) => {
-      const row: any = { cotizacionid, hotelid }
+      const row: any = { reservacionid: cotizacionid, hotelid }
       if (el.elementoid !== undefined) row.elementoid = el.elementoid
       if (el.tipoelemento !== undefined) row.tipoelemento = el.tipoelemento
       if (el.destacado !== undefined) row.destacado = el.destacado
@@ -446,6 +560,15 @@ export async function asignarPaqueteACotizacion(cotizacionid: number, paqueteid:
     if (errorInsert) {
       console.error("Error insertando elementos en cotización: ", errorInsert)
       return { success: false, error: errorInsert.message }
+    }
+
+    // Persistir paqueteid en eventoxreservaciones (id = reservacionid)
+    const { error: errUpdRes } = await supabase
+      .from("eventoxreservaciones")
+      .update({ paqueteid })
+      .eq("id", cotizacionid)
+    if (errUpdRes) {
+      console.error("Error actualizando paqueteid en eventoxreservaciones: ", errUpdRes)
     }
 
     return { success: true, data }
@@ -751,7 +874,7 @@ export async function obtenerPlatillosCotizacion(cotizacionid: number) {
     const { data: elemRows, error: elemError } = await supabase
       .from("elementosxcotizacion")
       .select("*")
-      .eq("cotizacionid", cotizacionid)
+      .eq("reservacionid", cotizacionid)
       .eq("tipoelemento", "Platillo")
 
     if (elemError) {
@@ -780,6 +903,7 @@ export async function obtenerPlatillosCotizacion(cotizacionid: number) {
         documentopdf: item.documentopdf || null,
         costo: item.costo ?? 0,
         tipo: item.tipo || null,
+        platilloid: item.platilloid ?? null,
       }
     })
 

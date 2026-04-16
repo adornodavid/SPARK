@@ -485,16 +485,20 @@ export default function CalendarGrid({
                                 <div className="truncate opacity-90" title={evento.salon}>
                                   {evento.salon}
                                 </div>
-                                <div className="text-[0.6rem] font-bold truncate bg-white/25 px-1 py-0.5 rounded text-center uppercase tracking-wide mt-auto">
-                                  {evento.estatus}
-                                </div>
                               </div>
                             ))}
-                            {eventosDelDia.length > 1 && (
-                              <div className="text-[0.55rem] text-center font-semibold bg-white/25 rounded px-1 py-0.5">
-                                +{eventosDelDia.length - 1} mas
-                              </div>
-                            )}
+                            <div className="mt-auto flex flex-wrap gap-0.5 justify-center">
+                              {reservaciones.length > 0 && (
+                                <span className="text-[0.5rem] font-bold bg-white/25 px-1 py-0.5 rounded uppercase">
+                                  {reservaciones.length} reserv.
+                                </span>
+                              )}
+                              {cotizaciones.length > 0 && (
+                                <span className="text-[0.5rem] font-bold bg-white/25 px-1 py-0.5 rounded uppercase">
+                                  {cotizaciones.length} cotiz.
+                                </span>
+                              )}
+                            </div>
                           </div>
                         )}
                         {past && hasEvents && (
