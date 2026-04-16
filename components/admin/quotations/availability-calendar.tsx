@@ -14,7 +14,18 @@ interface CalendarEvent {
   id: number; nombreevento: string; salonName: string; salonid: number
   fechainicio: string; fechafin: string; horainicio: string; horafin: string
   estatus: string; cliente: string; numeroinvitados: number
-  tipo: "reservacion" | "cotizacion"
+  tipo: "reservacion" | "cotizacion" | "draft"
+}
+
+export interface DraftReservacion {
+  salonid: string | number
+  fechainicio: string
+  fechafin: string
+  horainicio: string
+  horafin: string
+  horapremontaje?: string
+  horapostmontaje?: string
+  label?: string
 }
 type ViewMode = "day" | "week" | "month"
 
@@ -23,6 +34,13 @@ interface AvailabilityCalendarProps {
   onSelectSlot: (fecha: string, salonId: string, horaPreMontaje?: string, horaInicio?: string, horaFin?: string, horaPostMontaje?: string, horasExtras?: number, fechaFin?: string, overlappingCotizacion?: string) => void
   selectedFechaInicio?: string; selectedFechaFin?: string; selectedSalonId?: string
   selectedHoraPreMontaje?: string; selectedHoraInicio?: string; selectedHoraFin?: string; selectedHoraPostMontaje?: string
+  initialViewMode?: "day" | "week" | "month"
+  initialDate?: string
+  draftReservaciones?: DraftReservacion[]
+  /** Combo que identifica la reservación en edición para excluirla del grid (se maneja como selection editable).
+   *  vw_oeventos.id es el eventoid (compartido entre reservaciones del mismo evento), así que matcheamos
+   *  por eventoid + salonid + fechainicio + horainicio del último guardado. */
+  excludeMatch?: { eventoid?: number; salonid?: string | number; fechainicio?: string; horainicio?: string }
 }
 
 interface SelectionState {
@@ -78,7 +96,7 @@ function idxFromEndHour(v: string): number {
   const prev = (hr - 1 + 24) % 24
   return HOURS.findIndex((h) => h.hour24 === prev)
 }
-function getEventBarColor(ev: CalendarEvent) { if (ev.tipo === "reservacion") { const e = ev.estatus?.toLowerCase() || ""; if (e.includes("cancel")) return "bg-gray-400"; return "bg-purple-900" } return "bg-amber-400" }
+function getEventBarColor(ev: CalendarEvent) { if (ev.tipo === "draft") return "bg-sky-300"; if (ev.tipo === "reservacion") { const e = ev.estatus?.toLowerCase() || ""; if (e.includes("cancel")) return "bg-gray-400"; return "bg-purple-900" } return "bg-amber-400" }
 
 /** Total máximo de evento = 8 (core 4 + 4 de extensiones).
  *  Prioridad al lado más extendido: ese lado absorbe primero sus slots de evento.
@@ -104,19 +122,48 @@ export function AvailabilityCalendar({
   hotelId, salones, onSelectSlot,
   selectedFechaInicio, selectedFechaFin, selectedSalonId,
   selectedHoraPreMontaje, selectedHoraInicio, selectedHoraFin, selectedHoraPostMontaje,
+  initialViewMode, initialDate, draftReservaciones, excludeMatch,
 }: AvailabilityCalendarProps) {
-  const [viewMode, setViewMode] = useState<ViewMode>("week")
+  const [viewMode, setViewMode] = useState<ViewMode>(initialViewMode ?? "week")
   const [previousView, setPreviousView] = useState<ViewMode | null>(null)
-  const [currentDate, setCurrentDate] = useState(new Date())
+  const [currentDate, setCurrentDate] = useState(() => {
+    const seed = initialDate || selectedFechaInicio
+    return seed ? new Date(seed + "T12:00:00") : new Date()
+  })
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(false)
   const [hoveredCell, setHoveredCell] = useState<string | null>(null)
   const [hoverBlock, setHoverBlock] = useState<{ salonId: string; startIdx: number } | null>(null)
-  const [selection, setSelection] = useState<SelectionState | null>(null)
+  const [selection, setSelection] = useState<SelectionState | null>(() => {
+    // Reconstruir selección visual a partir de props (al montar: útil al cambiar de tab de reservación)
+    if (!selectedSalonId || !selectedFechaInicio || !selectedHoraInicio || !selectedHoraFin) return null
+    const preRef = selectedHoraPreMontaje || selectedHoraInicio
+    const postRef = selectedHoraPostMontaje || selectedHoraFin
+    const fullStart = getHourIdx(preRef)
+    const fullEnd = idxFromEndHour(postRef)
+    const evtStart = getHourIdx(selectedHoraInicio)
+    const evtEnd = idxFromEndHour(selectedHoraFin)
+    if (fullStart < 0 || fullEnd < 0 || evtStart < 0 || evtEnd < 0) return null
+    const preHours = Math.max(1, evtStart - fullStart)
+    const postHours = Math.max(1, fullEnd - evtEnd)
+    const coreStartIdx = fullStart
+    const extrasAfter = Math.max(0, (fullEnd - fullStart + 1) - BLOCK_SIZE)
+    return {
+      salonId: selectedSalonId,
+      dateStr: selectedFechaInicio.slice(0, 10),
+      coreStartIdx,
+      extrasBefore: 0,
+      extrasAfter,
+      preHours,
+      postHours,
+    }
+  })
   const [overlapAlert, setOverlapAlert] = useState<string | null>(null)
   const [eventDetail, setEventDetail] = useState<CalendarEvent | null>(null)
   // Guardar las últimas horas emitidas por el calendario para detectar cambios del usuario vs del calendario
   const lastEmittedRef = useRef<{ horaInicio: string; horaFin: string } | null>(null)
+  // Marca que la fecha emitida vino de un clic en vista semana; suprime el auto-switch a día.
+  const weekClickEmittedFechaRef = useRef<string | null>(null)
   // Day range selection for week/month view
   const [daySel, setDaySel] = useState<DaySelectionState | null>(null)
   const [dayDragging, setDayDragging] = useState<"left" | "right" | null>(null)
@@ -143,6 +190,9 @@ export function AvailabilityCalendar({
     if (result.success && result.data) {
       for (const e of result.data) {
         const tipo = String(e.tiporegistro).toLowerCase() === "reservacion" ? "reservacion" : "cotizacion"
+        // Rango completo = desde pre-montaje hasta post-montaje (incluye horas extras extendidas en el rango)
+        const horaIniFull = e.horapremontaje || e.horainicio || ""
+        const horaFinFull = e.horapostmontaje || e.horafin || ""
         all.push({
           id: e.id,
           nombreevento: e.nombreevento || (tipo === "reservacion" ? "Reservación" : "Cotización"),
@@ -150,8 +200,8 @@ export function AvailabilityCalendar({
           salonid: e.salonid,
           fechainicio: e.fechainicio,
           fechafin: e.fechafin,
-          horainicio: e.horainicio || "",
-          horafin: e.horafin || "",
+          horainicio: horaIniFull,
+          horafin: horaFinFull,
           estatus: e.estatus || "",
           cliente: e.cliente || "",
           numeroinvitados: e.numeroinvitados || 0,
@@ -163,6 +213,106 @@ export function AvailabilityCalendar({
   }, [hotelId, dateRange, salonNameMap])
 
   useEffect(() => { loadEvents() }, [loadEvents])
+
+  // Combinar eventos de DB con drafts in-memory (otras reservaciones del formulario actual)
+  const displayEvents: CalendarEvent[] = useMemo(() => {
+    // Excluir la reservación que se está editando — se maneja como selection editable, no como evento fijo.
+    // Match por eventoid + salonid + fechainicio + horainicio (todos los provistos).
+    const out = excludeMatch
+      ? events.filter((e) => {
+          if (excludeMatch.eventoid != null && Number(e.id) !== Number(excludeMatch.eventoid)) return true
+          if (excludeMatch.salonid != null && Number(e.salonid) !== Number(excludeMatch.salonid)) return true
+          if (excludeMatch.fechainicio && (e.fechainicio || "").slice(0, 10) !== excludeMatch.fechainicio.slice(0, 10)) return true
+          if (excludeMatch.horainicio && (e.horainicio || "").slice(0, 5) !== excludeMatch.horainicio.slice(0, 5)) return true
+          return false // todos los campos provistos coincidieron → excluir
+        })
+      : [...events]
+    if (draftReservaciones && draftReservaciones.length > 0) {
+      for (let i = 0; i < draftReservaciones.length; i++) {
+        const d = draftReservaciones[i]
+        if (!d.salonid || !d.fechainicio) continue
+        out.push({
+          id: -1000 - i,
+          nombreevento: d.label || "Reservación (en captura)",
+          salonName: salonNameMap.get(String(d.salonid)) || "Salón",
+          salonid: Number(d.salonid),
+          fechainicio: d.fechainicio,
+          fechafin: d.fechafin || d.fechainicio,
+          // Mostrar rango completo del draft: desde pre-montaje hasta post-montaje (incluye horas extras)
+          horainicio: d.horapremontaje || d.horainicio || "",
+          horafin: d.horapostmontaje || d.horafin || "",
+          estatus: "Borrador",
+          cliente: "",
+          numeroinvitados: 0,
+          tipo: "draft",
+        })
+      }
+    }
+    return out
+  }, [events, draftReservaciones, salonNameMap, excludeMatch])
+
+  // Cuando las props llegan tarde (ej: edición/switch de tab: formData se hidrata después del mount),
+  // construir/reconstruir la selection desde props si:
+  //  - aún no existe, O
+  //  - el salon/fecha de la selection actual no coinciden con las props (tab nueva con otra reservación)
+  useEffect(() => {
+    if (!selectedSalonId || !selectedFechaInicio || !selectedHoraInicio || !selectedHoraFin) return
+    const dateStrProp = selectedFechaInicio.slice(0, 10)
+    if (selection && selection.salonId === selectedSalonId && selection.dateStr === dateStrProp) return
+    const preRef = selectedHoraPreMontaje || selectedHoraInicio
+    const postRef = selectedHoraPostMontaje || selectedHoraFin
+    const fullStart = getHourIdx(preRef)
+    const fullEnd = idxFromEndHour(postRef)
+    const evtStart = getHourIdx(selectedHoraInicio)
+    const evtEnd = idxFromEndHour(selectedHoraFin)
+    if (fullStart < 0 || fullEnd < 0 || evtStart < 0 || evtEnd < 0) return
+    const preHours = Math.max(1, evtStart - fullStart)
+    const postHours = Math.max(1, fullEnd - evtEnd)
+    const coreStartIdx = fullStart
+    const extrasAfter = Math.max(0, (fullEnd - fullStart + 1) - BLOCK_SIZE)
+    setSelection({
+      salonId: selectedSalonId,
+      dateStr: selectedFechaInicio.slice(0, 10),
+      coreStartIdx,
+      extrasBefore: 0,
+      extrasAfter,
+      preHours,
+      postHours,
+    })
+  }, [selection, selectedSalonId, selectedFechaInicio, selectedHoraInicio, selectedHoraFin, selectedHoraPreMontaje, selectedHoraPostMontaje])
+
+  // Al cambiar la fecha de la reservación (tab switch), sincronizar currentDate y mostrar vista día.
+  // Solo auto-conmuta a día cuando además hay horas (reservación ya guardada); si solo viene fecha
+  // (ej: clic de rango en vista semana) nos mantenemos en la vista actual para permitir extender el rango.
+  useEffect(() => {
+    if (!selectedFechaInicio) return
+    const fechaStr = selectedFechaInicio.slice(0, 10)
+    // Si la fecha que llega proviene del clic de semana que acabamos de emitir, no auto-conmutar a día.
+    const fromWeekClick = weekClickEmittedFechaRef.current === fechaStr
+    if (fromWeekClick) {
+      weekClickEmittedFechaRef.current = null
+      return
+    }
+    const target = new Date(selectedFechaInicio + "T12:00:00")
+    if (target.getTime() !== currentDate.getTime()) {
+      setCurrentDate(target)
+    }
+    if (selectedHoraInicio && viewMode !== "day") setViewMode("day")
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFechaInicio, selectedHoraInicio])
+
+  // Inicializar daySel (rango de la vista semana) cuando hay fecha+salón asignados a la reservación
+  // Así al editar o al volver a semana, el rango del día(s) queda resaltado.
+  useEffect(() => {
+    if (!selectedFechaInicio || !selectedSalonId) { setDaySel(null); return }
+    const fi = selectedFechaInicio.slice(0, 10)
+    const ff = (selectedFechaFin || selectedFechaInicio).slice(0, 10)
+    const fiDate = new Date(fi + "T12:00:00")
+    const ffDate = new Date(ff + "T12:00:00")
+    const daysAfter = Math.max(0, Math.round((ffDate.getTime() - fiDate.getTime()) / 86400000))
+    setDaySel({ salonId: String(selectedSalonId), startDate: fi, daysBefore: 0, daysAfter })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFechaInicio, selectedFechaFin, selectedSalonId])
 
   // Sincronizar selection cuando los inputs de hora del formulario cambian
   // selectedHoraInicio/Fin = horas de EVENTO (primera y última hora de evento, no pre/post)
@@ -219,12 +369,12 @@ export function AvailabilityCalendar({
   function goBack() { if (previousView) { setViewMode(previousView); setPreviousView(null) } }
   function navigate(dir: -1 | 1) { setCurrentDate((p) => { const d = new Date(p); if (viewMode === "day") d.setDate(d.getDate() + dir); else if (viewMode === "week") d.setDate(d.getDate() + dir * 7); else d.setFullYear(d.getFullYear() + dir); return d }) }
 
-  function getEventsForCell(sId: string, ds: string) { return events.filter((e) => e.salonid === Number(sId) && e.fechainicio <= ds && e.fechafin >= ds) }
+  function getEventsForCell(sId: string, ds: string) { return displayEvents.filter((e) => e.salonid === Number(sId) && e.fechainicio <= ds && e.fechafin >= ds) }
   function getEventsForHourCell(sId: string, ds: string, hr: number) {
-    return events.filter((e) => { if (e.salonid !== Number(sId) || e.fechainicio > ds || e.fechafin < ds) return false; const s = parseHour(e.horainicio), en = parseHour(e.horafin); if (s < 0 || en < 0) return true; return s <= en ? (hr >= s && hr < en) : (hr >= s || hr < en) })
+    return displayEvents.filter((e) => { if (e.salonid !== Number(sId) || e.fechainicio > ds || e.fechafin < ds) return false; const s = parseHour(e.horainicio), en = parseHour(e.horafin); if (s < 0 || en < 0) return true; return s <= en ? (hr >= s && hr < en) : (hr >= s || hr < en) })
   }
-  function cellHasRes(sId: string, ds: string) { return events.some((e) => e.tipo === "reservacion" && e.salonid === Number(sId) && e.fechainicio <= ds && e.fechafin >= ds) }
-  function hourHasRes(sId: string, ds: string, hr: number) { return getEventsForHourCell(sId, ds, hr).some((e) => e.tipo === "reservacion") }
+  function cellHasRes(sId: string, ds: string) { return displayEvents.some((e) => (e.tipo === "reservacion" || e.tipo === "draft") && e.salonid === Number(sId) && e.fechainicio <= ds && e.fechafin >= ds) }
+  function hourHasRes(sId: string, ds: string, hr: number) { return getEventsForHourCell(sId, ds, hr).some((e) => e.tipo === "reservacion" || e.tipo === "draft") }
   function isCellSel(sId: string, ds: string) { if (!selectedSalonId || !selectedFechaInicio || sId !== selectedSalonId) return false; return selectedFechaFin ? (ds >= selectedFechaInicio && ds <= selectedFechaFin) : ds === selectedFechaInicio }
   function blockHasRes(sId: string, ds: string, start: number) { for (let i = start; i < start + BLOCK_SIZE && i < HOURS.length; i++) if (hourHasRes(sId, ds, HOURS[i].hour24)) return true; return false }
 
@@ -236,7 +386,7 @@ export function AvailabilityCalendar({
     // Detectar solapamiento con cotizaciones existentes
     // Usar índices del array HOURS en vez de hour24 para evitar problemas al cruzar medianoche
     const dateCheck = sel.dateStr.slice(0, 10)
-    const overlapping = events.filter((e) => {
+    const overlapping = displayEvents.filter((e) => {
       if (e.tipo !== "cotizacion") return false
       if (e.salonid !== Number(sel.salonId)) return false
       const eFechaIni = (e.fechainicio || "").slice(0, 10)
@@ -387,6 +537,7 @@ export function AvailabilityCalendar({
     const endD = addDays(new Date(ds.startDate + "T12:00:00"), ds.daysAfter)
     const fechaIni = toDateStr(startD)
     const fechaFin = toDateStr(endD)
+    weekClickEmittedFechaRef.current = fechaIni
     onSelectSlot(fechaIni, ds.salonId, undefined, undefined, undefined, undefined, undefined, fechaFin)
   }
 
@@ -525,7 +676,7 @@ export function AvailabilityCalendar({
         {viewMode === "month" && <MonthView
           year={currentDate.getFullYear()}
           salones={salones}
-          events={events}
+          events={displayEvents}
           onMonthClick={(month) => {
             const now = new Date()
             const yr = currentDate.getFullYear()

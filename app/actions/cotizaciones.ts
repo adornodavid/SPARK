@@ -178,7 +178,7 @@ export async function obtenerEventosPorHotel(
   try {
     const { data, error } = await supabase
       .from("vw_oeventos")
-      .select("id, nombreevento, salon, salonid, fechainicio, fechafin, horainicio, horafin, estatus, cliente, numeroinvitados, tiporegistro")
+      .select("id, nombreevento, salon, salonid, fechainicio, fechafin, horainicio, horafin, horapremontaje, horapostmontaje, horasextras, estatus, cliente, numeroinvitados, tiporegistro")
       .eq("hotelid", hotelId)
       .lte("fechainicio", fechaFin)
       .gte("fechafin", fechaInicio)
@@ -306,18 +306,16 @@ export async function crearCotizacion(formData: FormData) {
     const folio = `${acronimo}-E-${consecutivo}`
 
     // Paso 3: Preparar datos para inserción
+    // adultos, ninos, numeroinvitados ahora viven en eventoxreservaciones (por-reservación), no en eventos.
+    // nombreevento se registra en ambas tablas.
     const insertData: any = {
       folio,
       nombreevento,
-      tipoevento,
       hotelid,
       clienteid,
       fechainicio,
       fechafin,
       totalmonto: totalmonto || null,
-      numeroinvitados: numeroinvitados || null,
-      adultos: adultos ? Number(adultos) : null,
-      ninos: ninos ? Number(ninos) : null,
       estatusid: estatusid ? Number(estatusid) : null,
       categoriaevento: categoriaevento || null,
       subtotal: subtotal ? Number(subtotal) : null,
@@ -342,6 +340,7 @@ export async function crearCotizacion(formData: FormData) {
     }
 
     // Paso 5: Insertar en eventoxreservaciones
+    // Campos por-reservación (nombreevento, adultos, ninos, numeroinvitados, estatusid) ahora viven aquí
     const eventoReservacion: any = {
       eventoid: data.id,
       salonid: salonid ? Number(salonid) : null,
@@ -353,20 +352,29 @@ export async function crearCotizacion(formData: FormData) {
       horapremontaje: horapremontaje || null,
       horapostmontaje: horapostmontaje || null,
       horasextras: horasextras ? Number(horasextras) : 0,
+      nombreevento: nombreevento || null,
+      tipoevento: tipoevento || null,
+      adultos: adultos ? Number(adultos) : null,
+      ninos: ninos ? Number(ninos) : null,
+      numeroinvitados: numeroinvitados || null,
       fechacreacion: new Date().toISOString(),
       activo: true,
       creadopor: usuarioId,
     }
 
-    const { error: errReservacion } = await supabase.from("eventoxreservaciones").insert(eventoReservacion)
+    const { data: resvData, error: errReservacion } = await supabase
+      .from("eventoxreservaciones")
+      .insert(eventoReservacion)
+      .select("id")
+      .single()
     if (errReservacion) {
       console.error("Error insertando en eventoxreservaciones:", errReservacion)
     }
 
     revalidatePath("/cotizaciones")
 
-    // Retorno de datos
-    return { success: true, data: data.id }
+    // Retorno de datos: eventoid como data (compat) + reservacionid de la primera reservación
+    return { success: true, data: data.id, reservacionid: resvData?.id ?? null }
   } catch (error: unknown) {
     console.error("Error en crearCotizacion de actions/cotizaciones: ", error)
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
@@ -374,6 +382,138 @@ export async function crearCotizacion(formData: FormData) {
       success: false,
       error: "Error interno del servidor, al ejecutar crearCotizacion de actions/cotizaciones: " + errorMessage,
     }
+  }
+}
+
+// Función: crearReservacion: inserta una reservación adicional (eventoxreservaciones) para un evento existente
+export async function crearReservacion(eventoid: number, input: {
+  salonid?: number | string | null
+  montajeid?: number | string | null
+  fechainicio?: string | null
+  fechafin?: string | null
+  horainicio?: string | null
+  horafin?: string | null
+  horapremontaje?: string | null
+  horapostmontaje?: string | null
+  horasextras?: number | string | null
+  nombreevento?: string | null
+  tipoevento?: number | string | null
+  adultos?: number | string | null
+  ninos?: number | string | null
+  numeroinvitados?: string | number | null
+  estatusid?: number | string | null
+}) {
+  try {
+    const { obtenerSesion } = await import("@/app/actions/session")
+    const sesion = await obtenerSesion()
+    const usuarioId = sesion?.UsuarioId ? Number(sesion.UsuarioId) : null
+
+    const row: any = {
+      eventoid,
+      salonid: input.salonid ? Number(input.salonid) : null,
+      montajeid: input.montajeid ? Number(input.montajeid) : null,
+      fechainicio: input.fechainicio || null,
+      fechafin: input.fechafin || null,
+      horainicio: input.horainicio || null,
+      horafin: input.horafin || null,
+      horapremontaje: input.horapremontaje || null,
+      horapostmontaje: input.horapostmontaje || null,
+      horasextras: input.horasextras ? Number(input.horasextras) : 0,
+      nombreevento: input.nombreevento || null,
+      tipoevento: input.tipoevento || null,
+      adultos: input.adultos ? Number(input.adultos) : null,
+      ninos: input.ninos ? Number(input.ninos) : null,
+      numeroinvitados: input.numeroinvitados || null,
+      activo: true,
+      fechacreacion: new Date().toISOString(),
+      creadopor: usuarioId,
+    }
+
+    const { data, error } = await supabase
+      .from("eventoxreservaciones")
+      .insert(row)
+      .select("id")
+      .single()
+
+    if (error) {
+      console.error("Error en crearReservacion:", error)
+      return { success: false, error: error.message }
+    }
+    return { success: true, data: data?.id }
+  } catch (error: unknown) {
+    console.error("Error en crearReservacion:", error)
+    const msg = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: msg }
+  }
+}
+
+// Función: eliminarReservacion: soft-delete (activo = false) de una reservación por id
+export async function eliminarReservacion(reservacionid: number) {
+  try {
+    const { error } = await supabase
+      .from("eventoxreservaciones")
+      .update({ activo: false })
+      .eq("id", reservacionid)
+    if (error) {
+      console.error("Error en eliminarReservacion:", error)
+      return { success: false, error: error.message }
+    }
+    return { success: true }
+  } catch (error: unknown) {
+    console.error("Error en eliminarReservacion:", error)
+    const msg = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: msg }
+  }
+}
+
+// Función: actualizarReservacion: upsert de una reservación por id
+export async function actualizarReservacion(reservacionid: number, input: {
+  salonid?: number | string | null
+  montajeid?: number | string | null
+  fechainicio?: string | null
+  fechafin?: string | null
+  horainicio?: string | null
+  horafin?: string | null
+  horapremontaje?: string | null
+  horapostmontaje?: string | null
+  horasextras?: number | string | null
+  nombreevento?: string | null
+  tipoevento?: number | string | null
+  adultos?: number | string | null
+  ninos?: number | string | null
+  numeroinvitados?: string | number | null
+  estatusid?: number | string | null
+}) {
+  try {
+    const row: any = {
+      salonid: input.salonid ? Number(input.salonid) : null,
+      montajeid: input.montajeid ? Number(input.montajeid) : null,
+      fechainicio: input.fechainicio || null,
+      fechafin: input.fechafin || null,
+      horainicio: input.horainicio || null,
+      horafin: input.horafin || null,
+      horapremontaje: input.horapremontaje || null,
+      horapostmontaje: input.horapostmontaje || null,
+      horasextras: input.horasextras ? Number(input.horasextras) : 0,
+      nombreevento: input.nombreevento || null,
+      tipoevento: input.tipoevento || null,
+      adultos: input.adultos ? Number(input.adultos) : null,
+      ninos: input.ninos ? Number(input.ninos) : null,
+      numeroinvitados: input.numeroinvitados || null,
+    }
+    const { error } = await supabase
+      .from("eventoxreservaciones")
+      .update(row)
+      .eq("id", reservacionid)
+    if (error) {
+      console.error("Error en actualizarReservacion:", error)
+      return { success: false, error: error.message }
+    }
+    return { success: true }
+  } catch (error: unknown) {
+    console.error("Error en actualizarReservacion:", error)
+    const msg = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: msg }
   }
 }
 
@@ -464,7 +604,12 @@ export async function actualizarCotizacion(formData: FormData) {
     const montajeid = formData.get("montajeid") as string
     const horainicio = formData.get("horainicio") as string
     const horafin = formData.get("horafin") as string
+    const horapremontaje = formData.get("horapremontaje") as string
+    const horapostmontaje = formData.get("horapostmontaje") as string
+    const horasextras = formData.get("horasextras") as string
     const numeroinvitados = formData.get("numeroinvitados") as string
+    const adultos = formData.get("adultos") as string
+    const ninos = formData.get("ninos") as string
     const estatusid = formData.get("estatusid") as string
     const categoriaevento = formData.get("categoriaevento") as string
     const subtotal = formData.get("subtotal") as string
@@ -478,34 +623,30 @@ export async function actualizarCotizacion(formData: FormData) {
       return { success: false, error: "El parametro nombre, esta incompleto. Favor de verificar." }
     }
 
-    const { data: cotizacionExistente, error: errorExistencia } = await supabase
-      .from("cotizaciones")
+    const { data: eventoExistente, error: errorExistencia } = await supabase
+      .from("eventos")
       .select("id")
       .eq("id", id)
       .maybeSingle()
 
     if (errorExistencia) {
-      console.error("Error validando existencia de la cotizacion:", errorExistencia)
-      return { success: false, error: "Error validando existencia de la cotizacion: " + errorExistencia.message }
+      console.error("Error validando existencia del evento:", errorExistencia)
+      return { success: false, error: "Error validando existencia del evento: " + errorExistencia.message }
     }
 
-    if (!cotizacionExistente) {
-      return { success: false, error: "La cotizacion con el id proporcionado no existe" }
+    if (!eventoExistente) {
+      return { success: false, error: "El evento con el id proporcionado no existe" }
     }
 
+    // adultos, ninos, numeroinvitados se actualizan a nivel eventoxreservaciones (per reservación).
+    // nombreevento se actualiza en ambas tablas.
     const updateData: any = {
       nombreevento,
-      tipoevento,
       hotelid,
       clienteid,
       fechainicio,
       fechafin,
-      totalmonto,
-      salonid,
-      montajeid,
-      horainicio,
-      horafin,
-      numeroinvitados,
+      totalmonto: totalmonto || null,
       estatusid: estatusid ? Number(estatusid) : null,
       categoriaevento: categoriaevento || null,
       subtotal: subtotal ? Number(subtotal) : null,
@@ -515,18 +656,21 @@ export async function actualizarCotizacion(formData: FormData) {
       fechaactualizacion,
     }
 
-    // Paso 5: Ejecutar Query
-    const { data, error } = await supabase.from("cotizaciones").update(updateData).eq("id", id).select("id").single()
+    // Paso 5: UPDATE en tabla eventos
+    const { data, error } = await supabase.from("eventos").update(updateData).eq("id", id).select("id").single()
 
     // Return error
     if (error) {
-      console.error("Error actualizando cotizacion en query en actualizarCotizacion de actions/cotizaciones:", error)
+      console.error("Error actualizando evento en query en actualizarCotizacion de actions/cotizaciones:", error)
       return { success: false, error: error.message }
     }
 
     if (!data) {
-      return { success: false, error: "No se pudo obtener el ID de la cotizacion actualizada" }
+      return { success: false, error: "No se pudo obtener el ID del evento actualizado" }
     }
+
+    // Paso 6: los campos por-reservación (salón/montaje/horas/fechas) se actualizan desde el cliente
+    // invocando actualizarReservacion(reservacionid, data) para cada tab activa. Esto permite N reservaciones por evento.
 
     revalidatePath("/cotizaciones")
 
@@ -557,21 +701,21 @@ export async function estatusActivoCotizacion(
 ): Promise<{ success: boolean; error: string }> {
   try {
     const { data: cotizacionExistente, error: errorExistencia } = await supabase
-      .from("cotizaciones")
+      .from("eventos")
       .select("id")
       .eq("id", id)
       .maybeSingle()
 
     if (errorExistencia) {
-      console.error("Error validando existencia de la cotizacion en estatusActivoCotizacion:", errorExistencia)
-      return { success: false, error: "Error validando existencia de la cotizacion: " + errorExistencia.message }
+      console.error("Error validando existencia del evento en estatusActivoCotizacion:", errorExistencia)
+      return { success: false, error: "Error validando existencia del evento: " + errorExistencia.message }
     }
 
     if (!cotizacionExistente) {
-      return { success: false, error: "La cotizacion con el id proporcionado no existe" }
+      return { success: false, error: "El evento con el id proporcionado no existe" }
     }
 
-    const { error } = await supabase.from("cotizaciones").update({ activo: activo }).eq("id", id)
+    const { error } = await supabase.from("eventos").update({ activo: activo }).eq("id", id)
 
     if (error) {
       console.error(
@@ -615,7 +759,7 @@ export async function listaCategoriaEvento() {
 export async function listaDesplegableCotizaciones(id = -1, nombreevento = "") {
   try {
     // Query principal
-    let query = supabase.from("cotizaciones").select("id, nombreevento").eq("activo", true)
+    let query = supabase.from("eventos").select("id, nombreevento").eq("activo", true)
 
     // Filtros en query, dependiendo parametros
     if (id !== -1) {
