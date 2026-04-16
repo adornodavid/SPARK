@@ -728,6 +728,7 @@ export async function crearClienteNuevo(payload: CrearClientePayload) {
         preferenciasdecontacto: preferencias,
         notas: (payload.notas || "").trim() || null,
         fuente: "SPARK",
+        activo: true,
         fechacreacion: ahora,
         fechamodificacion: ahora,
       })

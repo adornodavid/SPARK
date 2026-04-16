@@ -1,8 +1,9 @@
 "use client"
 
 import { CardDescription } from "@/components/ui/card"
-import { listaDesplegableClientes, objetoCliente, crearCliente } from "@/app/actions/clientes"
+import { listaDesplegableClientes, objetoCliente, crearCliente, buscarClientesParaContacto } from "@/app/actions/clientes"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { NuevoClienteModal } from "./nuevo-cliente-modal"
 import { listaDesplegableHoteles } from "@/app/actions/hoteles"
 import { listaDesplegableSalones, objetoSalon, objetoSalones } from "@/app/actions/salones"
 import { crearCotizacion, actualizarCotizacion, objetoCotizacion, crearReservacion, actualizarReservacion, eliminarReservacion } from "@/app/actions/cotizaciones"
@@ -121,6 +122,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
   const [showClienteDropdown, setShowClienteDropdown] = useState(false)
   const [selectedClienteId, setSelectedClienteId] = useState<string>("")
   const [showNuevoClienteModal, setShowNuevoClienteModal] = useState(false)
+  const clienteSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [nuevoClienteLoading, setNuevoClienteLoading] = useState(false)
   const [nuevoClienteForm, setNuevoClienteForm] = useState({
     tipo: "",
@@ -3104,22 +3106,39 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
     setSelectedClienteId("") // invalidar selección al tipear manualmente
     if (value.trim() === "") {
       setFormData(prev => ({ ...prev, nombreCliente: "", empresa: "", grupo: "", email: "", telefono: "" }))
-      setFilteredClientes(clientes)
+      setFilteredClientes([])
       setShowClienteDropdown(false)
-      setSelectedClienteId("")
+      if (clienteSearchTimerRef.current) clearTimeout(clienteSearchTimerRef.current)
       return
     }
 
     setFormData(prev => ({ ...prev, nombreCliente: value }))
-    const searchTerm = value.toLowerCase()
-    const filtered = clientes.filter((cliente) =>
-      cliente.text.toLowerCase().includes(searchTerm) ||
-      cliente.email.toLowerCase().includes(searchTerm) ||
-      cliente.telefono.includes(searchTerm)
-    )
+    const q = value.trim()
+    if (clienteSearchTimerRef.current) clearTimeout(clienteSearchTimerRef.current)
 
-    setFilteredClientes(filtered)
-    setShowClienteDropdown(filtered.length > 0)
+    if (q.length < 2) {
+      setFilteredClientes([])
+      setShowClienteDropdown(true)
+      return
+    }
+
+    clienteSearchTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await buscarClientesParaContacto(q)
+        const adapted = res.map((c) => ({
+          value: c.id.toString(),
+          text: [c.nombre, c.apellidos].filter(Boolean).join(" ").trim() || `Cliente #${c.id}`,
+          email: c.email || "",
+          telefono: c.telefono || "",
+        }))
+        setFilteredClientes(adapted)
+        setShowClienteDropdown(true)
+      } catch (error) {
+        console.error("Error buscando clientes:", error)
+        setFilteredClientes([])
+        setShowClienteDropdown(true)
+      }
+    }, 250)
   }
 
   const handleClienteSelect = async (cliente: { value: string; text: string }) => {
@@ -3415,7 +3434,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
               <div className="space-y-2 relative">
                 <Label htmlFor="nombreCliente" className="text-sm font-medium flex items-center gap-2">
                   <User className="h-4 w-4" />
-                  Nombre del Cliente <span className="text-red-500">*</span>
+                  Buscar Cliente <span className="text-red-500">*</span>
                   <span className="relative inline-flex group/tip">
                     <span
                       tabIndex={0}
@@ -3430,7 +3449,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                     >
                       <span className="block rounded-lg bg-slate-900 text-white text-xs font-normal leading-relaxed px-3 py-2 shadow-xl ring-1 ring-black/5">
                         <span className="block font-semibold text-blue-200 mb-0.5">Búsqueda flexible</span>
-                        Puedes buscar al cliente escribiendo su <span className="font-semibold text-white">nombre</span>, <span className="font-semibold text-white">email</span> o <span className="font-semibold text-white">teléfono</span>.
+                        Puedes buscar al cliente escribiendo su <span className="font-semibold text-white">nombre</span>, <span className="font-semibold text-white">apellidos</span>, <span className="font-semibold text-white">email</span> o <span className="font-semibold text-white">teléfono</span>.
                       </span>
                       <span className="absolute left-1/2 -bottom-1 -translate-x-1/2 w-2 h-2 rotate-45 bg-slate-900 ring-1 ring-black/5" />
                     </span>
@@ -3442,38 +3461,31 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                   value={formData.nombreCliente}
                   onChange={(e) => handleClienteInputChange(e.target.value)}
                   onFocus={() => {
-                    if (filteredClientes.length > 0) setShowClienteDropdown(true)
+                    if (formData.nombreCliente.trim() !== "") setShowClienteDropdown(true)
                   }}
                   onBlur={() => {
                     setTimeout(() => setShowClienteDropdown(false), 200)
                   }}
-                  placeholder="Escribe para buscar cliente..."
+                  placeholder="Nombre, apellidos, email o teléfono..."
                   className={`border-blue-200 focus:ring-blue-500 ${formData.nombreCliente && !selectedClienteId ? "border-red-400 focus:ring-red-400" : ""}`}
                   autoComplete="off"
                 />
-                {formData.nombreCliente && !selectedClienteId && !showClienteDropdown && (
-                  <div className="flex items-start gap-2 mt-1">
-                    <p className="text-xs text-red-500 leading-tight line-clamp-2">Cliente no encontrado en contactos, regístralo haciendo clic aquí →</p>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowNuevoClienteModal(true)}
-                      className="h-6 text-[11px] gap-1 border-blue-300 text-blue-700 hover:bg-blue-50 hover:text-blue-800 flex-shrink-0"
-                    >
-                      <UserPlus className="h-3 w-3" />
-                      Registrar
-                    </Button>
-                  </div>
-                )}
-                {showClienteDropdown && filteredClientes.length > 0 && (
-                  <div className="absolute z-50 w-full mt-1 bg-white border border-blue-300 rounded-lg shadow-lg max-h-60 overflow-y-auto min-w-[480px]">
+                {showClienteDropdown && formData.nombreCliente.trim() !== "" && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-blue-300 rounded-lg shadow-lg max-h-72 overflow-y-auto min-w-[480px]">
+                    {filteredClientes.length === 0 && (
+                      <div className="px-4 py-2.5 text-xs text-gray-500 border-b border-blue-100">
+                        {formData.nombreCliente.trim().length < 2
+                          ? "Escribe al menos 2 caracteres para buscar…"
+                          : "Sin coincidencias"}
+                      </div>
+                    )}
                     {filteredClientes.map((cliente) => (
                       <button
                         key={cliente.value}
                         type="button"
+                        onMouseDown={(e) => e.preventDefault()}
                         onClick={() => handleClienteSelect(cliente)}
-                        className="w-full text-left px-4 py-2.5 hover:bg-blue-50 transition-colors border-b border-blue-100 last:border-b-0"
+                        className="w-full text-left px-4 py-2.5 hover:bg-blue-50 transition-colors border-b border-blue-100"
                       >
                         <div className="text-sm font-medium text-gray-800">{cliente.text}</div>
                         <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
@@ -3490,6 +3502,18 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                         </div>
                       </button>
                     ))}
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setShowClienteDropdown(false)
+                        setShowNuevoClienteModal(true)
+                      }}
+                      className="w-full text-left px-4 py-2.5 bg-blue-50/50 hover:bg-blue-100 transition-colors flex items-center gap-2 text-blue-700 font-medium text-sm"
+                    >
+                      <UserPlus className="h-4 w-4" />
+                      Registrar nuevo cliente
+                    </button>
                   </div>
                 )}
               </div>
@@ -7077,14 +7101,17 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
       </fieldset>
     </form>
 
-    {/* Modal Nuevo Cliente */}
-    <Dialog open={showNuevoClienteModal} onOpenChange={(open) => {
-      setShowNuevoClienteModal(open)
-      if (!open) {
-        setNuevoClienteForm({ tipo: "", nombre: "", apellidopaterno: "", apellidomaterno: "", email: "", telefono: "", celular: "", direccion: "", empresa: "" })
-        setNuevoClienteError("")
-      }
-    }}>
+    {/* Modal Nuevo Cliente — flujo completo con validación Pipedrive */}
+    <NuevoClienteModal
+      open={showNuevoClienteModal}
+      onOpenChange={setShowNuevoClienteModal}
+      onRegistered={async (id, nombreCompleto) => {
+        await handleClienteSelect({ value: id.toString(), text: nombreCompleto })
+      }}
+    />
+
+    {/* Modal Nuevo Cliente (legacy, oculto — reemplazado arriba) */}
+    <Dialog open={false} onOpenChange={() => {}}>
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-blue-900">
