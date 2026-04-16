@@ -2294,9 +2294,16 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
         }
         y += headerH
 
+        // Regla de cortesía: si la suma de los otros conceptos cubre el total del salón,
+        // el salón se muestra como "Cortesía" y no suma al total.
+        const otrosTotalPdf = presupuestoItems
+          .filter((p: any) => p.tipo !== "Salón")
+          .reduce((s: number, p: any) => s + (p.total || 0), 0)
+
         // Data rows
         for (let idx = 0; idx < presupuestoItems.length; idx++) {
           const item = presupuestoItems[idx]
+          const esCortesiaSalon = item.tipo === "Salón" && item.total > 0 && otrosTotalPdf >= item.total
           const rowH = 6.5
           checkNewPage(rowH + 2)
 
@@ -2335,7 +2342,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
             item.subtotal > 0 ? fmt(item.subtotal) : "Por definir",
             item.cantidad ? String(item.cantidad) : "-",
             String(item.dias),
-            item.total > 0 ? fmt(item.total) : "Por definir",
+            esCortesiaSalon ? "Cortesía" : (item.total > 0 ? fmt(item.total) : "Por definir"),
           ]
 
           colX = tableX
@@ -2380,8 +2387,11 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
         const totalLabelX = tableX + cols.slice(0, 9).reduce((a, b) => a + b, 0) - 2
         doc.text("Total", totalLabelX, y + 5, { align: "right" })
 
-        // Valor total
-        const grandTotal = presupuestoItems.reduce((sum, i) => sum + i.total, 0)
+        // Valor total (excluye salón cuando aplica como cortesía)
+        const grandTotal = presupuestoItems.reduce((sum: number, i: any) => {
+          const esCortesia = i.tipo === "Salón" && i.total > 0 && otrosTotalPdf >= i.total
+          return sum + (esCortesia ? 0 : (i.total || 0))
+        }, 0)
         doc.setFontSize(8.5)
         doc.setTextColor(50, 50, 50)
         const totalValX = tableX + contentWidth - 2
