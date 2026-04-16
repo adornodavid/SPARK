@@ -115,23 +115,6 @@ function calcSideExtras(leftExt: number, rightExt: number, totalExtras: number) 
   return { leftExtras: leftExt - la, rightExtras: rightExt - ra }
 }
 
-/** Total máximo de evento = 8 (core 4 + 4 de extensiones).
- *  Prioridad al lado más extendido: ese lado absorbe primero sus slots de evento.
- *  El lado menor recibe lo que queda. Extras siempre quedan de su lado. */
-function calcSideExtras(leftExt: number, rightExt: number, totalExtras: number) {
-  if (totalExtras <= 0) return { leftExtras: 0, rightExtras: 0 }
-  // El lado más grande absorbe primero hasta REMAINING_CAP
-  let la: number, ra: number
-  if (leftExt >= rightExt) {
-    la = Math.min(leftExt, REMAINING_CAP)
-    ra = Math.min(rightExt, REMAINING_CAP - la)
-  } else {
-    ra = Math.min(rightExt, REMAINING_CAP)
-    la = Math.min(leftExt, REMAINING_CAP - ra)
-  }
-  return { leftExtras: leftExt - la, rightExtras: rightExt - ra }
-}
-
 /* ==================================================
   Main Component
 ================================================== */
