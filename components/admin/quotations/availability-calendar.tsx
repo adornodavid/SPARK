@@ -1,10 +1,10 @@
 "use client"
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react"
-import { ChevronLeft, ChevronRight, Calendar, Clock, CalendarDays, CalendarRange, ArrowLeft, GripVertical } from "lucide-react"
+import { ChevronLeft, ChevronRight, Calendar, Clock, CalendarDays, CalendarRange, ArrowLeft, GripVertical, User, Users, MapPin, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { obtenerReservacionesPorHotel } from "@/app/actions/reservaciones"
-import { obtenerCotizacionesPorHotel } from "@/app/actions/cotizaciones"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { obtenerEventosPorHotel } from "@/app/actions/cotizaciones"
 import type { ddlItem } from "@/types/common"
 
 /* ==================================================
@@ -14,7 +14,18 @@ interface CalendarEvent {
   id: number; nombreevento: string; salonName: string; salonid: number
   fechainicio: string; fechafin: string; horainicio: string; horafin: string
   estatus: string; cliente: string; numeroinvitados: number
-  tipo: "reservacion" | "cotizacion"
+  tipo: "reservacion" | "cotizacion" | "draft"
+}
+
+export interface DraftReservacion {
+  salonid: string | number
+  fechainicio: string
+  fechafin: string
+  horainicio: string
+  horafin: string
+  horapremontaje?: string
+  horapostmontaje?: string
+  label?: string
 }
 type ViewMode = "day" | "week" | "month"
 
@@ -23,11 +34,19 @@ interface AvailabilityCalendarProps {
   onSelectSlot: (fecha: string, salonId: string, horaPreMontaje?: string, horaInicio?: string, horaFin?: string, horaPostMontaje?: string, horasExtras?: number, fechaFin?: string, overlappingCotizacion?: string) => void
   selectedFechaInicio?: string; selectedFechaFin?: string; selectedSalonId?: string
   selectedHoraPreMontaje?: string; selectedHoraInicio?: string; selectedHoraFin?: string; selectedHoraPostMontaje?: string
+  initialViewMode?: "day" | "week" | "month"
+  initialDate?: string
+  draftReservaciones?: DraftReservacion[]
+  /** Combo que identifica la reservación en edición para excluirla del grid (se maneja como selection editable).
+   *  vw_oeventos.id es el eventoid (compartido entre reservaciones del mismo evento), así que matcheamos
+   *  por eventoid + salonid + fechainicio + horainicio del último guardado. */
+  excludeMatch?: { eventoid?: number; salonid?: string | number; fechainicio?: string; horainicio?: string }
 }
 
 interface SelectionState {
   salonId: string; dateStr: string; coreStartIdx: number
   extrasBefore: number; extrasAfter: number
+  preHours: number; postHours: number // horas de montaje dentro del rango (mínimo 1)
 }
 
 // Day range selection for week/month view
@@ -48,7 +67,10 @@ const HOURS = (() => {
   for (let i = 0; i <= 2; i++) { h.push({ value: `${i.toString().padStart(2, "0")}:00`, label: `${fmt(i)}-${fmt(i + 1)}`, hour24: i }) }
   return h
 })()
-const BLOCK_SIZE = 10 // 1 pre + 8 event + 1 post
+const BLOCK_SIZE = 6 // 1 pre + 4 event + 1 post
+const MAX_EVENT_HOURS = 8
+const CORE_EVENTS = BLOCK_SIZE - 2 // 4
+const REMAINING_CAP = MAX_EVENT_HOURS - CORE_EVENTS // 4 slots adicionales de evento antes de extras
 const DAYS_ES = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"]
 const MONTHS_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
@@ -62,7 +84,36 @@ function getMonthStart(d: Date) { return new Date(d.getFullYear(), d.getMonth(),
 function getMonthEnd(d: Date) { return new Date(d.getFullYear(), d.getMonth() + 1, 0) }
 function parseHour(t: string) { if (!t) return -1; return parseInt(t.split(":")[0], 10) }
 function getHourIdx(v: string) { return HOURS.findIndex((h) => h.value === v) }
-function getEventBarColor(ev: CalendarEvent) { if (ev.tipo === "reservacion") { const e = ev.estatus?.toLowerCase() || ""; if (e.includes("cancel")) return "bg-gray-400"; return "bg-purple-900" } return "bg-amber-400" }
+/** Hora de fin de un bloque: la hora siguiente. Ej: celda "16:00" (4PM-5PM) → fin = "17:00" */
+function endOfBlock(idx: number): string {
+  const hr = HOURS[idx].hour24
+  const next = (hr + 1) % 24
+  return `${next.toString().padStart(2, "0")}:00`
+}
+/** Índice de la celda que EMPIEZA en la hora dada (inverso de endOfBlock) */
+function idxFromEndHour(v: string): number {
+  const hr = parseInt(v.split(":")[0], 10)
+  const prev = (hr - 1 + 24) % 24
+  return HOURS.findIndex((h) => h.hour24 === prev)
+}
+function getEventBarColor(ev: CalendarEvent) { if (ev.tipo === "draft") return "bg-sky-300"; if (ev.tipo === "reservacion") { const e = ev.estatus?.toLowerCase() || ""; if (e.includes("cancel")) return "bg-gray-400"; return "bg-purple-900" } return "bg-amber-400" }
+
+/** Total máximo de evento = 8 (core 4 + 4 de extensiones).
+ *  Prioridad al lado más extendido: ese lado absorbe primero sus slots de evento.
+ *  El lado menor recibe lo que queda. Extras siempre quedan de su lado. */
+function calcSideExtras(leftExt: number, rightExt: number, totalExtras: number) {
+  if (totalExtras <= 0) return { leftExtras: 0, rightExtras: 0 }
+  // El lado más grande absorbe primero hasta REMAINING_CAP
+  let la: number, ra: number
+  if (leftExt >= rightExt) {
+    la = Math.min(leftExt, REMAINING_CAP)
+    ra = Math.min(rightExt, REMAINING_CAP - la)
+  } else {
+    ra = Math.min(rightExt, REMAINING_CAP)
+    la = Math.min(leftExt, REMAINING_CAP - ra)
+  }
+  return { leftExtras: leftExt - la, rightExtras: rightExt - ra }
+}
 
 /* ==================================================
   Main Component
@@ -71,24 +122,56 @@ export function AvailabilityCalendar({
   hotelId, salones, onSelectSlot,
   selectedFechaInicio, selectedFechaFin, selectedSalonId,
   selectedHoraPreMontaje, selectedHoraInicio, selectedHoraFin, selectedHoraPostMontaje,
+  initialViewMode, initialDate, draftReservaciones, excludeMatch,
 }: AvailabilityCalendarProps) {
-  const [viewMode, setViewMode] = useState<ViewMode>("week")
+  const [viewMode, setViewMode] = useState<ViewMode>(initialViewMode ?? "week")
   const [previousView, setPreviousView] = useState<ViewMode | null>(null)
-  const [currentDate, setCurrentDate] = useState(new Date())
+  const [currentDate, setCurrentDate] = useState(() => {
+    const seed = initialDate || selectedFechaInicio
+    return seed ? new Date(seed + "T12:00:00") : new Date()
+  })
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(false)
   const [hoveredCell, setHoveredCell] = useState<string | null>(null)
   const [hoverBlock, setHoverBlock] = useState<{ salonId: string; startIdx: number } | null>(null)
-  const [selection, setSelection] = useState<SelectionState | null>(null)
+  const [selection, setSelection] = useState<SelectionState | null>(() => {
+    // Reconstruir selección visual a partir de props (al montar: útil al cambiar de tab de reservación)
+    if (!selectedSalonId || !selectedFechaInicio || !selectedHoraInicio || !selectedHoraFin) return null
+    const preRef = selectedHoraPreMontaje || selectedHoraInicio
+    const postRef = selectedHoraPostMontaje || selectedHoraFin
+    const fullStart = getHourIdx(preRef)
+    const fullEnd = idxFromEndHour(postRef)
+    const evtStart = getHourIdx(selectedHoraInicio)
+    const evtEnd = idxFromEndHour(selectedHoraFin)
+    if (fullStart < 0 || fullEnd < 0 || evtStart < 0 || evtEnd < 0) return null
+    const preHours = Math.max(1, evtStart - fullStart)
+    const postHours = Math.max(1, fullEnd - evtEnd)
+    const coreStartIdx = fullStart
+    const extrasAfter = Math.max(0, (fullEnd - fullStart + 1) - BLOCK_SIZE)
+    return {
+      salonId: selectedSalonId,
+      dateStr: selectedFechaInicio.slice(0, 10),
+      coreStartIdx,
+      extrasBefore: 0,
+      extrasAfter,
+      preHours,
+      postHours,
+    }
+  })
   const [overlapAlert, setOverlapAlert] = useState<string | null>(null)
+  const [eventDetail, setEventDetail] = useState<CalendarEvent | null>(null)
+  // Guardar las últimas horas emitidas por el calendario para detectar cambios del usuario vs del calendario
+  const lastEmittedRef = useRef<{ horaInicio: string; horaFin: string } | null>(null)
+  // Marca que la fecha emitida vino de un clic en vista semana; suprime el auto-switch a día.
+  const weekClickEmittedFechaRef = useRef<string | null>(null)
   // Day range selection for week/month view
   const [daySel, setDaySel] = useState<DaySelectionState | null>(null)
   const [dayDragging, setDayDragging] = useState<"left" | "right" | null>(null)
   const dayDragStartRef = useRef<{ daysBefore: number; daysAfter: number; startDateStr: string } | null>(null)
 
-  // Drag state
-  const [dragging, setDragging] = useState<"left" | "right" | null>(null)
-  const dragStartRef = useRef<{ extrasBefore: number; extrasAfter: number; startMouseIdx: number } | null>(null)
+  // Drag state: left/right = rango evento, pre/post = montaje dentro del rango
+  const [dragging, setDragging] = useState<"left" | "right" | "pre" | "post" | null>(null)
+  const dragStartRef = useRef<{ extrasBefore: number; extrasAfter: number; preHours: number; postHours: number; startMouseIdx: number } | null>(null)
 
   const salonNameMap = useMemo(() => { const m = new Map<string, string>(); for (const s of salones) m.set(s.value, s.text); return m }, [salones])
 
@@ -102,28 +185,196 @@ export function AvailabilityCalendar({
   const loadEvents = useCallback(async () => {
     if (!hotelId) return
     setLoading(true)
-    const [resR, cotR] = await Promise.all([
-      obtenerReservacionesPorHotel(Number(hotelId), toDateStr(dateRange.start), toDateStr(dateRange.end)),
-      obtenerCotizacionesPorHotel(Number(hotelId), toDateStr(dateRange.start), toDateStr(dateRange.end)),
-    ])
+    const result = await obtenerEventosPorHotel(Number(hotelId), toDateStr(dateRange.start), toDateStr(dateRange.end))
     const all: CalendarEvent[] = []
-    if (resR.success && resR.data) for (const r of resR.data) all.push({ id: r.id, nombreevento: r.nombreevento || "Reservación", salonName: r.salon || salonNameMap.get(String(r.salonid)) || "Salón", salonid: r.salonid, fechainicio: r.fechainicio, fechafin: r.fechafin, horainicio: r.horainicio || "", horafin: r.horafin || "", estatus: r.estatus || "", cliente: r.cliente || "", numeroinvitados: r.numeroinvitados || 0, tipo: "reservacion" })
-    if (cotR.success && cotR.data) for (const c of cotR.data) all.push({ id: c.id, nombreevento: c.nombreevento || "Cotización", salonName: salonNameMap.get(String(c.salonid)) || "Salón", salonid: c.salonid, fechainicio: c.fechainicio, fechafin: c.fechafin, horainicio: c.horainicio || "", horafin: c.horafin || "", estatus: c.estatus || "", cliente: c.cliente || "", numeroinvitados: c.numeroinvitados || 0, tipo: "cotizacion" })
+    if (result.success && result.data) {
+      for (const e of result.data) {
+        const tipo = String(e.tiporegistro).toLowerCase() === "reservacion" ? "reservacion" : "cotizacion"
+        // Rango completo = desde pre-montaje hasta post-montaje (incluye horas extras extendidas en el rango)
+        const horaIniFull = e.horapremontaje || e.horainicio || ""
+        const horaFinFull = e.horapostmontaje || e.horafin || ""
+        all.push({
+          id: e.id,
+          nombreevento: e.nombreevento || (tipo === "reservacion" ? "Reservación" : "Cotización"),
+          salonName: e.salon || salonNameMap.get(String(e.salonid)) || "Salón",
+          salonid: e.salonid,
+          fechainicio: e.fechainicio,
+          fechafin: e.fechafin,
+          horainicio: horaIniFull,
+          horafin: horaFinFull,
+          estatus: e.estatus || "",
+          cliente: e.cliente || "",
+          numeroinvitados: e.numeroinvitados || 0,
+          tipo,
+        })
+      }
+    }
     setEvents(all); setLoading(false)
   }, [hotelId, dateRange, salonNameMap])
 
   useEffect(() => { loadEvents() }, [loadEvents])
 
+  // Combinar eventos de DB con drafts in-memory (otras reservaciones del formulario actual)
+  const displayEvents: CalendarEvent[] = useMemo(() => {
+    // Excluir la reservación que se está editando — se maneja como selection editable, no como evento fijo.
+    // Match por eventoid + salonid + fechainicio + horainicio (todos los provistos).
+    const out = excludeMatch
+      ? events.filter((e) => {
+          if (excludeMatch.eventoid != null && Number(e.id) !== Number(excludeMatch.eventoid)) return true
+          if (excludeMatch.salonid != null && Number(e.salonid) !== Number(excludeMatch.salonid)) return true
+          if (excludeMatch.fechainicio && (e.fechainicio || "").slice(0, 10) !== excludeMatch.fechainicio.slice(0, 10)) return true
+          if (excludeMatch.horainicio && (e.horainicio || "").slice(0, 5) !== excludeMatch.horainicio.slice(0, 5)) return true
+          return false // todos los campos provistos coincidieron → excluir
+        })
+      : [...events]
+    if (draftReservaciones && draftReservaciones.length > 0) {
+      for (let i = 0; i < draftReservaciones.length; i++) {
+        const d = draftReservaciones[i]
+        if (!d.salonid || !d.fechainicio) continue
+        out.push({
+          id: -1000 - i,
+          nombreevento: d.label || "Reservación (en captura)",
+          salonName: salonNameMap.get(String(d.salonid)) || "Salón",
+          salonid: Number(d.salonid),
+          fechainicio: d.fechainicio,
+          fechafin: d.fechafin || d.fechainicio,
+          // Mostrar rango completo del draft: desde pre-montaje hasta post-montaje (incluye horas extras)
+          horainicio: d.horapremontaje || d.horainicio || "",
+          horafin: d.horapostmontaje || d.horafin || "",
+          estatus: "Borrador",
+          cliente: "",
+          numeroinvitados: 0,
+          tipo: "draft",
+        })
+      }
+    }
+    return out
+  }, [events, draftReservaciones, salonNameMap, excludeMatch])
+
+  // Cuando las props llegan tarde (ej: edición/switch de tab: formData se hidrata después del mount),
+  // construir/reconstruir la selection desde props si:
+  //  - aún no existe, O
+  //  - el salon/fecha de la selection actual no coinciden con las props (tab nueva con otra reservación)
+  useEffect(() => {
+    if (!selectedSalonId || !selectedFechaInicio || !selectedHoraInicio || !selectedHoraFin) return
+    const dateStrProp = selectedFechaInicio.slice(0, 10)
+    if (selection && selection.salonId === selectedSalonId && selection.dateStr === dateStrProp) return
+    const preRef = selectedHoraPreMontaje || selectedHoraInicio
+    const postRef = selectedHoraPostMontaje || selectedHoraFin
+    const fullStart = getHourIdx(preRef)
+    const fullEnd = idxFromEndHour(postRef)
+    const evtStart = getHourIdx(selectedHoraInicio)
+    const evtEnd = idxFromEndHour(selectedHoraFin)
+    if (fullStart < 0 || fullEnd < 0 || evtStart < 0 || evtEnd < 0) return
+    const preHours = Math.max(1, evtStart - fullStart)
+    const postHours = Math.max(1, fullEnd - evtEnd)
+    const coreStartIdx = fullStart
+    const extrasAfter = Math.max(0, (fullEnd - fullStart + 1) - BLOCK_SIZE)
+    setSelection({
+      salonId: selectedSalonId,
+      dateStr: selectedFechaInicio.slice(0, 10),
+      coreStartIdx,
+      extrasBefore: 0,
+      extrasAfter,
+      preHours,
+      postHours,
+    })
+  }, [selection, selectedSalonId, selectedFechaInicio, selectedHoraInicio, selectedHoraFin, selectedHoraPreMontaje, selectedHoraPostMontaje])
+
+  // Al cambiar la fecha de la reservación (tab switch), sincronizar currentDate y mostrar vista día.
+  // Solo auto-conmuta a día cuando además hay horas (reservación ya guardada); si solo viene fecha
+  // (ej: clic de rango en vista semana) nos mantenemos en la vista actual para permitir extender el rango.
+  useEffect(() => {
+    if (!selectedFechaInicio) return
+    const fechaStr = selectedFechaInicio.slice(0, 10)
+    // Si la fecha que llega proviene del clic de semana que acabamos de emitir, no auto-conmutar a día.
+    const fromWeekClick = weekClickEmittedFechaRef.current === fechaStr
+    if (fromWeekClick) {
+      weekClickEmittedFechaRef.current = null
+      return
+    }
+    const target = new Date(selectedFechaInicio + "T12:00:00")
+    if (target.getTime() !== currentDate.getTime()) {
+      setCurrentDate(target)
+    }
+    if (selectedHoraInicio && viewMode !== "day") setViewMode("day")
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFechaInicio, selectedHoraInicio])
+
+  // Inicializar daySel (rango de la vista semana) cuando hay fecha+salón asignados a la reservación
+  // Así al editar o al volver a semana, el rango del día(s) queda resaltado.
+  useEffect(() => {
+    if (!selectedFechaInicio || !selectedSalonId) { setDaySel(null); return }
+    const fi = selectedFechaInicio.slice(0, 10)
+    const ff = (selectedFechaFin || selectedFechaInicio).slice(0, 10)
+    const fiDate = new Date(fi + "T12:00:00")
+    const ffDate = new Date(ff + "T12:00:00")
+    const daysAfter = Math.max(0, Math.round((ffDate.getTime() - fiDate.getTime()) / 86400000))
+    setDaySel({ salonId: String(selectedSalonId), startDate: fi, daysBefore: 0, daysAfter })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFechaInicio, selectedFechaFin, selectedSalonId])
+
+  // Sincronizar selection cuando los inputs de hora del formulario cambian
+  // selectedHoraInicio/Fin = horas de EVENTO (primera y última hora de evento, no pre/post)
+  useEffect(() => {
+    if (!selection || !selectedSalonId || !selectedHoraInicio || !selectedHoraFin) return
+    if (selection.salonId !== selectedSalonId) return
+    // Si las horas coinciden con lo que el calendario emitió, el cambio vino del calendario → ignorar
+    if (lastEmittedRef.current && lastEmittedRef.current.horaInicio === selectedHoraInicio && lastEmittedRef.current.horaFin === selectedHoraFin) return
+
+    const newEvtStartIdx = getHourIdx(selectedHoraInicio)
+    let newEvtEndIdx = idxFromEndHour(selectedHoraFin)
+    if (newEvtStartIdx < 0 || newEvtEndIdx < 0) return
+
+    const preH = selection.preHours ?? 1
+    const postH = selection.postHours ?? 1
+
+    // Si el rango de evento es menor a 4 horas, extender el fin para mantener mínimo 4
+    if (newEvtEndIdx - newEvtStartIdx + 1 < CORE_EVENTS) {
+      newEvtEndIdx = newEvtStartIdx + CORE_EVENTS - 1
+    }
+
+    // Rango completo = PRE + evento + POST
+    const newFullStart = newEvtStartIdx - preH
+    const newFullEnd = newEvtEndIdx + postH
+    if (newFullStart < 0 || newFullEnd >= HOURS.length) return
+
+    // Comparar con rango actual de evento
+    const coreEnd = Math.min(selection.coreStartIdx + BLOCK_SIZE - 1, HOURS.length - 1)
+    const curFullStart = selection.coreStartIdx - selection.extrasBefore
+    const curFullEnd = coreEnd + selection.extrasAfter
+    const curEvtStart = curFullStart + preH
+    const curEvtEnd = curFullEnd - postH
+    if (curEvtStart === newEvtStartIdx && curEvtEnd === newEvtEndIdx) return
+
+    // Recalcular: extrasBefore/After son respecto al core dentro del rango completo
+    // fullStart = coreStartIdx - extrasBefore, fullEnd = coreEnd + extrasAfter
+    // Necesitamos: newFullStart = newCore - newBefore, newFullEnd = newCoreEnd + newAfter
+    const newCore = Math.max(newFullStart, Math.min(selection.coreStartIdx, newFullEnd - BLOCK_SIZE + 1))
+    const newCoreEnd = Math.min(newCore + BLOCK_SIZE - 1, HOURS.length - 1)
+    const newBefore = newCore - newFullStart
+    const newAfter = newFullEnd - newCoreEnd
+
+    const newSel: SelectionState = {
+      ...selection,
+      coreStartIdx: newCore,
+      extrasBefore: newBefore,
+      extrasAfter: newAfter,
+    }
+    setSelection(newSel)
+    emitSelection(newSel)
+  }, [selectedHoraInicio, selectedHoraFin])
+
   function goToDayView(date: Date, from: ViewMode) { setPreviousView(from); setCurrentDate(date); setViewMode("day") }
   function goBack() { if (previousView) { setViewMode(previousView); setPreviousView(null) } }
   function navigate(dir: -1 | 1) { setCurrentDate((p) => { const d = new Date(p); if (viewMode === "day") d.setDate(d.getDate() + dir); else if (viewMode === "week") d.setDate(d.getDate() + dir * 7); else d.setFullYear(d.getFullYear() + dir); return d }) }
 
-  function getEventsForCell(sId: string, ds: string) { return events.filter((e) => e.salonid === Number(sId) && e.fechainicio <= ds && e.fechafin >= ds) }
+  function getEventsForCell(sId: string, ds: string) { return displayEvents.filter((e) => e.salonid === Number(sId) && e.fechainicio <= ds && e.fechafin >= ds) }
   function getEventsForHourCell(sId: string, ds: string, hr: number) {
-    return events.filter((e) => { if (e.salonid !== Number(sId) || e.fechainicio > ds || e.fechafin < ds) return false; const s = parseHour(e.horainicio), en = parseHour(e.horafin); if (s < 0 || en < 0) return true; return s <= en ? (hr >= s && hr < en) : (hr >= s || hr < en) })
+    return displayEvents.filter((e) => { if (e.salonid !== Number(sId) || e.fechainicio > ds || e.fechafin < ds) return false; const s = parseHour(e.horainicio), en = parseHour(e.horafin); if (s < 0 || en < 0) return true; return s <= en ? (hr >= s && hr < en) : (hr >= s || hr < en) })
   }
-  function cellHasRes(sId: string, ds: string) { return events.some((e) => e.tipo === "reservacion" && e.salonid === Number(sId) && e.fechainicio <= ds && e.fechafin >= ds) }
-  function hourHasRes(sId: string, ds: string, hr: number) { return getEventsForHourCell(sId, ds, hr).some((e) => e.tipo === "reservacion") }
+  function cellHasRes(sId: string, ds: string) { return displayEvents.some((e) => (e.tipo === "reservacion" || e.tipo === "draft") && e.salonid === Number(sId) && e.fechainicio <= ds && e.fechafin >= ds) }
+  function hourHasRes(sId: string, ds: string, hr: number) { return getEventsForHourCell(sId, ds, hr).some((e) => e.tipo === "reservacion" || e.tipo === "draft") }
   function isCellSel(sId: string, ds: string) { if (!selectedSalonId || !selectedFechaInicio || sId !== selectedSalonId) return false; return selectedFechaFin ? (ds >= selectedFechaInicio && ds <= selectedFechaFin) : ds === selectedFechaInicio }
   function blockHasRes(sId: string, ds: string, start: number) { for (let i = start; i < start + BLOCK_SIZE && i < HOURS.length; i++) if (hourHasRes(sId, ds, HOURS[i].hour24)) return true; return false }
 
@@ -135,7 +386,7 @@ export function AvailabilityCalendar({
     // Detectar solapamiento con cotizaciones existentes
     // Usar índices del array HOURS en vez de hour24 para evitar problemas al cruzar medianoche
     const dateCheck = sel.dateStr.slice(0, 10)
-    const overlapping = events.filter((e) => {
+    const overlapping = displayEvents.filter((e) => {
       if (e.tipo !== "cotizacion") return false
       if (e.salonid !== Number(sel.salonId)) return false
       const eFechaIni = (e.fechainicio || "").slice(0, 10)
@@ -156,27 +407,43 @@ export function AvailabilityCalendar({
       : undefined
     setOverlapAlert(overlapMsg || null)
 
+    // Extras: prioridad al lado más extendido
+    const rawInner = fullEnd - fullStart - 1
+    const rawTotalExtras = Math.max(0, rawInner - MAX_EVENT_HOURS)
+    const { leftExtras, rightExtras } = calcSideExtras(Math.max(0, sel.extrasBefore), Math.max(0, sel.extrasAfter), rawTotalExtras)
+    const extraHours = leftExtras + rightExtras
+
+    // Pre/Post montaje en los extremos, horaInicio/Fin = primera/última celda de evento
+    const preH = sel.preHours ?? 1
+    const postH = sel.postHours ?? 1
+    const evtStartIdx = fullStart + preH
+    const evtEndIdx = fullEnd - postH
+
+    const emitHoraInicio = HOURS[Math.min(evtStartIdx, HOURS.length - 1)].value
+    const emitHoraFin = endOfBlock(Math.max(evtEndIdx, 0))
+    lastEmittedRef.current = { horaInicio: emitHoraInicio, horaFin: emitHoraFin }
+
     onSelectSlot("", sel.salonId,
-      HOURS[fullStart].value,
-      HOURS[fullStart].value,
-      HOURS[fullEnd].value,
-      HOURS[fullEnd].value,
-      sel.extrasBefore + sel.extrasAfter,
+      HOURS[fullStart].value,                                        // horaPreMontaje (inicio del bloque pre)
+      emitHoraInicio,                                                // horaInicio (inicio primera hora evento)
+      emitHoraFin,                                                   // horaFin (fin de la última hora evento)
+      endOfBlock(fullEnd),                                           // horaPostMontaje (fin del bloque post)
+      extraHours,
       undefined,
       overlapMsg,
     )
   }
 
   function handleHourClick(sId: string, ds: string, idx: number) {
-    const sel: SelectionState = { salonId: sId, dateStr: ds, coreStartIdx: idx, extrasBefore: 0, extrasAfter: 0 }
+    const sel: SelectionState = { salonId: sId, dateStr: ds, coreStartIdx: idx, extrasBefore: 0, extrasAfter: 0, preHours: 1, postHours: 1 }
     setSelection(sel); emitSelection(sel)
   }
 
   // Drag handlers for edge handles
-  function startDrag(side: "left" | "right", mouseHourIdx: number) {
+  function startDrag(side: "left" | "right" | "pre" | "post", mouseHourIdx: number) {
     if (!selection) return
     setDragging(side)
-    dragStartRef.current = { extrasBefore: selection.extrasBefore, extrasAfter: selection.extrasAfter, startMouseIdx: mouseHourIdx }
+    dragStartRef.current = { extrasBefore: selection.extrasBefore, extrasAfter: selection.extrasAfter, preHours: selection.preHours, postHours: selection.postHours, startMouseIdx: mouseHourIdx }
   }
 
   function onDragMove(hoverIdx: number) {
@@ -184,33 +451,85 @@ export function AvailabilityCalendar({
     const { startMouseIdx, extrasBefore: origBefore, extrasAfter: origAfter } = dragStartRef.current
     const delta = hoverIdx - startMouseIdx
     const coreEnd = Math.min(selection.coreStartIdx + BLOCK_SIZE - 1, HOURS.length - 1)
+    const MIN_TOTAL = BLOCK_SIZE // PRE + 4 eventos + POST mínimo
 
-    if (dragging === "left") {
-      // Moving left handle: negative delta = more extras before, positive = fewer
-      const newExtras = Math.max(0, origBefore - delta)
-      // Check bounds
-      const newStartIdx = selection.coreStartIdx - newExtras
-      if (newStartIdx < 0) return
-      // Check for reservaciones in the new extra range
-      for (let i = newStartIdx; i < selection.coreStartIdx; i++) {
-        if (hourHasRes(selection.salonId, selection.dateStr, HOURS[i].hour24)) return
+    if (dragging === "pre") {
+      // Arrastrar ▶ de PRE hacia la derecha = más pre, hacia izquierda = menos pre
+      const newPre = Math.max(1, Math.min(MAX_PRE_POST, (dragStartRef.current.preHours) + delta))
+      const fs = selection.coreStartIdx - selection.extrasBefore
+      const fe = coreEnd + selection.extrasAfter
+      const totalCells = fe - fs + 1
+      if (totalCells - newPre - selection.postHours < MIN_EVENT_INNER) return
+      const newSel = { ...selection, preHours: newPre }
+      setSelection(newSel); emitSelection(newSel)
+    } else if (dragging === "post") {
+      const newPost = Math.max(1, Math.min(MAX_PRE_POST, (dragStartRef.current.postHours) - delta))
+      const fs = selection.coreStartIdx - selection.extrasBefore
+      const fe = coreEnd + selection.extrasAfter
+      const totalCells = fe - fs + 1
+      if (totalCells - selection.preHours - newPost < MIN_EVENT_INNER) return
+      const newSel = { ...selection, postHours: newPost }
+      setSelection(newSel); emitSelection(newSel)
+    } else if (dragging === "left") {
+      const newBefore = origBefore - delta
+      const minBefore = MIN_TOTAL - BLOCK_SIZE - selection.extrasAfter
+      const clampedBefore = Math.max(minBefore, newBefore)
+      const newStartIdx = selection.coreStartIdx - clampedBefore
+      if (newStartIdx < 0 || newStartIdx >= HOURS.length) return
+      if (clampedBefore > 0) {
+        for (let i = newStartIdx; i < selection.coreStartIdx; i++) {
+          if (hourHasRes(selection.salonId, selection.dateStr, HOURS[i].hour24)) return
+        }
       }
-      const newSel = { ...selection, extrasBefore: newExtras }
+      const newSel = { ...selection, extrasBefore: clampedBefore }
       setSelection(newSel); emitSelection(newSel)
     } else {
-      // Moving right handle: positive delta = more extras after, negative = fewer
-      const newExtras = Math.max(0, origAfter + delta)
-      const newEndIdx = coreEnd + newExtras
-      if (newEndIdx >= HOURS.length) return
-      for (let i = coreEnd + 1; i <= newEndIdx; i++) {
-        if (hourHasRes(selection.salonId, selection.dateStr, HOURS[i].hour24)) return
+      const newAfter = origAfter + delta
+      const minAfter = MIN_TOTAL - BLOCK_SIZE - selection.extrasBefore
+      const clampedAfter = Math.max(minAfter, newAfter)
+      const newEndIdx = coreEnd + clampedAfter
+      if (newEndIdx < 0 || newEndIdx >= HOURS.length) return
+      if (clampedAfter > 0) {
+        for (let i = coreEnd + 1; i <= newEndIdx; i++) {
+          if (hourHasRes(selection.salonId, selection.dateStr, HOURS[i].hour24)) return
+        }
       }
-      const newSel = { ...selection, extrasAfter: newExtras }
+      const newSel = { ...selection, extrasAfter: clampedAfter }
       setSelection(newSel); emitSelection(newSel)
     }
   }
 
   function endDrag() { setDragging(null); dragStartRef.current = null }
+
+  // Ajustar pre/post montaje dentro del rango (máx 3 hrs c/u, no cubrir las 4 hrs fijas de evento)
+  const MAX_PRE_POST = 3
+  const MIN_EVENT_INNER = CORE_EVENTS // 4 horas de evento siempre protegidas
+
+  function adjustPre(delta: number) {
+    if (!selection) return
+    const newPre = Math.max(1, Math.min(MAX_PRE_POST, (selection.preHours ?? 1) + delta))
+    const ce = Math.min(selection.coreStartIdx + BLOCK_SIZE - 1, HOURS.length - 1)
+    const fs = selection.coreStartIdx - selection.extrasBefore
+    const fe = ce + selection.extrasAfter
+    const totalCells = fe - fs + 1
+    const postH = selection.postHours ?? 1
+    if (totalCells - newPre - postH < MIN_EVENT_INNER) return
+    const newSel = { ...selection, preHours: newPre }
+    setSelection(newSel); emitSelection(newSel)
+  }
+
+  function adjustPost(delta: number) {
+    if (!selection) return
+    const newPost = Math.max(1, Math.min(MAX_PRE_POST, (selection.postHours ?? 1) + delta))
+    const ce = Math.min(selection.coreStartIdx + BLOCK_SIZE - 1, HOURS.length - 1)
+    const fs = selection.coreStartIdx - selection.extrasBefore
+    const fe = ce + selection.extrasAfter
+    const totalCells = fe - fs + 1
+    const preH = selection.preHours ?? 1
+    if (totalCells - preH - newPost < MIN_EVENT_INNER) return
+    const newSel = { ...selection, postHours: newPost }
+    setSelection(newSel); emitSelection(newSel)
+  }
 
   // === Day range selection (week view) ===
   function emitDaySel(ds: DaySelectionState) {
@@ -218,6 +537,7 @@ export function AvailabilityCalendar({
     const endD = addDays(new Date(ds.startDate + "T12:00:00"), ds.daysAfter)
     const fechaIni = toDateStr(startD)
     const fechaFin = toDateStr(endD)
+    weekClickEmittedFechaRef.current = fechaIni
     onSelectSlot(fechaIni, ds.salonId, undefined, undefined, undefined, undefined, undefined, fechaFin)
   }
 
@@ -283,11 +603,40 @@ export function AvailabilityCalendar({
           <Calendar className="w-4 h-4 text-blue-600" />
           <h3 className="text-sm font-bold text-blue-900">{title}</h3>
           {loading && <div className="w-3.5 h-3.5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />}
-          {viewMode === "day" && selection && (selection.extrasBefore + selection.extrasAfter) > 0 && (
-            <span className="text-[10px] font-bold text-teal-700 bg-teal-100 border border-teal-300 px-2 py-0.5 rounded-full ml-2">
-              +{selection.extrasBefore + selection.extrasAfter} hr extra{(selection.extrasBefore + selection.extrasAfter) !== 1 ? "s" : ""}
-            </span>
-          )}
+          {viewMode === "day" && selection && (() => {
+            const ce = Math.min(selection.coreStartIdx + BLOCK_SIZE - 1, HOURS.length - 1)
+            const fs = selection.coreStartIdx - selection.extrasBefore
+            const fe = ce + selection.extrasAfter
+            const preH = selection.preHours ?? 1, postH = selection.postHours ?? 1
+            const totalInner = fe - fs + 1 - preH - postH
+            const rawInner = fe - fs - 1
+            const extraHrs = Math.max(0, rawInner - MAX_EVENT_HOURS)
+            const eventHrs = Math.min(MAX_EVENT_HOURS, Math.max(0, rawInner))
+            return (
+              <>
+                {preH > 1 && (
+                  <span className="text-[10px] font-bold text-purple-700 bg-purple-100 border border-purple-300 px-2 py-0.5 rounded-full ml-2">
+                    {preH} hrs pre
+                  </span>
+                )}
+                {eventHrs > CORE_EVENTS && (
+                  <span className="text-[10px] font-bold text-blue-700 bg-blue-100 border border-blue-300 px-2 py-0.5 rounded-full ml-1">
+                    {eventHrs} hrs evento
+                  </span>
+                )}
+                {extraHrs > 0 && (
+                  <span className="text-[10px] font-bold text-teal-700 bg-teal-100 border border-teal-300 px-2 py-0.5 rounded-full ml-1">
+                    +{extraHrs} hr extra{extraHrs !== 1 ? "s" : ""}
+                  </span>
+                )}
+                {postH > 1 && (
+                  <span className="text-[10px] font-bold text-purple-700 bg-purple-100 border border-purple-300 px-2 py-0.5 rounded-full ml-1">
+                    {postH} hrs post
+                  </span>
+                )}
+              </>
+            )
+          })()}
           {overlapAlert && (
             <div className="flex items-center gap-1.5 bg-orange-50 border border-orange-300 rounded-full px-2.5 py-0.5 ml-2">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5 text-orange-500 flex-shrink-0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
@@ -297,7 +646,7 @@ export function AvailabilityCalendar({
         </div>
         <div className="flex items-center gap-1.5">
           {viewMode === "day" && !selection && <span className="text-[10px] text-gray-400 mr-2">Clic en una hora para bloque de 8 hrs</span>}
-          {viewMode === "day" && selection && <span className="text-[10px] text-gray-400 mr-2">Arrastra las flechas ◀ ▶ para agregar horas extras</span>}
+          {viewMode === "day" && selection && <span className="text-[10px] text-gray-400 mr-2">Arrastra ◀ ▶ para extender el rango</span>}
           <div className="flex bg-white rounded-lg border border-blue-200 p-0.5 mr-2">
             {(["day", "week", "month"] as const).map((m) => (
               <button key={m} type="button" onClick={() => { setViewMode(m); setPreviousView(null); setHoverBlock(null) }}
@@ -313,8 +662,8 @@ export function AvailabilityCalendar({
       </div>
 
       {/* Body */}
-      <div className="overflow-auto max-h-[420px]">
-        {viewMode === "day" && <DayView date={currentDate} salones={salones} getEventsForHourCell={getEventsForHourCell} hourHasRes={hourHasRes} onHourClick={handleHourClick} hoverBlock={hoverBlock} setHoverBlock={setHoverBlock} selection={selection} dragging={dragging} startDrag={startDrag} onDragMove={onDragMove} onClearSelection={() => { setSelection(null); setOverlapAlert(null) }} />}
+      <div className="overflow-y-auto overflow-x-hidden max-h-[420px]">
+        {viewMode === "day" && <DayView date={currentDate} salones={salones} getEventsForHourCell={getEventsForHourCell} hourHasRes={hourHasRes} onHourClick={handleHourClick} hoverBlock={hoverBlock} setHoverBlock={setHoverBlock} selection={selection} dragging={dragging} startDrag={startDrag} onDragMove={onDragMove} onClearSelection={() => { setSelection(null); setOverlapAlert(null); lastEmittedRef.current = null; onSelectSlot("", "", "", "", "", "", 0) }} onAdjustPre={adjustPre} onAdjustPost={adjustPost} onEventClick={setEventDetail} />}
         {viewMode === "week" && <WeekView days={weekDays} salones={salones} getEventsForCell={getEventsForCell}
           onDayClick={handleDayClick}
           onRangeClick={handleDayRangeClick}
@@ -323,11 +672,11 @@ export function AvailabilityCalendar({
           startDayDrag={startDayDrag}
           onDayDragMove={onDayDragMove}
           onClearDaySel={() => setDaySel(null)}
-          isCellSel={isCellSel} isToday={isToday} isPast={isPast} hoveredCell={hoveredCell} setHoveredCell={setHoveredCell} />}
+          isCellSel={isCellSel} isToday={isToday} isPast={isPast} hoveredCell={hoveredCell} setHoveredCell={setHoveredCell} onEventClick={setEventDetail} />}
         {viewMode === "month" && <MonthView
           year={currentDate.getFullYear()}
           salones={salones}
-          events={events}
+          events={displayEvents}
           onMonthClick={(month) => {
             const now = new Date()
             const yr = currentDate.getFullYear()
@@ -352,6 +701,9 @@ export function AvailabilityCalendar({
         <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded bg-blue-200 border border-blue-400" /><span className="text-[10px] text-gray-600">Evento</span></div>
         <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded bg-teal-300 border border-teal-500" /><span className="text-[10px] text-gray-600">Hora extra</span></div>
       </div>
+
+      {/* Event Detail Modal */}
+      <EventDetailModal event={eventDetail} onClose={() => setEventDetail(null)} />
     </div>
   )
 }
@@ -359,7 +711,7 @@ export function AvailabilityCalendar({
 /* ==================================================
   Day View — with drag handles at range edges
 ================================================== */
-function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick, hoverBlock, setHoverBlock, selection, dragging, startDrag, onDragMove, onClearSelection }: {
+function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick, hoverBlock, setHoverBlock, selection, dragging, startDrag, onDragMove, onClearSelection, onAdjustPre, onAdjustPost, onEventClick }: {
   date: Date; salones: ddlItem[]
   getEventsForHourCell: (s: string, d: string, h: number) => CalendarEvent[]
   hourHasRes: (s: string, d: string, h: number) => boolean
@@ -367,10 +719,13 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
   hoverBlock: { salonId: string; startIdx: number } | null
   setHoverBlock: (v: { salonId: string; startIdx: number } | null) => void
   selection: SelectionState | null
-  dragging: "left" | "right" | null
-  startDrag: (side: "left" | "right", mouseIdx: number) => void
+  dragging: "left" | "right" | "pre" | "post" | null
+  startDrag: (side: "left" | "right" | "pre" | "post", mouseIdx: number) => void
   onDragMove: (hoverIdx: number) => void
   onClearSelection: () => void
+  onAdjustPre: (delta: number) => void
+  onAdjustPost: (delta: number) => void
+  onEventClick: (ev: CalendarEvent) => void
 }) {
   const dateStr = toDateStr(date)
   const isPastDay = date < new Date(new Date().setHours(0, 0, 0, 0))
@@ -385,14 +740,40 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
       const fs = cs - selection.extrasBefore, fe = ce + selection.extrasAfter
       if (hIdx < fs || hIdx > fe) return null
 
-      // Primera hora del rango completo = pre-montaje (extra+pre si hay extras, pre si no)
-      if (hIdx === fs) return selection.extrasBefore > 0 ? "extra-pre" : "pre"
-      // Última hora del rango completo = post-montaje (extra+post si hay extras, post si no)
-      if (hIdx === fe) return selection.extrasAfter > 0 ? "extra-post" : "post"
-      // Horas extra intermedias (entre extra-pre y el core, o entre core y extra-post)
-      if (hIdx > fs && hIdx < cs) return "extra"
-      if (hIdx > ce && hIdx < fe) return "extra"
-      // Todo lo demás entre pre y post = evento (incluye old pre/post absorbidos)
+      const preH = selection.preHours ?? 1, postH = selection.postHours ?? 1
+
+      // Calcular extras con prioridad al lado más extendido
+      const leftExt = Math.max(0, selection.extrasBefore)
+      const rightExt = Math.max(0, selection.extrasAfter)
+      const rawInner = fe - fs - 1 // celdas internas con pre=1, post=1
+      const rawTotalExtras = Math.max(0, rawInner - MAX_EVENT_HOURS)
+      const { leftExtras: rawLE, rightExtras: rawRE } = calcSideExtras(leftExt, rightExt, rawTotalExtras)
+
+      // Posiciones absolutas de extras: izq pegadas a fs+1, der pegadas a fe-1
+      const isExtraPos = (idx: number) => {
+        const pLeft = idx - fs        // 1-based desde fs
+        const pRight = fe - idx       // 1-based desde fe
+        if (rawLE > 0 && pLeft >= 1 && pLeft <= rawLE) return true
+        if (rawRE > 0 && pRight >= 1 && pRight <= rawRE) return true
+        return false
+      }
+
+      // Bloque PRE
+      if (hIdx < fs + preH) return isExtraPos(hIdx) ? "extra-pre" : "pre"
+      // Bloque POST
+      if (hIdx > fe - postH) return isExtraPos(hIdx) ? "extra-post" : "post"
+
+      // Celdas internas entre bloques PRE y POST
+      const innerStart = fs + preH
+      const innerEnd = fe - postH
+      const totalInner = innerEnd - innerStart + 1
+      if (totalInner <= MAX_EVENT_HOURS) return "event"
+
+      // Extras en zona interna
+      const posFromLeft = hIdx - fs
+      const posFromRight = fe - hIdx
+      if (rawLE > 0 && posFromLeft >= 1 && posFromLeft <= rawLE) return "extra"
+      if (rawRE > 0 && posFromRight >= 1 && posFromRight <= rawRE) return "extra"
       return "event"
     }
     if (hoverBlock && hoverBlock.salonId === sId) {
@@ -425,15 +806,15 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
   }
 
   return (
-    <table className="w-full border-collapse text-[11px]">
+    <table className="w-full border-collapse text-[11px] table-fixed">
       <thead className="sticky top-0 z-10"><tr className="bg-blue-50">
-        <th className="text-left p-2 font-semibold text-blue-900 border-b border-r border-blue-200 min-w-[110px] sticky left-0 bg-blue-50 z-20">Salón</th>
-        {HOURS.map((h) => <th key={h.value} className="text-center p-1.5 font-medium text-blue-700 border-b border-r border-blue-100 min-w-[56px] whitespace-nowrap">{h.label}</th>)}
+        <th className="text-left p-2 font-semibold text-blue-900 border-b border-r border-blue-200 w-[100px] sticky left-0 bg-blue-50 z-20">Salón</th>
+        {HOURS.map((h) => <th key={h.value} className="text-center p-1 font-medium text-blue-700 border-b border-r border-blue-100 whitespace-nowrap text-[10px]">{h.label}</th>)}
       </tr></thead>
       <tbody>
         {salones.map((salon) => (
           <tr key={salon.value} className="group hover:bg-blue-50/20">
-            <td className="p-2 font-semibold text-gray-800 border-b border-r border-blue-100 sticky left-0 bg-white group-hover:bg-blue-50/20 z-10 truncate max-w-[130px]">{salon.text}</td>
+            <td className="p-2 font-semibold text-gray-800 border-b border-r border-blue-100 sticky left-0 bg-white group-hover:bg-blue-50/20 z-10 truncate w-[100px]">{salon.text}</td>
             {HOURS.map((h, hIdx) => {
               const evts = getEventsForHourCell(salon.value, dateStr, h.hour24)
               const hasRes = hourHasRes(salon.value, dateStr, h.hour24)
@@ -444,6 +825,11 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
 
               const isLeftEdge = isSalonSel && hIdx === selFullStart
               const isRightEdge = isSalonSel && hIdx === selFullEnd
+              // Bordes interiores de PRE y POST para flechas de extensión de montaje
+              const preH = selection?.preHours ?? 1
+              const postH = selection?.postHours ?? 1
+              const isPreInnerEdge = isSalonSel && (ct === "pre" || ct === "extra-pre") && hIdx === selFullStart + preH - 1
+              const isPostInnerEdge = isSalonSel && (ct === "post" || ct === "extra-post") && hIdx === selFullEnd - postH + 1
 
               let bg = "", bd = ""
               switch (ct) {
@@ -482,8 +868,8 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
                   }}
                   onMouseLeave={() => { if (!dragging) setHoverBlock(null) }}
                   title={
-                    ct === "extra-pre" ? "Hora extra + Pre-Montaje (clic derecho para quitar)"
-                    : ct === "extra-post" ? "Hora extra + Post-Montaje (clic derecho para quitar)"
+                    ct === "extra-pre" ? "Hora extra + Pre-Montaje"
+                    : ct === "extra-post" ? "Hora extra + Post-Montaje"
                     : ct === "extra" ? "Hora extra (clic derecho para quitar)"
                     : ct === "pre" || ct === "hover-pre" ? "Pre-Montaje (clic derecho para quitar)"
                     : ct === "post" || ct === "hover-post" ? "Post-Montaje (clic derecho para quitar)"
@@ -501,7 +887,8 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
                     const insetR = pos === "end" || pos === "single" ? "right-0.5" : "right-0"
                     const showLabel = pos === "start" || pos === "single"
                     return (
-                      <div className={`absolute top-1 bottom-1 ${insetL} ${insetR} ${roundL} ${roundR} ${getEventBarColor(primary)} ${hasRes ? "opacity-85" : "opacity-50"}`}>
+                      <div className={`absolute top-1 bottom-1 ${insetL} ${insetR} ${roundL} ${roundR} ${getEventBarColor(primary)} ${hasRes ? "opacity-85" : "opacity-50"} cursor-pointer hover:opacity-100 transition-opacity`}
+                        onClick={(e) => { e.stopPropagation(); onEventClick(primary) }}>
                         {showLabel && (
                           <div className="absolute inset-0 flex items-center pl-1.5">
                             <span className={`text-[9px] font-bold truncate ${hasRes ? "text-white" : "text-amber-900"}`}>{primary.nombreevento?.slice(0, 12)}</span>
@@ -511,11 +898,53 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
                     )
                   })()}
 
-                  {/* Labels */}
-                  {(ct === "pre" || ct === "hover-pre") && !primary && <div className="absolute inset-0 flex items-center justify-center"><span className="text-[8px] font-bold text-purple-700">PRE</span></div>}
-                  {(ct === "post" || ct === "hover-post") && !primary && <div className="absolute inset-0 flex items-center justify-center"><span className="text-[8px] font-bold text-purple-700">POST</span></div>}
-                  {ct === "extra-pre" && <div className="absolute inset-0 flex flex-col items-center justify-center leading-none"><span className="text-[7px] font-bold text-teal-700">EXTRA</span><span className="text-[7px] font-bold text-purple-700">+PRE</span></div>}
-                  {ct === "extra-post" && <div className="absolute inset-0 flex flex-col items-center justify-center leading-none"><span className="text-[7px] font-bold text-teal-700">EXTRA</span><span className="text-[7px] font-bold text-purple-700">+POST</span></div>}
+                  {/* Labels + handles arrastrables de montaje */}
+                  {(ct === "pre" || ct === "hover-pre") && !primary && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-[8px] font-bold text-purple-700">PRE</span>
+                      {isPreInnerEdge && ct === "pre" && (
+                        <div className="absolute right-0 top-0 bottom-0 w-3 flex items-center justify-center cursor-ew-resize z-20 group/handle hover:bg-purple-400/30 rounded-r"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startDrag("pre", hIdx) }}>
+                          <div className="w-1 h-5 rounded-full bg-purple-600 group-hover/handle:bg-purple-800 group-hover/handle:w-1.5 transition-all shadow-sm" />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {ct === "extra-pre" && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
+                      <span className="text-[7px] font-bold text-teal-700">EXTRA</span>
+                      <span className="text-[7px] font-bold text-purple-700">+PRE</span>
+                      {isPreInnerEdge && (
+                        <div className="absolute right-0 top-0 bottom-0 w-3 flex items-center justify-center cursor-ew-resize z-20 group/handle hover:bg-purple-400/30 rounded-r"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startDrag("pre", hIdx) }}>
+                          <div className="w-1 h-5 rounded-full bg-purple-600 group-hover/handle:bg-purple-800 group-hover/handle:w-1.5 transition-all shadow-sm" />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {(ct === "post" || ct === "hover-post") && !primary && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      {isPostInnerEdge && ct === "post" && (
+                        <div className="absolute left-0 top-0 bottom-0 w-3 flex items-center justify-center cursor-ew-resize z-20 group/handle hover:bg-purple-400/30 rounded-l"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startDrag("post", hIdx) }}>
+                          <div className="w-1 h-5 rounded-full bg-purple-600 group-hover/handle:bg-purple-800 group-hover/handle:w-1.5 transition-all shadow-sm" />
+                        </div>
+                      )}
+                      <span className="text-[8px] font-bold text-purple-700">POST</span>
+                    </div>
+                  )}
+                  {ct === "extra-post" && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
+                      {isPostInnerEdge && (
+                        <div className="absolute left-0 top-0 bottom-0 w-3 flex items-center justify-center cursor-ew-resize z-20 group/handle hover:bg-purple-400/30 rounded-l"
+                          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startDrag("post", hIdx) }}>
+                          <div className="w-1 h-5 rounded-full bg-purple-600 group-hover/handle:bg-purple-800 group-hover/handle:w-1.5 transition-all shadow-sm" />
+                        </div>
+                      )}
+                      <span className="text-[7px] font-bold text-teal-700">EXTRA</span>
+                      <span className="text-[7px] font-bold text-purple-700">+POST</span>
+                    </div>
+                  )}
                   {ct === "extra" && <div className="absolute inset-0 flex items-center justify-center"><span className="text-[8px] font-bold text-teal-700">EXTRA</span></div>}
                   {(ct === "event" || ct === "hover-event") && !primary && <div className="absolute inset-0 flex items-center justify-center"><div className="w-1.5 h-1.5 rounded-full bg-blue-500 opacity-50" /></div>}
 
@@ -547,7 +976,7 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
 /* ==================================================
   Week View — with day range selection + drag handles
 ================================================== */
-function WeekView({ days, salones, getEventsForCell, onDayClick, onRangeClick, daySel, dayDragging, startDayDrag, onDayDragMove, onClearDaySel, isCellSel, isToday, isPast, hoveredCell, setHoveredCell }: {
+function WeekView({ days, salones, getEventsForCell, onDayClick, onRangeClick, daySel, dayDragging, startDayDrag, onDayDragMove, onClearDaySel, isCellSel, isToday, isPast, hoveredCell, setHoveredCell, onEventClick }: {
   days: Date[]; salones: ddlItem[]; getEventsForCell: (s: string, d: string) => CalendarEvent[]
   onDayClick: (d: Date, s: string) => void
   onRangeClick: () => void
@@ -558,6 +987,7 @@ function WeekView({ days, salones, getEventsForCell, onDayClick, onRangeClick, d
   onClearDaySel: () => void
   isCellSel: (s: string, d: string) => boolean
   isToday: (d: Date) => boolean; isPast: (d: Date) => boolean; hoveredCell: string | null; setHoveredCell: (v: string | null) => void
+  onEventClick: (ev: CalendarEvent) => void
 }) {
   // Compute day selection range
   function getDayCellType(salonId: string, dateStr: string, colIdx: number): "selected" | "range" | null {
@@ -585,14 +1015,14 @@ function WeekView({ days, salones, getEventsForCell, onDayClick, onRangeClick, d
   }
 
   return (
-    <table className="w-full border-collapse text-[11px]">
+    <table className="w-full border-collapse text-[11px] table-fixed">
       <thead className="sticky top-0 z-10"><tr className="bg-blue-50">
-        <th className="text-left p-2 font-semibold text-blue-900 border-b border-r border-blue-200 min-w-[110px] sticky left-0 bg-blue-50 z-20">Salón</th>
-        {days.map((d) => { const t = isToday(d); return <th key={toDateStr(d)} className={`text-center p-2 border-b border-r border-blue-100 min-w-[100px] ${t ? "bg-blue-600 text-white" : "text-blue-700"}`}><div className="text-[10px] uppercase tracking-wide">{DAYS_ES[d.getDay()]}</div><div className={`text-base font-bold ${t ? "text-white" : "text-blue-900"}`}>{d.getDate()}</div></th> })}
+        <th className="text-left p-2 font-semibold text-blue-900 border-b border-r border-blue-200 w-[100px] sticky left-0 bg-blue-50 z-20">Salón</th>
+        {days.map((d) => { const t = isToday(d); return <th key={toDateStr(d)} className={`text-center p-2 border-b border-r border-blue-100 ${t ? "bg-blue-600 text-white" : "text-blue-700"}`}><div className="text-[10px] uppercase tracking-wide">{DAYS_ES[d.getDay()]}</div><div className={`text-base font-bold ${t ? "text-white" : "text-blue-900"}`}>{d.getDate()}</div></th> })}
       </tr></thead>
       <tbody>{salones.map((salon) => (
         <tr key={salon.value} className="group">
-          <td className="p-2 font-semibold text-gray-800 border-b border-r border-blue-100 sticky left-0 bg-white group-hover:bg-blue-50/30 z-10 truncate max-w-[130px]">{salon.text}</td>
+          <td className="p-2 font-semibold text-gray-800 border-b border-r border-blue-100 sticky left-0 bg-white group-hover:bg-blue-50/30 z-10 truncate w-[100px]">{salon.text}</td>
           {days.map((d, colIdx) => {
             const ds = toDateStr(d), evts = getEventsForCell(salon.value, ds)
             const res = evts.filter(e => e.tipo === "reservacion"), cot = evts.filter(e => e.tipo === "cotizacion")
@@ -621,9 +1051,9 @@ function WeekView({ days, salones, getEventsForCell, onDayClick, onRangeClick, d
               onMouseLeave={() => { if (!dayDragging) setHoveredCell(null) }}>
 
               {/* Events */}
-              {res.slice(0, 2).map(r => <div key={`r-${r.id}`} className="rounded px-1.5 py-0.5 mb-0.5 border text-[10px] leading-tight truncate bg-purple-100 border-purple-400 text-purple-900"><div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-purple-900 flex-shrink-0" /><span className="font-semibold truncate">{r.nombreevento?.slice(0, 10)}</span></div><div className="text-[9px] text-purple-600 opacity-70">{r.horainicio?.slice(0, 5)} – {r.horafin?.slice(0, 5)}</div></div>)}
+              {res.slice(0, 2).map(r => <div key={`r-${r.id}`} className="rounded px-1.5 py-0.5 mb-0.5 border text-[10px] leading-tight truncate bg-purple-100 border-purple-400 text-purple-900 cursor-pointer hover:bg-purple-200 transition-colors" onClick={(e) => { e.stopPropagation(); onEventClick(r) }}><div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-purple-900 flex-shrink-0" /><span className="font-semibold truncate">{r.nombreevento?.slice(0, 10)}</span></div><div className="text-[9px] text-purple-600 opacity-70">{r.horainicio?.slice(0, 5)} – {r.horafin?.slice(0, 5)}</div></div>)}
               {res.length > 2 && <div className="text-[9px] text-purple-700 pl-1">+{res.length - 2}</div>}
-              {cot.slice(0, 2).map(c => <div key={`c-${c.id}`} className="rounded px-1.5 py-0.5 mb-0.5 border text-[10px] leading-tight truncate bg-amber-50 border-amber-200 text-amber-800"><div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" /><span className="font-semibold truncate">{c.nombreevento?.slice(0, 10)}</span></div><div className="text-[9px] text-amber-600 opacity-70">{c.horainicio?.slice(0, 5)} – {c.horafin?.slice(0, 5)}</div></div>)}
+              {cot.slice(0, 2).map(c => <div key={`c-${c.id}`} className="rounded px-1.5 py-0.5 mb-0.5 border text-[10px] leading-tight truncate bg-amber-50 border-amber-200 text-amber-800 cursor-pointer hover:bg-amber-100 transition-colors" onClick={(e) => { e.stopPropagation(); onEventClick(c) }}><div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" /><span className="font-semibold truncate">{c.nombreevento?.slice(0, 10)}</span></div><div className="text-[9px] text-amber-600 opacity-70">{c.horainicio?.slice(0, 5)} – {c.horafin?.slice(0, 5)}</div></div>)}
               {cot.length > 2 && <div className="text-[9px] text-amber-500 pl-1">+{cot.length - 2}</div>}
               {evts.length === 0 && !past && !isInRange && <div className="h-full flex items-center justify-center opacity-0 group-hover:opacity-30"><span className="text-[10px] text-blue-400">Disponible</span></div>}
 
@@ -685,12 +1115,12 @@ function MonthView({ year, salones, events, onMonthClick }: {
   const isCurrentMonth = (m: number) => year === currentYear && m === currentMonth
 
   return (
-    <table className="w-full border-collapse text-[11px]">
+    <table className="w-full border-collapse text-[11px] table-fixed">
       <thead className="sticky top-0 z-10">
         <tr className="bg-blue-50">
-          <th className="text-left p-2 font-semibold text-blue-900 border-b border-r border-blue-200 min-w-[110px] sticky left-0 bg-blue-50 z-20">Salón</th>
+          <th className="text-left p-2 font-semibold text-blue-900 border-b border-r border-blue-200 w-[100px] sticky left-0 bg-blue-50 z-20">Salón</th>
           {MONTHS_SHORT.map((m, i) => (
-            <th key={i} className={`text-center p-2 font-medium border-b border-r border-blue-100 min-w-[70px] ${
+            <th key={i} className={`text-center p-2 font-medium border-b border-r border-blue-100 ${
               isCurrentMonth(i) ? "bg-blue-600 text-white" : isPastMonth(i) ? "text-gray-400" : "text-blue-700"
             }`}>
               {m}
@@ -701,7 +1131,7 @@ function MonthView({ year, salones, events, onMonthClick }: {
       <tbody>
         {salones.map((salon) => (
           <tr key={salon.value} className="group">
-            <td className="p-2 font-semibold text-gray-800 border-b border-r border-blue-100 sticky left-0 bg-white group-hover:bg-blue-50/30 z-10 truncate max-w-[130px]">
+            <td className="p-2 font-semibold text-gray-800 border-b border-r border-blue-100 sticky left-0 bg-white group-hover:bg-blue-50/30 z-10 truncate w-[100px]">
               {salon.text}
             </td>
             {MONTHS_SHORT.map((_, month) => {
@@ -745,5 +1175,69 @@ function MonthView({ year, salones, events, onMonthClick }: {
         ))}
       </tbody>
     </table>
+  )
+}
+
+/* ==================================================
+  Event Detail Modal
+================================================== */
+function EventDetailModal({ event, onClose }: { event: CalendarEvent | null; onClose: () => void }) {
+  if (!event) return null
+  const isRes = event.tipo === "reservacion"
+  const statusColor = (() => {
+    const s = event.estatus?.toLowerCase() || ""
+    if (s.includes("confirm")) return "bg-green-100 text-green-800 border-green-300"
+    if (s.includes("cancel")) return "bg-red-100 text-red-800 border-red-300"
+    if (s.includes("pendiente")) return "bg-yellow-100 text-yellow-800 border-yellow-300"
+    return "bg-gray-100 text-gray-700 border-gray-300"
+  })()
+
+  return (
+    <Dialog open={!!event} onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className="sm:max-w-[360px] p-0 gap-0 overflow-hidden">
+        <div className={`px-4 py-3 ${isRes ? "bg-purple-900" : "bg-amber-400"}`}>
+          <DialogHeader>
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${isRes ? "bg-white" : "bg-amber-900"}`} />
+              <span className={`text-[10px] font-semibold uppercase tracking-wider ${isRes ? "text-purple-200" : "text-amber-800"}`}>
+                {isRes ? "Reservación" : "Cotización"}
+              </span>
+            </div>
+            <DialogTitle className={`text-base font-bold mt-1 ${isRes ? "text-white" : "text-amber-900"}`}>
+              {event.nombreevento}
+            </DialogTitle>
+          </DialogHeader>
+        </div>
+        <div className="px-4 py-3 space-y-3">
+          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${statusColor}`}>
+            {event.estatus || "Sin estatus"}
+          </span>
+          <div className="space-y-2.5">
+            <div className="flex items-center gap-2.5">
+              <MapPin className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+              <div><div className="text-[10px] text-gray-400 uppercase">Salón</div><div className="text-sm font-medium text-gray-800">{event.salonName}</div></div>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <User className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+              <div><div className="text-[10px] text-gray-400 uppercase">Cliente</div><div className="text-sm font-medium text-gray-800">{event.cliente || "—"}</div></div>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <Calendar className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+              <div><div className="text-[10px] text-gray-400 uppercase">Fecha</div><div className="text-sm font-medium text-gray-800">{event.fechainicio === event.fechafin ? event.fechainicio : `${event.fechainicio} → ${event.fechafin}`}</div></div>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <Clock className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+              <div><div className="text-[10px] text-gray-400 uppercase">Horario</div><div className="text-sm font-medium text-gray-800">{event.horainicio?.slice(0, 5) || "—"} – {event.horafin?.slice(0, 5) || "—"}</div></div>
+            </div>
+            {event.numeroinvitados > 0 && (
+              <div className="flex items-center gap-2.5">
+                <Users className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                <div><div className="text-[10px] text-gray-400 uppercase">Invitados</div><div className="text-sm font-medium text-gray-800">{event.numeroinvitados}</div></div>
+              </div>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
