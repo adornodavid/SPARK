@@ -6,46 +6,49 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Progress } from "@/components/ui/progress"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Label } from "@/components/ui/label"
 import { ArrowLeft, Play, Square, Search, RefreshCw, Database, Cloud } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
+import type { ErrorDetalle, OrganizationRow } from "@/app/actions/pipedrive"
 import {
   extraerLoteOrganizations,
   obtenerOrganizationsSupabase,
   conteoOrganizationsSupabase,
+  conteoPipedriveOrganizations,
   verificarPipedriveOrganizations,
 } from "@/app/actions/pipedrive"
-import type { OrganizationRow } from "@/app/actions/pipedrive"
 
 export default function OrganizationsPage() {
   const router = useRouter()
   const cancelRef = useRef(false)
 
-  // Estado tabla
-  const [organizations, setOrganizations] = useState<OrganizationRow[]>([])
-  const [totalOrganizations, setTotalOrganizations] = useState(0)
+  const [items, setItems] = useState<OrganizationRow[]>([])
+  const [total, setTotal] = useState(0)
   const [pagina, setPagina] = useState(1)
   const [busqueda, setBusqueda] = useState("")
   const [loadingTabla, setLoadingTabla] = useState(true)
   const porPagina = 20
 
-  // Estado extracción
   const [extrayendo, setExtrayendo] = useState(false)
   const [progreso, setProgreso] = useState({ insertados: 0, omitidos: 0, errores: 0, procesados: 0, loteActual: 0 })
   const [conteoSupabase, setConteoSupabase] = useState(0)
   const [pipedriveConectado, setPipedriveConectado] = useState<boolean | null>(null)
+  const [conteoPipe, setConteoPipe] = useState<number | null>(null)
+  const [loadingConteoPipe, setLoadingConteoPipe] = useState(false)
   const [loadingConteos, setLoadingConteos] = useState(true)
+  const [modoCompleto, setModoCompleto] = useState(false)
+  const [erroresDetalle, setErroresDetalle] = useState<ErrorDetalle[]>([])
 
-  // Cargar tabla
   const cargarTabla = useCallback(async () => {
     setLoadingTabla(true)
     const result = await obtenerOrganizationsSupabase(pagina, porPagina, busqueda)
-    setOrganizations(result.data)
-    setTotalOrganizations(result.total)
+    setItems(result.data)
+    setTotal(result.total)
     setLoadingTabla(false)
   }, [pagina, busqueda])
 
-  // Cargar conteos iniciales
   const cargarConteos = useCallback(async () => {
     setLoadingConteos(true)
     const [supa, pipe] = await Promise.all([
@@ -57,19 +60,21 @@ export default function OrganizationsPage() {
     setLoadingConteos(false)
   }, [])
 
-  useEffect(() => {
-    cargarTabla()
-  }, [cargarTabla])
+  async function validarConteoPipedrive() {
+    setLoadingConteoPipe(true)
+    const t = await conteoPipedriveOrganizations()
+    setConteoPipe(t)
+    setLoadingConteoPipe(false)
+  }
 
-  useEffect(() => {
-    cargarConteos()
-  }, [cargarConteos])
+  useEffect(() => { cargarTabla() }, [cargarTabla])
+  useEffect(() => { cargarConteos() }, [cargarConteos])
 
-  // Iniciar extracción por lotes
   async function iniciarExtraccion() {
     cancelRef.current = false
     setExtrayendo(true)
     setProgreso({ insertados: 0, omitidos: 0, errores: 0, procesados: 0, loteActual: 0 })
+    setErroresDetalle([])
 
     try {
       let start = 0
@@ -84,10 +89,8 @@ export default function OrganizationsPage() {
           toast.info(`Extracción detenida. ${totalInsertados} insertados, ${totalOmitidos} omitidos.`)
           break
         }
-
         lote++
         setProgreso(prev => ({ ...prev, loteActual: lote }))
-
         await new Promise(r => setTimeout(r, 50))
         if (cancelRef.current) {
           toast.info(`Extracción detenida. ${totalInsertados} insertados, ${totalOmitidos} omitidos.`)
@@ -95,14 +98,9 @@ export default function OrganizationsPage() {
         }
 
         const resultado = await extraerLoteOrganizations(start)
-
-        if (!resultado.success) {
-          toast.error(resultado.mensaje)
-          break
-        }
-
+        if (!resultado.success) { toast.error(resultado.mensaje); break }
         if (resultado.total_lote === 0 && !resultado.hay_mas) {
-          toast.success("No hay organizaciones para extraer desde Pipedrive.")
+          toast.success("No hay organizations para extraer desde Pipedrive.")
           break
         }
 
@@ -111,19 +109,21 @@ export default function OrganizationsPage() {
         totalErrores += resultado.errores
         totalProcesados += resultado.total_lote
 
-        setProgreso({
-          insertados: totalInsertados,
-          omitidos: totalOmitidos,
-          errores: totalErrores,
-          procesados: totalProcesados,
-          loteActual: lote,
-        })
+        if (resultado.erroresDetalle.length > 0) {
+          setErroresDetalle(prev => [...prev, ...resultado.erroresDetalle])
+        }
+
+        if (!modoCompleto && resultado.insertados === 0 && resultado.omitidos === resultado.total_lote) {
+          toast.success(`Extracción completada. ${totalInsertados} nuevos insertados.`)
+          break
+        }
+
+        setProgreso({ insertados: totalInsertados, omitidos: totalOmitidos, errores: totalErrores, procesados: totalProcesados, loteActual: lote })
 
         if (!resultado.hay_mas) {
           toast.success(`Extracción completada. ${totalInsertados} insertados, ${totalOmitidos} ya existían, ${totalErrores} errores.`)
           break
         }
-
         start = resultado.next_start
       }
     } catch (error: any) {
@@ -135,25 +135,17 @@ export default function OrganizationsPage() {
     cargarTabla()
   }
 
-  // Detener extracción
   function detenerExtraccion() {
     cancelRef.current = true
     toast.info("Deteniendo... esperando a que termine el lote actual.")
   }
 
-  // Paginación
-  const totalPaginas = Math.ceil(totalOrganizations / porPagina)
-
-  function handleBuscar() {
-    setPagina(1)
-    cargarTabla()
-  }
-
+  const totalPaginas = Math.ceil(total / porPagina)
+  function handleBuscar() { setPagina(1); cargarTabla() }
   const porcentajeProgreso = extrayendo ? Math.min(progreso.loteActual * 2, 95) : (progreso.procesados > 0 ? 100 : 0)
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <div className="space-y-6 w-full max-w-full overflow-x-hidden">
       <div className="flex items-center gap-4">
         <Button variant="outline" size="icon" onClick={() => router.push("/admin/extraccion-pipedrive")}>
           <ArrowLeft className="h-4 w-4" />
@@ -164,86 +156,76 @@ export default function OrganizationsPage() {
         </div>
       </div>
 
-      {/* Conteos */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card>
+      <div className="flex flex-wrap gap-4">
+        <Card className="w-fit">
           <CardContent className="flex items-center gap-4 py-4">
-            <div className="rounded-full bg-blue-500/10 p-3">
-              <Cloud className="h-5 w-5 text-blue-500" />
-            </div>
+            <div className="rounded-full bg-blue-500/10 p-3 shrink-0"><Cloud className="h-5 w-5 text-blue-500" /></div>
             <div>
               <p className="text-sm text-muted-foreground">Pipedrive API</p>
-              <p className="text-2xl font-bold">
-                {loadingConteos ? "..." : (pipedriveConectado ? "Conectado" : "Error")}
-              </p>
+              <p className="text-2xl font-bold">{loadingConteos ? "..." : (pipedriveConectado ? "Conectado" : "Error")}</p>
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="w-fit">
           <CardContent className="flex items-center gap-4 py-4">
-            <div className="rounded-full bg-emerald-500/10 p-3">
-              <Database className="h-5 w-5 text-emerald-500" />
+            <div className="rounded-full bg-blue-500/10 p-3 shrink-0"><Cloud className="h-5 w-5 text-blue-500" /></div>
+            <div>
+              <p className="text-sm text-muted-foreground">Organizations en Pipedrive</p>
+              <div className="flex items-center gap-2">
+                <p className="text-2xl font-bold">{loadingConteoPipe ? "..." : (conteoPipe !== null ? conteoPipe.toLocaleString() : "0")}</p>
+                {conteoPipe === null && !loadingConteoPipe && (
+                  <Button variant="outline" size="sm" className="h-7 text-xs" onClick={validarConteoPipedrive}>Validar</Button>
+                )}
+              </div>
             </div>
+          </CardContent>
+        </Card>
+        <Card className="w-fit">
+          <CardContent className="flex items-center gap-4 py-4">
+            <div className="rounded-full bg-emerald-500/10 p-3 shrink-0"><Database className="h-5 w-5 text-emerald-500" /></div>
             <div>
               <p className="text-sm text-muted-foreground">Organizations en Supabase</p>
-              <p className="text-2xl font-bold">
-                {loadingConteos ? "..." : conteoSupabase}
-              </p>
+              <p className="text-2xl font-bold">{loadingConteos ? "..." : conteoSupabase.toLocaleString()}</p>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Sección Extracción */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Extracción desde Pipedrive</CardTitle>
-        </CardHeader>
+      <Card className="w-fit">
+        <CardHeader><CardTitle>Extracción desde Pipedrive</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center gap-3">
-            {!extrayendo ? (
-              <Button onClick={iniciarExtraccion} className="gap-2">
-                <Play className="h-4 w-4" />
-                Iniciar Extracción
-              </Button>
-            ) : (
-              <Button onClick={detenerExtraccion} variant="destructive" className="gap-2">
-                <Square className="h-4 w-4" />
-                Detener
-              </Button>
-            )}
-            {!extrayendo && conteoSupabase > 0 && (
-              <p className="text-sm text-muted-foreground">
-                Se omitirán los {conteoSupabase} registros que ya existen en Supabase
-              </p>
-            )}
+          <div className="space-y-3">
+            <div className="flex items-center gap-4 text-sm">
+              <div className="flex items-center gap-2">
+                <Checkbox id="modo-rapido" checked={!modoCompleto} onCheckedChange={() => setModoCompleto(false)} disabled={extrayendo} />
+                <Label htmlFor="modo-rapido" className="text-sm font-normal cursor-pointer">Solo nuevos (corta al no encontrar nuevos)</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox id="modo-completo" checked={modoCompleto} onCheckedChange={() => setModoCompleto(true)} disabled={extrayendo} />
+                <Label htmlFor="modo-completo" className="text-sm font-normal cursor-pointer">Recorrido completo</Label>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              {!extrayendo ? (
+                <Button onClick={iniciarExtraccion} className="gap-2"><Play className="h-4 w-4" />Iniciar Extracción</Button>
+              ) : (
+                <Button onClick={detenerExtraccion} variant="destructive" className="gap-2"><Square className="h-4 w-4" />Detener</Button>
+              )}
+              {!extrayendo && conteoSupabase > 0 && (
+                <p className="text-sm text-muted-foreground">Se omitirán los {conteoSupabase} registros que ya existen en Supabase</p>
+              )}
+            </div>
           </div>
 
-          {/* Progreso */}
           {(extrayendo || progreso.procesados > 0) && (
             <div className="space-y-3">
               <Progress value={porcentajeProgreso} />
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
-                <div>
-                  <p className="text-muted-foreground">Procesados</p>
-                  <p className="font-semibold">{progreso.procesados.toLocaleString()}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Insertados</p>
-                  <p className="font-semibold text-emerald-600">{progreso.insertados}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Omitidos</p>
-                  <p className="font-semibold text-amber-600">{progreso.omitidos}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Errores</p>
-                  <p className="font-semibold text-red-600">{progreso.errores}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Lote</p>
-                  <p className="font-semibold">{progreso.loteActual}</p>
-                </div>
+                <div><p className="text-muted-foreground">Procesados</p><p className="font-semibold">{progreso.procesados.toLocaleString()}</p></div>
+                <div><p className="text-muted-foreground">Insertados</p><p className="font-semibold text-emerald-600">{progreso.insertados}</p></div>
+                <div><p className="text-muted-foreground">Omitidos</p><p className="font-semibold text-amber-600">{progreso.omitidos}</p></div>
+                <div><p className="text-muted-foreground">Errores</p><p className="font-semibold text-red-600">{progreso.errores}</p></div>
+                <div><p className="text-muted-foreground">Lote</p><p className="font-semibold">{progreso.loteActual}</p></div>
               </div>
               {extrayendo && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -253,82 +235,75 @@ export default function OrganizationsPage() {
               )}
             </div>
           )}
+
+          {erroresDetalle.length > 0 && (
+            <div className="border border-red-200 rounded-lg p-4 bg-red-50 dark:bg-red-950/30 dark:border-red-800 space-y-2">
+              <p className="text-sm font-semibold text-red-700 dark:text-red-400">Errores ({erroresDetalle.length})</p>
+              <div className="max-h-48 overflow-y-auto space-y-1">
+                {erroresDetalle.map((err, i) => (
+                  <div key={i} className="text-xs text-red-600 dark:text-red-400 font-mono bg-white dark:bg-red-950/50 rounded px-2 py-1">
+                    <span className="font-semibold">PD #{err.pipedrive_id}</span>
+                    {err.nombre && <span> — {err.nombre}</span>}
+                    <span className="text-red-400 dark:text-red-500"> → {err.error}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* Tabla de Organizations */}
       <Card>
         <CardHeader>
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <CardTitle>Organizations en Supabase</CardTitle>
             <div className="flex items-center gap-2">
-              <Input
-                placeholder="Buscar por nombre o ciudad..."
-                value={busqueda}
-                onChange={(e) => setBusqueda(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleBuscar()}
-                className="w-64"
-              />
-              <Button variant="outline" size="icon" onClick={handleBuscar}>
-                <Search className="h-4 w-4" />
-              </Button>
-              <Button variant="outline" size="icon" onClick={cargarTabla}>
-                <RefreshCw className="h-4 w-4" />
-              </Button>
+              <Input placeholder="Buscar" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleBuscar()} className="w-64" />
+              <Button variant="outline" size="icon" onClick={handleBuscar}><Search className="h-4 w-4" /></Button>
+              <Button variant="outline" size="icon" onClick={cargarTabla}><RefreshCw className="h-4 w-4" /></Button>
             </div>
           </div>
         </CardHeader>
         <CardContent>
           {loadingTabla ? (
             <div className="flex items-center justify-center text-muted-foreground py-12">
-              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-foreground mr-3" />
-              Cargando...
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-foreground mr-3" />Cargando...
             </div>
           ) : (
             <>
-              <div className="rounded-xl border border-border/50 overflow-hidden">
-                <Table>
+              <div className="rounded-xl border border-border/50 overflow-x-auto">
+                <Table className="table-fixed w-full">
                   <TableHeader>
                     <TableRow className="border-border/50">
-                      <TableHead className="w-16">ID PD</TableHead>
+                      <TableHead className="w-14">Id</TableHead>
+                      <TableHead className="w-14">Pd</TableHead>
                       <TableHead>Nombre</TableHead>
+                      <TableHead>Propietario</TableHead>
                       <TableHead>Ciudad</TableHead>
                       <TableHead>País</TableHead>
-                      <TableHead className="text-center">Personas</TableHead>
-                      <TableHead className="text-center">Tratos Abiertos</TableHead>
-                      <TableHead className="text-center">Tratos Ganados</TableHead>
-                      <TableHead>Propietario</TableHead>
-                      <TableHead>Estatus</TableHead>
+                      <TableHead className="w-20">Personas</TableHead>
+                      <TableHead className="w-20">Estatus</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {organizations.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={9} className="text-center text-muted-foreground py-12">
-                          No hay organizaciones registradas
-                        </TableCell>
-                      </TableRow>
+                    {items.length === 0 ? (
+                      <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-12">No hay organizations registradas</TableCell></TableRow>
                     ) : (
-                      organizations.map((org) => (
-                        <TableRow key={org.id} className="border-border/50">
-                          <TableCell className="text-sm text-muted-foreground">{org.pipedrive_id}</TableCell>
-                          <TableCell className="font-medium">{org.nombre || "—"}</TableCell>
-                          <TableCell className="text-sm">{org.direccion_ciudad || "—"}</TableCell>
-                          <TableCell className="text-sm">{org.direccion_pais || "—"}</TableCell>
-                          <TableCell className="text-sm text-center">{org.personas_count}</TableCell>
-                          <TableCell className="text-sm text-center">{org.tratos_abiertos}</TableCell>
-                          <TableCell className="text-sm text-center">{org.tratos_ganados}</TableCell>
-                          <TableCell className="text-sm">{org.propietario_nombre || "—"}</TableCell>
+                      items.map((item) => (
+                        <TableRow key={item.id} className="border-border/50">
+                          <TableCell className="text-sm text-muted-foreground">{item.id}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">{item.pipedrive_id}</TableCell>
+                          <TableCell className="font-medium truncate">{item.nombre || "—"}</TableCell>
+                          <TableCell className="text-sm truncate">{item.propietario_nombre || "—"}</TableCell>
+                          <TableCell className="text-sm truncate">{item.direccion_ciudad || "—"}</TableCell>
+                          <TableCell className="text-sm truncate">{item.direccion_pais || "—"}</TableCell>
+                          <TableCell className="text-sm">{item.personas_count}</TableCell>
                           <TableCell>
-                            <span
-                              className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
-                                org.activo
-                                  ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800"
-                                  : "bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800"
-                              }`}
-                            >
-                              {org.activo ? "Activo" : "Inactivo"}
-                            </span>
+                            <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+                              item.activo
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800"
+                                : "bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800"
+                            }`}>{item.activo ? "Activo" : "Inactivo"}</span>
                           </TableCell>
                         </TableRow>
                       ))
@@ -337,32 +312,15 @@ export default function OrganizationsPage() {
                 </Table>
               </div>
 
-              {/* Paginación */}
               {totalPaginas > 1 && (
                 <div className="flex items-center justify-between mt-4">
                   <p className="text-sm text-muted-foreground">
-                    Mostrando {((pagina - 1) * porPagina) + 1}-{Math.min(pagina * porPagina, totalOrganizations)} de {totalOrganizations}
+                    Mostrando {((pagina - 1) * porPagina) + 1}-{Math.min(pagina * porPagina, total)} de {total}
                   </p>
                   <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={pagina <= 1}
-                      onClick={() => setPagina(pagina - 1)}
-                    >
-                      Anterior
-                    </Button>
-                    <span className="text-sm px-2">
-                      {pagina} / {totalPaginas}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={pagina >= totalPaginas}
-                      onClick={() => setPagina(pagina + 1)}
-                    >
-                      Siguiente
-                    </Button>
+                    <Button variant="outline" size="sm" disabled={pagina <= 1} onClick={() => setPagina(pagina - 1)}>Anterior</Button>
+                    <span className="text-sm px-2">{pagina} / {totalPaginas}</span>
+                    <Button variant="outline" size="sm" disabled={pagina >= totalPaginas} onClick={() => setPagina(pagina + 1)}>Siguiente</Button>
                   </div>
                 </div>
               )}

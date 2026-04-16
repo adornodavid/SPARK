@@ -69,6 +69,11 @@ const navItems = [
     icon: Users,
   },
   {
+    title: "Empresas",
+    href: "/empresas",
+    icon: Building2,
+  },
+  {
     title: "Eventos",
     href: "/cotizaciones",
     icon: FileText,

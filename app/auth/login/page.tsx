@@ -12,11 +12,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { AlertCircle, UserX, Lock, User } from "lucide-react"
+import { AlertCircle, UserX, Lock, User, Mail, CheckCircle2 } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
-import { loginUser } from "@/app/actions/auth"
+import { loginUser, solicitarRecuperacionPassword } from "@/app/actions/auth"
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
@@ -28,6 +28,41 @@ export default function LoginPage() {
   const [showInactiveUserModal, setShowInactiveUserModal] = useState(false)
   const [showCredentialsErrorModal, setShowCredentialsErrorModal] = useState(false)
   const [errorMessage, setErrorMessage] = useState("")
+
+  // Modal recuperar contraseña
+  const [showRecoverModal, setShowRecoverModal] = useState(false)
+  const [recoverEmail, setRecoverEmail] = useState("")
+  const [recoverLoading, setRecoverLoading] = useState(false)
+  const [recoverError, setRecoverError] = useState<string | null>(null)
+  const [recoverSuccess, setRecoverSuccess] = useState<string | null>(null)
+
+  function abrirModalRecuperar() {
+    setRecoverEmail("")
+    setRecoverError(null)
+    setRecoverSuccess(null)
+    setShowRecoverModal(true)
+  }
+
+  async function handleRecuperarSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setRecoverError(null)
+    setRecoverSuccess(null)
+
+    if (!recoverEmail.trim() || !recoverEmail.includes("@")) {
+      setRecoverError("Por favor ingresa un correo válido.")
+      return
+    }
+
+    setRecoverLoading(true)
+    const result = await solicitarRecuperacionPassword(recoverEmail.trim())
+    setRecoverLoading(false)
+
+    if (!result.success) {
+      setRecoverError(result.message || "No se pudo procesar la solicitud.")
+      return
+    }
+    setRecoverSuccess(result.message || "Te hemos enviado un correo con instrucciones.")
+  }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -120,12 +155,13 @@ export default function LoginPage() {
                       <Label htmlFor="password" className="text-sm font-medium">
                         Contrasena
                       </Label>
-                      <Link
-                        href="/auth/forgot-password"
+                      <button
+                        type="button"
+                        onClick={abrirModalRecuperar}
                         className="text-sm font-medium text-primary transition-colors hover:text-primary/80 hover:underline"
                       >
-                        Olvidaste tu contrasena?
-                      </Link>
+                        ¿Olvidaste tu contraseña? Da clic aquí
+                      </button>
                     </div>
                     <div className="relative">
                       <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
@@ -240,6 +276,69 @@ export default function LoginPage() {
           <DialogFooter className="sm:justify-center">
             <Button onClick={() => setShowCredentialsErrorModal(false)}>Intentar de nuevo</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Recuperar Contraseña */}
+      <Dialog open={showRecoverModal} onOpenChange={setShowRecoverModal}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+              {recoverSuccess ? (
+                <CheckCircle2 className="h-6 w-6 text-emerald-600" />
+              ) : (
+                <Mail className="h-6 w-6 text-primary" />
+              )}
+            </div>
+            <DialogTitle className="text-center">
+              {recoverSuccess ? "Correo enviado" : "Recuperar contraseña"}
+            </DialogTitle>
+            <DialogDescription className="text-center">
+              {recoverSuccess
+                ? recoverSuccess
+                : "Ingresa tu correo registrado y te enviaremos un enlace para restablecer tu contraseña."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {!recoverSuccess && (
+            <form onSubmit={handleRecuperarSubmit} className="flex flex-col gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="recoverEmail">Correo electrónico</Label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="recoverEmail"
+                    type="email"
+                    placeholder="tu@correo.com"
+                    value={recoverEmail}
+                    onChange={(e) => setRecoverEmail(e.target.value)}
+                    className="pl-9"
+                    autoFocus
+                    required
+                  />
+                </div>
+              </div>
+
+              {recoverError && (
+                <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{recoverError}</div>
+              )}
+
+              <DialogFooter className="sm:justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setShowRecoverModal(false)} disabled={recoverLoading}>
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={recoverLoading}>
+                  {recoverLoading ? "Enviando..." : "Enviar"}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+
+          {recoverSuccess && (
+            <DialogFooter className="sm:justify-center">
+              <Button onClick={() => setShowRecoverModal(false)}>Cerrar</Button>
+            </DialogFooter>
+          )}
         </DialogContent>
       </Dialog>
     </>

@@ -6,13 +6,17 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Progress } from "@/components/ui/progress"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Label } from "@/components/ui/label"
 import { ArrowLeft, Play, Square, Search, RefreshCw, Database, Cloud } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
+import type { ErrorDetalle } from "@/app/actions/pipedrive"
 import {
   extraerLotePersons,
   obtenerPersonsSupabase,
   conteoPersonsSupabase,
+  conteoPipedrive,
   verificarPipedrive,
 } from "@/app/actions/pipedrive"
 import type { PersonRow } from "@/app/actions/pipedrive"
@@ -34,7 +38,11 @@ export default function PersonsPage() {
   const [progreso, setProgreso] = useState({ insertados: 0, omitidos: 0, errores: 0, procesados: 0, loteActual: 0 })
   const [conteoSupabase, setConteoSupabase] = useState(0)
   const [pipedriveConectado, setPipedriveConectado] = useState<boolean | null>(null)
+  const [conteoPipe, setConteoPipe] = useState<number | null>(null)
+  const [loadingConteoPipe, setLoadingConteoPipe] = useState(false)
   const [loadingConteos, setLoadingConteos] = useState(true)
+  const [modoCompleto, setModoCompleto] = useState(false)
+  const [erroresDetalle, setErroresDetalle] = useState<ErrorDetalle[]>([])
 
   // Cargar tabla
   const cargarTabla = useCallback(async () => {
@@ -56,6 +64,13 @@ export default function PersonsPage() {
     setPipedriveConectado(pipe.conectado)
     setLoadingConteos(false)
   }, [])
+
+  async function validarConteoPipedrive() {
+    setLoadingConteoPipe(true)
+    const total = await conteoPipedrive()
+    setConteoPipe(total)
+    setLoadingConteoPipe(false)
+  }
 
   useEffect(() => {
     cargarTabla()
@@ -84,6 +99,7 @@ export default function PersonsPage() {
     cancelRef.current = false
     setExtrayendo(true)
     setProgreso({ insertados: 0, omitidos: 0, errores: 0, procesados: 0, loteActual: 0 })
+    setErroresDetalle([])
 
     try {
       let start = 0
@@ -127,6 +143,16 @@ export default function PersonsPage() {
         totalErrores += resultado.errores
         totalProcesados += resultado.total_lote
 
+        if (resultado.erroresDetalle.length > 0) {
+          setErroresDetalle(prev => [...prev, ...resultado.erroresDetalle])
+        }
+
+        // Si el lote completo fue de omitidos y estamos en modo rápido, parar
+        if (!modoCompleto && resultado.insertados === 0 && resultado.omitidos === resultado.total_lote) {
+          toast.success(`Extracción completada. ${totalInsertados} nuevos insertados. Se detectaron registros ya existentes y se detuvo.`)
+          break
+        }
+
         setProgreso({
           insertados: totalInsertados,
           omitidos: totalOmitidos,
@@ -169,7 +195,7 @@ export default function PersonsPage() {
   const porcentajeProgreso = extrayendo ? Math.min(progreso.loteActual * 2, 95) : (progreso.procesados > 0 ? 100 : 0)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full max-w-full overflow-x-hidden">
       {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="outline" size="icon" onClick={() => router.push("/admin/extraccion-pipedrive")}>
@@ -182,10 +208,10 @@ export default function PersonsPage() {
       </div>
 
       {/* Conteos */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card>
+      <div className="flex flex-wrap gap-4">
+        <Card className="w-fit">
           <CardContent className="flex items-center gap-4 py-4">
-            <div className="rounded-full bg-blue-500/10 p-3">
+            <div className="rounded-full bg-blue-500/10 p-3 shrink-0">
               <Cloud className="h-5 w-5 text-blue-500" />
             </div>
             <div>
@@ -196,15 +222,35 @@ export default function PersonsPage() {
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="w-fit">
           <CardContent className="flex items-center gap-4 py-4">
-            <div className="rounded-full bg-emerald-500/10 p-3">
+            <div className="rounded-full bg-blue-500/10 p-3 shrink-0">
+              <Cloud className="h-5 w-5 text-blue-500" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Persons en Pipedrive</p>
+              <div className="flex items-center gap-2">
+                <p className="text-2xl font-bold">
+                  {loadingConteoPipe ? "..." : (conteoPipe !== null ? conteoPipe.toLocaleString() : "0")}
+                </p>
+                {conteoPipe === null && !loadingConteoPipe && (
+                  <Button variant="outline" size="sm" className="h-7 text-xs" onClick={validarConteoPipedrive}>
+                    Validar
+                  </Button>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="w-fit">
+          <CardContent className="flex items-center gap-4 py-4">
+            <div className="rounded-full bg-emerald-500/10 p-3 shrink-0">
               <Database className="h-5 w-5 text-emerald-500" />
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Persons en Supabase</p>
               <p className="text-2xl font-bold">
-                {loadingConteos ? "..." : conteoSupabase}
+                {loadingConteos ? "..." : conteoSupabase.toLocaleString()}
               </p>
             </div>
           </CardContent>
@@ -212,28 +258,40 @@ export default function PersonsPage() {
       </div>
 
       {/* Sección Extracción */}
-      <Card>
+      <Card className="w-fit">
         <CardHeader>
           <CardTitle>Extracción desde Pipedrive</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center gap-3">
-            {!extrayendo ? (
-              <Button onClick={iniciarExtraccion} className="gap-2">
-                <Play className="h-4 w-4" />
-                Iniciar Extracción
-              </Button>
-            ) : (
-              <Button onClick={detenerExtraccion} variant="destructive" className="gap-2">
-                <Square className="h-4 w-4" />
-                Detener
-              </Button>
-            )}
-            {!extrayendo && conteoSupabase > 0 && (
-              <p className="text-sm text-muted-foreground">
-                Se omitirán los {conteoSupabase} registros que ya existen en Supabase
-              </p>
-            )}
+          <div className="space-y-3">
+            <div className="flex items-center gap-4 text-sm">
+              <div className="flex items-center gap-2">
+                <Checkbox id="modo-rapido" checked={!modoCompleto} onCheckedChange={() => setModoCompleto(false)} disabled={extrayendo} />
+                <Label htmlFor="modo-rapido" className="text-sm font-normal cursor-pointer">Solo nuevos (corta al no encontrar nuevos)</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox id="modo-completo" checked={modoCompleto} onCheckedChange={() => setModoCompleto(true)} disabled={extrayendo} />
+                <Label htmlFor="modo-completo" className="text-sm font-normal cursor-pointer">Recorrido completo</Label>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              {!extrayendo ? (
+                <Button onClick={iniciarExtraccion} className="gap-2">
+                  <Play className="h-4 w-4" />
+                  Iniciar Extracción
+                </Button>
+              ) : (
+                <Button onClick={detenerExtraccion} variant="destructive" className="gap-2">
+                  <Square className="h-4 w-4" />
+                  Detener
+                </Button>
+              )}
+              {!extrayendo && conteoSupabase > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  Se omitirán los {conteoSupabase} registros que ya existen en Supabase
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Progreso */}
@@ -270,6 +328,24 @@ export default function PersonsPage() {
               )}
             </div>
           )}
+
+          {/* Detalle de errores */}
+          {erroresDetalle.length > 0 && (
+            <div className="border border-red-200 rounded-lg p-4 bg-red-50 dark:bg-red-950/30 dark:border-red-800 space-y-2">
+              <p className="text-sm font-semibold text-red-700 dark:text-red-400">
+                Errores ({erroresDetalle.length})
+              </p>
+              <div className="max-h-48 overflow-y-auto space-y-1">
+                {erroresDetalle.map((err, i) => (
+                  <div key={i} className="text-xs text-red-600 dark:text-red-400 font-mono bg-white dark:bg-red-950/50 rounded px-2 py-1">
+                    <span className="font-semibold">PD #{err.pipedrive_id}</span>
+                    {err.nombre && <span> — {err.nombre}</span>}
+                    <span className="text-red-400 dark:text-red-500"> → {err.error}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -280,7 +356,7 @@ export default function PersonsPage() {
             <CardTitle>Persons en Supabase</CardTitle>
             <div className="flex items-center gap-2">
               <Input
-                placeholder="Buscar por nombre u organización..."
+                placeholder="Buscar"
                 value={busqueda}
                 onChange={(e) => setBusqueda(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleBuscar()}
@@ -303,37 +379,35 @@ export default function PersonsPage() {
             </div>
           ) : (
             <>
-              <div className="rounded-xl border border-border/50 overflow-hidden">
-                <Table>
+              <div className="rounded-xl border border-border/50 overflow-x-auto">
+                <Table className="table-fixed w-full">
                   <TableHeader>
                     <TableRow className="border-border/50">
-                      <TableHead className="w-16">ID PD</TableHead>
+                      <TableHead className="w-14">Id</TableHead>
+                      <TableHead className="w-14">Pd</TableHead>
                       <TableHead>Nombre</TableHead>
                       <TableHead>Email</TableHead>
                       <TableHead>Teléfono</TableHead>
                       <TableHead>Puesto</TableHead>
-                      <TableHead>Organización</TableHead>
-                      <TableHead>Propietario</TableHead>
-                      <TableHead>Estatus</TableHead>
+                      <TableHead className="w-20">Estatus</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {persons.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="text-center text-muted-foreground py-12">
+                        <TableCell colSpan={7} className="text-center text-muted-foreground py-12">
                           No hay personas registradas
                         </TableCell>
                       </TableRow>
                     ) : (
                       persons.map((person) => (
                         <TableRow key={person.id} className="border-border/50">
+                          <TableCell className="text-sm text-muted-foreground">{person.id}</TableCell>
                           <TableCell className="text-sm text-muted-foreground">{person.pipedrive_id}</TableCell>
-                          <TableCell className="font-medium">{person.nombre || "—"}</TableCell>
-                          <TableCell className="text-sm">{emailPrimario(person.email)}</TableCell>
-                          <TableCell className="text-sm">{telefonoPrimario(person.telefono)}</TableCell>
-                          <TableCell className="text-sm">{person.puesto || "—"}</TableCell>
-                          <TableCell className="text-sm">{person.organizacion_nombre || "—"}</TableCell>
-                          <TableCell className="text-sm">{person.propietario_nombre || "—"}</TableCell>
+                          <TableCell className="font-medium truncate">{person.nombre || "—"}</TableCell>
+                          <TableCell className="text-sm truncate">{emailPrimario(person.email)}</TableCell>
+                          <TableCell className="text-sm truncate">{telefonoPrimario(person.telefono)}</TableCell>
+                          <TableCell className="text-sm truncate">{person.puesto || "—"}</TableCell>
                           <TableCell>
                             <span
                               className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
