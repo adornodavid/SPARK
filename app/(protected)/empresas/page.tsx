@@ -6,7 +6,7 @@ import { obtenerSesion } from "@/app/actions/session"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
-import { Plus, Download, RefreshCw, Loader2, Search, X, Eye, Edit, ChevronLeft, ChevronRight, Square } from "lucide-react"
+import { Plus, Download, RefreshCw, Loader2, Search, X, Eye, Edit, ChevronLeft, ChevronRight, Square, Info } from "lucide-react"
 import Link from "next/link"
 import {
   transferirNuevasEmpresasDesdePipedrive,
@@ -15,6 +15,7 @@ import {
 import { extraerLoteOrganizations } from "@/app/actions/pipedrive"
 import type { ErrorDetalle } from "@/app/actions/pipedrive"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 type EmpresaRow = {
   id: number
@@ -31,6 +32,7 @@ export default function EmpresasPage() {
   const cancelRef = useRef(false)
 
   const [loading, setLoading] = useState(true)
+  const [rolId, setRolId] = useState(0)
   const [importing, setImporting] = useState(false)
   const [updating, setUpdating] = useState(false)
   const [feedback, setFeedback] = useState<{ tipo: "ok" | "error"; msg: string } | null>(null)
@@ -67,10 +69,12 @@ export default function EmpresasPage() {
         return
       }
       const allowedRoles = [1, 2, 3, 4]
-      if (!allowedRoles.includes(Number(session.RolId))) {
+      const currentRol = Number(session.RolId)
+      if (!allowedRoles.includes(currentRol)) {
         router.push("/dashboard")
         return
       }
+      setRolId(currentRol)
       setLoading(false)
       await fetchRows("", 1)
     }
@@ -213,20 +217,74 @@ export default function EmpresasPage() {
           <p className="text-sm text-muted-foreground">Gestiona tu cartera de empresas</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={onImportarNuevos} disabled={importing || updating}>
-            {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-            Importar nuevos de Pipedrive
-          </Button>
-          <Button variant="outline" onClick={onActualizarConPipedrive} disabled={importing || updating}>
-            {updating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-            Actualizar con Pipedrive
-          </Button>
           <Button asChild>
             <Link href="/empresas/new">
               <Plus className="mr-2 h-4 w-4" />
               Nueva Empresa
             </Link>
           </Button>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-border/60 bg-card p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold tracking-tight text-foreground">Acciones especiales</h2>
+          <span className="text-xs text-muted-foreground">
+            Procesos de sincronización con Pipedrive
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1">
+            <Button variant="outline" onClick={onActualizarConPipedrive} disabled={importing || updating}>
+              {updating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+              Actualizar con Pipedrive
+            </Button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8" title="Información del proceso">
+                  <Info className="h-4 w-4 text-blue-600" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-80 text-sm">
+                <p className="font-semibold mb-2">Actualizar con Pipedrive</p>
+                <p className="text-muted-foreground mb-2">
+                  Proceso en 2 fases:
+                </p>
+                <ol className="list-decimal list-inside text-muted-foreground space-y-1 mb-2">
+                  <li><strong>Fase 1:</strong> consulta la API de Pipedrive en lotes y agrega a <code className="font-mono text-xs">pip_organizations</code> las organizaciones nuevas (corta al encontrar un lote completamente ya existente).</li>
+                  <li><strong>Fase 2:</strong> transfiere las nuevas de <code className="font-mono text-xs">pip_organizations</code> a <code className="font-mono text-xs">empresas</code>.</li>
+                </ol>
+                <p className="text-muted-foreground">
+                  Puedes detener el proceso en cualquier momento con el botón Detener.
+                </p>
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          {[1, 2, 3].includes(rolId) && (
+            <div className="flex items-center gap-1">
+              <Button variant="outline" onClick={onImportarNuevos} disabled={importing || updating}>
+                {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                Importar nuevos de Pipedrive
+              </Button>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" title="Información del proceso">
+                    <Info className="h-4 w-4 text-blue-600" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-80 text-sm">
+                  <p className="font-semibold mb-2">Importar nuevos de Pipedrive</p>
+                  <p className="text-muted-foreground mb-2">
+                    Toma los registros que ya están cargados en la tabla <code className="font-mono text-xs">pip_organizations</code> (extraídos previamente desde Pipedrive) y los inserta en la tabla <code className="font-mono text-xs">empresas</code>.
+                  </p>
+                  <p className="text-muted-foreground">
+                    Solo se insertan organizaciones nuevas (las que aún no existen en <code className="font-mono text-xs">empresas</code> según su <code className="font-mono text-xs">pipedrive_id</code>). No consulta la API de Pipedrive.
+                  </p>
+                </PopoverContent>
+              </Popover>
+            </div>
+          )}
         </div>
       </div>
 

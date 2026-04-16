@@ -6,7 +6,7 @@ import { obtenerSesion } from "@/app/actions/session"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
-import { Plus, Download, RefreshCw, Loader2, Search, X, Eye, Edit, ChevronLeft, ChevronRight, Square, DatabaseZap } from "lucide-react"
+import { Plus, Download, RefreshCw, Loader2, Search, X, Eye, Edit, ChevronLeft, ChevronRight, Square, DatabaseZap, Info } from "lucide-react"
 import Link from "next/link"
 import {
   transferirNuevosDesdePipedrive,
@@ -16,6 +16,7 @@ import {
 import { extraerLotePersons } from "@/app/actions/pipedrive"
 import type { ErrorDetalle } from "@/app/actions/pipedrive"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 type ClienteRow = {
   id: number
@@ -32,6 +33,7 @@ export default function ClientsPage() {
   const cancelRef = useRef(false)
 
   const [loading, setLoading] = useState(true)
+  const [rolId, setRolId] = useState(0)
   const [importing, setImporting] = useState(false)
   const [updating, setUpdating] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -70,10 +72,12 @@ export default function ClientsPage() {
         return
       }
       const allowedRoles = [1, 2, 3, 4]
-      if (!allowedRoles.includes(Number(session.RolId))) {
+      const currentRol = Number(session.RolId)
+      if (!allowedRoles.includes(currentRol)) {
         router.push("/dashboard")
         return
       }
+      setRolId(currentRol)
       setLoading(false)
       await fetchRows("", 1)
     }
@@ -237,24 +241,102 @@ export default function ClientsPage() {
           <p className="text-sm text-muted-foreground">Gestiona tu cartera de clientes</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={onImportarNuevos} disabled={importing || updating || syncing}>
-            {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-            Importar nuevos de Pipedrive
-          </Button>
-          <Button variant="outline" onClick={onActualizarExistentes} disabled={importing || updating || syncing}>
-            {updating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-            Actualizar con Pipedrive
-          </Button>
-          <Button variant="outline" onClick={onActualizarDesdeTablaEspecial} disabled={importing || updating || syncing}>
-            {syncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <DatabaseZap className="mr-2 h-4 w-4" />}
-            Actualizar clientes desde tabla especial
-          </Button>
           <Button asChild>
             <Link href="/clientes/new">
               <Plus className="mr-2 h-4 w-4" />
               Nuevo Cliente
             </Link>
           </Button>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-border/60 bg-card p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold tracking-tight text-foreground">Acciones especiales</h2>
+          <span className="text-xs text-muted-foreground">
+            Procesos de sincronización con Pipedrive
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1">
+            <Button variant="outline" onClick={onActualizarExistentes} disabled={importing || updating || syncing}>
+              {updating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+              Actualizar con Pipedrive
+            </Button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8" title="Información del proceso">
+                  <Info className="h-4 w-4 text-blue-600" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-80 text-sm">
+                <p className="font-semibold mb-2">Actualizar con Pipedrive</p>
+                <p className="text-muted-foreground mb-2">
+                  Proceso en 2 fases:
+                </p>
+                <ol className="list-decimal list-inside text-muted-foreground space-y-1 mb-2">
+                  <li><strong>Fase 1:</strong> consulta la API de Pipedrive en lotes y agrega a <code className="font-mono text-xs">pip_persons</code> las personas nuevas (corta al encontrar un lote completamente ya existente).</li>
+                  <li><strong>Fase 2:</strong> transfiere los nuevos de <code className="font-mono text-xs">pip_persons</code> a <code className="font-mono text-xs">clientes</code> con dedupe por pipedrive_id, email y teléfono.</li>
+                </ol>
+                <p className="text-muted-foreground">
+                  Puedes detener el proceso en cualquier momento con el botón Detener.
+                </p>
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          {[1, 2, 3].includes(rolId) && (
+            <div className="flex items-center gap-1">
+              <Button variant="outline" onClick={onImportarNuevos} disabled={importing || updating || syncing}>
+                {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                Importar nuevos de Pipedrive
+              </Button>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" title="Información del proceso">
+                    <Info className="h-4 w-4 text-blue-600" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-80 text-sm">
+                  <p className="font-semibold mb-2">Importar nuevos de Pipedrive</p>
+                  <p className="text-muted-foreground mb-2">
+                    Toma los registros que ya están cargados en la tabla <code className="font-mono text-xs">pip_persons</code> (extraídos previamente desde Pipedrive) y los inserta en la tabla <code className="font-mono text-xs">clientes</code>.
+                  </p>
+                  <p className="text-muted-foreground">
+                    Aplica deduplicación: omite cualquier registro cuyo <code className="font-mono text-xs">pipedrive_id</code>, email o teléfono ya exista en <code className="font-mono text-xs">clientes</code>. No consulta la API de Pipedrive.
+                  </p>
+                </PopoverContent>
+              </Popover>
+            </div>
+          )}
+
+          {[1, 2, 3].includes(rolId) && (
+            <div className="flex items-center gap-1">
+              <Button variant="outline" onClick={onActualizarDesdeTablaEspecial} disabled={importing || updating || syncing}>
+                {syncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <DatabaseZap className="mr-2 h-4 w-4" />}
+                Actualizar clientes desde tabla especial
+              </Button>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" title="Información del proceso">
+                    <Info className="h-4 w-4 text-blue-600" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-80 text-sm">
+                  <p className="font-semibold mb-2">Actualizar clientes desde tabla especial</p>
+                  <p className="text-muted-foreground mb-2">
+                    Ejecuta un UPDATE masivo sobre <code className="font-mono text-xs">clientes</code> usando los datos de <code className="font-mono text-xs">pip_persons</code> donde coincida el <code className="font-mono text-xs">pipedrive_id</code>.
+                  </p>
+                  <p className="text-muted-foreground mb-2">
+                    Sobrescribe: nombre, apellidos, email, teléfono, puesto, país, estado, ciudad, dirección, código postal, correos/teléfonos JSON, organización y tipo de contacto.
+                  </p>
+                  <p className="text-muted-foreground">
+                    Útil cuando ya ejecutaste Importar/Actualizar y quieres sincronizar los valores actualizados sin crear duplicados.
+                  </p>
+                </PopoverContent>
+              </Popover>
+            </div>
+          )}
         </div>
       </div>
 
