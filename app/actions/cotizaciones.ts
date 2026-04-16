@@ -377,6 +377,138 @@ export async function crearCotizacion(formData: FormData) {
   }
 }
 
+// Función: crearReservacion: inserta una reservación adicional (eventoxreservaciones) para un evento existente
+export async function crearReservacion(eventoid: number, input: {
+  salonid?: number | string | null
+  montajeid?: number | string | null
+  fechainicio?: string | null
+  fechafin?: string | null
+  horainicio?: string | null
+  horafin?: string | null
+  horapremontaje?: string | null
+  horapostmontaje?: string | null
+  horasextras?: number | string | null
+  nombreevento?: string | null
+  tipoevento?: number | string | null
+  adultos?: number | string | null
+  ninos?: number | string | null
+  numeroinvitados?: string | number | null
+  estatusid?: number | string | null
+}) {
+  try {
+    const { obtenerSesion } = await import("@/app/actions/session")
+    const sesion = await obtenerSesion()
+    const usuarioId = sesion?.UsuarioId ? Number(sesion.UsuarioId) : null
+
+    const row: any = {
+      eventoid,
+      salonid: input.salonid ? Number(input.salonid) : null,
+      montajeid: input.montajeid ? Number(input.montajeid) : null,
+      fechainicio: input.fechainicio || null,
+      fechafin: input.fechafin || null,
+      horainicio: input.horainicio || null,
+      horafin: input.horafin || null,
+      horapremontaje: input.horapremontaje || null,
+      horapostmontaje: input.horapostmontaje || null,
+      horasextras: input.horasextras ? Number(input.horasextras) : 0,
+      nombreevento: input.nombreevento || null,
+      tipoevento: input.tipoevento || null,
+      adultos: input.adultos ? Number(input.adultos) : null,
+      ninos: input.ninos ? Number(input.ninos) : null,
+      numeroinvitados: input.numeroinvitados || null,
+      activo: true,
+      fechacreacion: new Date().toISOString(),
+      creadopor: usuarioId,
+    }
+
+    const { data, error } = await supabase
+      .from("eventoxreservaciones")
+      .insert(row)
+      .select("id")
+      .single()
+
+    if (error) {
+      console.error("Error en crearReservacion:", error)
+      return { success: false, error: error.message }
+    }
+    return { success: true, data: data?.id }
+  } catch (error: unknown) {
+    console.error("Error en crearReservacion:", error)
+    const msg = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: msg }
+  }
+}
+
+// Función: eliminarReservacion: soft-delete (activo = false) de una reservación por id
+export async function eliminarReservacion(reservacionid: number) {
+  try {
+    const { error } = await supabase
+      .from("eventoxreservaciones")
+      .update({ activo: false })
+      .eq("id", reservacionid)
+    if (error) {
+      console.error("Error en eliminarReservacion:", error)
+      return { success: false, error: error.message }
+    }
+    return { success: true }
+  } catch (error: unknown) {
+    console.error("Error en eliminarReservacion:", error)
+    const msg = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: msg }
+  }
+}
+
+// Función: actualizarReservacion: upsert de una reservación por id
+export async function actualizarReservacion(reservacionid: number, input: {
+  salonid?: number | string | null
+  montajeid?: number | string | null
+  fechainicio?: string | null
+  fechafin?: string | null
+  horainicio?: string | null
+  horafin?: string | null
+  horapremontaje?: string | null
+  horapostmontaje?: string | null
+  horasextras?: number | string | null
+  nombreevento?: string | null
+  tipoevento?: number | string | null
+  adultos?: number | string | null
+  ninos?: number | string | null
+  numeroinvitados?: string | number | null
+  estatusid?: number | string | null
+}) {
+  try {
+    const row: any = {
+      salonid: input.salonid ? Number(input.salonid) : null,
+      montajeid: input.montajeid ? Number(input.montajeid) : null,
+      fechainicio: input.fechainicio || null,
+      fechafin: input.fechafin || null,
+      horainicio: input.horainicio || null,
+      horafin: input.horafin || null,
+      horapremontaje: input.horapremontaje || null,
+      horapostmontaje: input.horapostmontaje || null,
+      horasextras: input.horasextras ? Number(input.horasextras) : 0,
+      nombreevento: input.nombreevento || null,
+      tipoevento: input.tipoevento || null,
+      adultos: input.adultos ? Number(input.adultos) : null,
+      ninos: input.ninos ? Number(input.ninos) : null,
+      numeroinvitados: input.numeroinvitados || null,
+    }
+    const { error } = await supabase
+      .from("eventoxreservaciones")
+      .update(row)
+      .eq("id", reservacionid)
+    if (error) {
+      console.error("Error en actualizarReservacion:", error)
+      return { success: false, error: error.message }
+    }
+    return { success: true }
+  } catch (error: unknown) {
+    console.error("Error en actualizarReservacion:", error)
+    const msg = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: msg }
+  }
+}
+
 /*==================================================
   SELECTS: READ / OBTENER / SELECT
 ================================================== */
