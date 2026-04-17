@@ -31,6 +31,7 @@ const PAGE_SIZE = 50
 export default function ClientsPage() {
   const router = useRouter()
   const cancelRef = useRef(false)
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [rolId, setRolId] = useState(0)
@@ -51,6 +52,11 @@ export default function ClientsPage() {
   const [erroresDetalle, setErroresDetalle] = useState<ErrorDetalle[]>([])
   const [fase, setFase] = useState<"idle" | "extrayendo" | "transfiriendo" | "hecho">("idle")
   const [resultadoTransfer, setResultadoTransfer] = useState<{ insertados: number; skipeados_dup: number } | null>(null)
+  const [progresoOculto, setProgresoOculto] = useState(false)
+
+  useEffect(() => {
+    return () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current) }
+  }, [])
 
   async function fetchRows(s: string, p: number) {
     setFetching(true)
@@ -123,6 +129,8 @@ export default function ClientsPage() {
     if (!confirm("Se extraerán nuevas personas desde Pipedrive → pip_persons, luego se insertarán en clientes (omitiendo duplicados por pipedrive_id, email o teléfono). ¿Continuar?")) return
 
     cancelRef.current = false
+    if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null }
+    setProgresoOculto(false)
     setUpdating(true)
     setFeedback(null)
     setProgreso({ insertados: 0, omitidos: 0, errores: 0, procesados: 0, loteActual: 0 })
@@ -136,6 +144,7 @@ export default function ClientsPage() {
     let totalOmitidos = 0
     let totalErrores = 0
     let totalProcesados = 0
+    let huboError = false
 
     try {
       while (true) {
@@ -148,6 +157,7 @@ export default function ClientsPage() {
         const resultado = await extraerLotePersons(start)
 
         if (!resultado.success) {
+          huboError = true
           setFeedback({ tipo: "error", msg: resultado.mensaje })
           break
         }
@@ -188,17 +198,22 @@ export default function ClientsPage() {
           msg: `Pipedrive → pip_persons: ${totalInsertados} insertados. pip_persons → clientes: ${r.insertados} insertados, ${r.skipeados_dup} duplicados omitidos.`,
         })
       } else {
+        huboError = true
         setFeedback({ tipo: "error", msg: r.error || "Error en transferencia a clientes" })
       }
 
       await fetchRows(searchActive, 1)
       setPage(1)
     } catch (err: unknown) {
+      huboError = true
       const m = err instanceof Error ? err.message : "Error desconocido"
       setFeedback({ tipo: "error", msg: `Error inesperado: ${m}` })
     } finally {
       setFase("hecho")
       setUpdating(false)
+      if (!huboError) {
+        hideTimerRef.current = setTimeout(() => { setProgresoOculto(true) }, 15000)
+      }
     }
   }
 
@@ -340,7 +355,7 @@ export default function ClientsPage() {
         </div>
       </div>
 
-      {(updating || fase === "hecho") && (
+      {(updating || fase === "hecho") && !progresoOculto && (
         <div className="rounded-xl border bg-card p-4 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-sm font-medium">

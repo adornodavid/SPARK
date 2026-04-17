@@ -583,6 +583,39 @@ export type ClienteEditPayload = {
   ciudadid: number | null
   codigopostal: string | null
   fuente: string | null
+  puesto: string | null
+  cumpleanos: string | null
+  preferenciaEmail: boolean
+  preferenciaTelefono: boolean
+  notas: string | null
+}
+
+/**
+ * Verifica que `valor` no esté usado por otro cliente (excluye `id`) en `campo` (email o telefono).
+ * email: comparación case-insensitive. telefono: igualdad exacta tras trim.
+ */
+export async function validarUnicidadClienteCampo(
+  id: number,
+  campo: "email" | "telefono",
+  valor: string,
+): Promise<{ disponible: boolean; mensaje: string }> {
+  try {
+    const v = (valor ?? "").trim()
+    if (!v) return { disponible: false, mensaje: `El ${campo} está vacío.` }
+
+    const query = supabase.from("clientes").select("id").neq("id", id).limit(1)
+    const { data, error } =
+      campo === "email"
+        ? await query.ilike("email", v.toLowerCase()).maybeSingle()
+        : await query.eq("telefono", v).maybeSingle()
+
+    if (error) return { disponible: false, mensaje: error.message }
+    if (data) return { disponible: false, mensaje: `Ya existe otro cliente con ese ${campo}.` }
+    return { disponible: true, mensaje: `${campo === "email" ? "Email" : "Teléfono"} disponible.` }
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "Error desconocido"
+    return { disponible: false, mensaje: "Error validando: " + msg }
+  }
 }
 
 export async function actualizarClienteBasico(id: number, data: ClienteEditPayload) {
@@ -622,6 +655,10 @@ export async function actualizarClienteBasico(id: number, data: ClienteEditPaylo
       if (dupTel) return { success: false, error: `Ya existe otro cliente con el teléfono "${telefono}".` }
     }
 
+    const preferencias: string[] = []
+    if (data.preferenciaEmail) preferencias.push("email")
+    if (data.preferenciaTelefono) preferencias.push("telefono")
+
     const { error } = await supabase
       .from("clientes")
       .update({
@@ -637,6 +674,10 @@ export async function actualizarClienteBasico(id: number, data: ClienteEditPaylo
         ciudadid: data.ciudadid,
         codigopostal: (data.codigopostal ?? "").trim() || null,
         fuente: data.fuente,
+        puesto: (data.puesto ?? "").trim() || null,
+        cumpleanos: data.cumpleanos,
+        preferenciasdecontacto: preferencias,
+        notas: (data.notas ?? "").trim() || null,
         fechamodificacion: new Date().toISOString(),
       })
       .eq("id", id)
