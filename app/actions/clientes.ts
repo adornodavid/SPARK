@@ -678,6 +678,7 @@ export async function actualizarClienteBasico(id: number, data: ClienteEditPaylo
         cumpleanos: data.cumpleanos,
         preferenciasdecontacto: preferencias,
         notas: (data.notas ?? "").trim() || null,
+        editado: true,
         fechamodificacion: new Date().toISOString(),
       })
       .eq("id", id)
