@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Loader2, Eye, Edit, Ban, Power, Plus } from "lucide-react"
+import { Loader2, Eye, Edit, Ban, Power, Plus, Trash2, Search, X } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -28,6 +28,11 @@ import {
   listarBeneficioPorHotel,
   crearBeneficio,
   validarNombreBeneficio,
+  eliminarElemento,
+  actualizarMobiliario,
+  actualizarServicio,
+  actualizarCortesia,
+  actualizarBeneficio,
   type MobiliarioRow,
   type ServicioRow,
   type CortesiaRow,
@@ -52,6 +57,8 @@ export default function ElementosPage() {
   const [beneficios, setBeneficios] = useState<BeneficioRow[]>([])
   const [fetchingBeneficios, setFetchingBeneficios] = useState(false)
   const [togglingId, setTogglingId] = useState<number | null>(null)
+  const [eliminandoId, setEliminandoId] = useState<number | null>(null)
+  const [search, setSearch] = useState<string>("")
 
   const TIPOS = [
     { value: "platillos", label: "Platillos/Alimentos" },
@@ -63,6 +70,8 @@ export default function ElementosPage() {
   ]
 
   const [agregarOpen, setAgregarOpen] = useState(false)
+  const [modalMode, setModalMode] = useState<"create" | "edit">("create")
+  const [editingId, setEditingId] = useState<number | null>(null)
   const [formHotel, setFormHotel] = useState<string>("")
   const [formTipo, setFormTipo] = useState<string>("mobiliario")
   const [formNombre, setFormNombre] = useState("")
@@ -120,50 +129,41 @@ export default function ElementosPage() {
   useEffect(() => {
     if (loading) return
     const hid = hotel === "-1" ? null : Number(hotel)
-    if (tab === "mobiliario") {
-      async function loadMobiliario() {
+    const t = setTimeout(() => {
+      if (tab === "mobiliario") {
         setFetchingMobiliario(true)
-        const r = await listarMobiliarioPorHotel(hid)
-        if (r.success) setMobiliario(r.data)
-        else setMobiliario([])
-        setFetchingMobiliario(false)
-      }
-      loadMobiliario()
-    } else if (tab === "servicios") {
-      async function loadServicios() {
+        listarMobiliarioPorHotel(hid, search).then((r) => {
+          if (r.success) setMobiliario(r.data)
+          else setMobiliario([])
+          setFetchingMobiliario(false)
+        })
+      } else if (tab === "servicios") {
         setFetchingServicios(true)
-        const r = await listarServicioPorHotel(hid)
-        if (r.success) setServicios(r.data)
-        else setServicios([])
-        setFetchingServicios(false)
-      }
-      loadServicios()
-    } else if (tab === "cortesias") {
-      async function loadCortesias() {
+        listarServicioPorHotel(hid, search).then((r) => {
+          if (r.success) setServicios(r.data)
+          else setServicios([])
+          setFetchingServicios(false)
+        })
+      } else if (tab === "cortesias") {
         setFetchingCortesias(true)
-        const r = await listarCortesiaPorHotel(hid)
-        if (r.success) setCortesias(r.data)
-        else setCortesias([])
-        setFetchingCortesias(false)
-      }
-      loadCortesias()
-    } else if (tab === "beneficios") {
-      async function loadBeneficios() {
+        listarCortesiaPorHotel(hid, search).then((r) => {
+          if (r.success) setCortesias(r.data)
+          else setCortesias([])
+          setFetchingCortesias(false)
+        })
+      } else if (tab === "beneficios") {
         setFetchingBeneficios(true)
-        const r = await listarBeneficioPorHotel(hid)
-        if (r.success) setBeneficios(r.data)
-        else setBeneficios([])
-        setFetchingBeneficios(false)
+        listarBeneficioPorHotel(hid, search).then((r) => {
+          if (r.success) setBeneficios(r.data)
+          else setBeneficios([])
+          setFetchingBeneficios(false)
+        })
       }
-      loadBeneficios()
-    }
-  }, [loading, tab, hotel])
+    }, 300)
+    return () => clearTimeout(t)
+  }, [loading, tab, hotel, search])
 
-  function abrirModalAgregar() {
-    const hotelInicial =
-      hotel !== "-1" ? hotel : hotelesList.length > 0 ? hotelesList[0].value : ""
-    setFormHotel(hotelInicial)
-    setFormTipo(tab)
+  function resetTodosLosForms() {
     // Reset Mobiliario
     setFormNombre("")
     setFormDescripcion("")
@@ -188,8 +188,83 @@ export default function ElementosPage() {
     setBenFormCosto("")
     setBenFormActivo("true")
     setBenNombreValidacion(null)
+  }
+
+  function abrirModalAgregar() {
+    const hotelInicial =
+      hotel !== "-1" ? hotel : hotelesList.length > 0 ? hotelesList[0].value : ""
+    setModalMode("create")
+    setEditingId(null)
+    setFormHotel(hotelInicial)
+    setFormTipo(tab)
+    resetTodosLosForms()
     setFormFeedback(null)
     setAgregarOpen(true)
+  }
+
+  async function abrirModalEditar(
+    tipo: string,
+    row: { id: number; nombre: string | null; descripcion: string | null; costo: number | null; activo: boolean | null; hotelid: number | null },
+  ) {
+    setModalMode("edit")
+    setEditingId(row.id)
+    setFormHotel(row.hotelid != null ? String(row.hotelid) : "")
+    setFormTipo(tipo)
+    resetTodosLosForms()
+    setFormFeedback(null)
+
+    const nombre = row.nombre ?? ""
+    const descripcion = row.descripcion ?? ""
+    const costo = row.costo != null ? String(row.costo) : ""
+    const activo = row.activo ? "true" : "false"
+
+    if (tipo === "mobiliario") {
+      setFormNombre(nombre)
+      setFormDescripcion(descripcion)
+      setFormCosto(costo)
+      setFormActivo(activo)
+    } else if (tipo === "servicios") {
+      setSrvFormNombre(nombre)
+      setSrvFormDescripcion(descripcion)
+      setSrvFormCosto(costo)
+      setSrvFormActivo(activo)
+    } else if (tipo === "cortesias") {
+      setCorFormNombre(nombre)
+      setCorFormDescripcion(descripcion)
+      setCorFormCosto(costo)
+      setCorFormActivo(activo)
+    } else if (tipo === "beneficios") {
+      setBenFormNombre(nombre)
+      setBenFormDescripcion(descripcion)
+      setBenFormCosto(costo)
+      setBenFormActivo(activo)
+    }
+    setAgregarOpen(true)
+
+    // Pre-validar el nombre (excluyendo el id propio) para que Guardar quede habilitado.
+    if (row.hotelid && nombre.trim()) {
+      if (tipo === "mobiliario") {
+        setValidandoNombre(true)
+        const r = await validarNombreMobiliario(nombre, row.hotelid, row.id)
+        setNombreValidacion(r)
+        setValidandoNombre(false)
+      } else if (tipo === "servicios") {
+        setSrvValidandoNombre(true)
+        const r = await validarNombreServicio(nombre, row.hotelid, row.id)
+        setSrvNombreValidacion(r)
+        setSrvValidandoNombre(false)
+      } else if (tipo === "cortesias") {
+        setCorValidandoNombre(true)
+        const r = await validarNombreCortesia(nombre, row.hotelid, row.id)
+        setCorNombreValidacion(r)
+        setCorValidandoNombre(false)
+      } else if (tipo === "beneficios") {
+        setBenValidandoNombre(true)
+        const r = await validarNombreBeneficio(nombre, row.hotelid, row.id)
+        setBenNombreValidacion(r)
+        setBenValidandoNombre(false)
+      }
+    }
   }
 
   function limpiarFormularioMobiliario() {
@@ -235,7 +310,8 @@ export default function ElementosPage() {
       return
     }
     setValidandoNombre(true)
-    const r = await validarNombreMobiliario(formNombre, Number(formHotel))
+    const excluir = modalMode === "edit" ? editingId : null
+    const r = await validarNombreMobiliario(formNombre, Number(formHotel), excluir)
     setNombreValidacion(r)
     setValidandoNombre(false)
   }
@@ -251,7 +327,8 @@ export default function ElementosPage() {
       return
     }
     setSrvValidandoNombre(true)
-    const r = await validarNombreServicio(srvFormNombre, Number(formHotel))
+    const excluir = modalMode === "edit" ? editingId : null
+    const r = await validarNombreServicio(srvFormNombre, Number(formHotel), excluir)
     setSrvNombreValidacion(r)
     setSrvValidandoNombre(false)
   }
@@ -267,7 +344,8 @@ export default function ElementosPage() {
       return
     }
     setCorValidandoNombre(true)
-    const r = await validarNombreCortesia(corFormNombre, Number(formHotel))
+    const excluir = modalMode === "edit" ? editingId : null
+    const r = await validarNombreCortesia(corFormNombre, Number(formHotel), excluir)
     setCorNombreValidacion(r)
     setCorValidandoNombre(false)
   }
@@ -283,7 +361,8 @@ export default function ElementosPage() {
       return
     }
     setBenValidandoNombre(true)
-    const r = await validarNombreBeneficio(benFormNombre, Number(formHotel))
+    const excluir = modalMode === "edit" ? editingId : null
+    const r = await validarNombreBeneficio(benFormNombre, Number(formHotel), excluir)
     setBenNombreValidacion(r)
     setBenValidandoNombre(false)
   }
@@ -311,23 +390,39 @@ export default function ElementosPage() {
           setFormFeedback({ tipo: "error", msg: "Costo inválido." })
           return
         }
-        const r = await crearMobiliario({
+        const payload = {
           hotelid: Number(formHotel),
           nombre: formNombre,
           descripcion: formDescripcion,
           costo: costoNum,
           activo: formActivo === "true",
-        })
-        if (!r.success) {
-          setFormFeedback({ tipo: "error", msg: r.error || "Error al guardar." })
-          return
         }
-        setFormFeedback({ tipo: "ok", msg: `Registro guardado correctamente (id ${r.id}).` })
-        limpiarFormularioMobiliario()
-        if (tab === "mobiliario") {
-          const hid = hotel === "-1" ? null : Number(hotel)
-          const listado = await listarMobiliarioPorHotel(hid)
-          if (listado.success) setMobiliario(listado.data)
+        if (modalMode === "edit" && editingId != null) {
+          const r = await actualizarMobiliario(editingId, payload)
+          if (!r.success) {
+            setFormFeedback({ tipo: "error", msg: r.error || "Error al actualizar." })
+            return
+          }
+          setFormFeedback({ tipo: "ok", msg: `Registro actualizado correctamente.` })
+          if (tab === "mobiliario") {
+            const hid = hotel === "-1" ? null : Number(hotel)
+            const listado = await listarMobiliarioPorHotel(hid, search)
+            if (listado.success) setMobiliario(listado.data)
+          }
+          setAgregarOpen(false)
+        } else {
+          const r = await crearMobiliario(payload)
+          if (!r.success) {
+            setFormFeedback({ tipo: "error", msg: r.error || "Error al guardar." })
+            return
+          }
+          setFormFeedback({ tipo: "ok", msg: `Registro guardado correctamente (id ${r.id}).` })
+          limpiarFormularioMobiliario()
+          if (tab === "mobiliario") {
+            const hid = hotel === "-1" ? null : Number(hotel)
+            const listado = await listarMobiliarioPorHotel(hid, search)
+            if (listado.success) setMobiliario(listado.data)
+          }
         }
       } else if (formTipo === "servicios") {
         if (!srvFormNombre.trim()) {
@@ -343,23 +438,39 @@ export default function ElementosPage() {
           setFormFeedback({ tipo: "error", msg: "Costo inválido." })
           return
         }
-        const r = await crearServicio({
+        const payload = {
           hotelid: Number(formHotel),
           nombre: srvFormNombre,
           descripcion: srvFormDescripcion,
           costo: costoNum,
           activo: srvFormActivo === "true",
-        })
-        if (!r.success) {
-          setFormFeedback({ tipo: "error", msg: r.error || "Error al guardar." })
-          return
         }
-        setFormFeedback({ tipo: "ok", msg: `Registro guardado correctamente (id ${r.id}).` })
-        limpiarFormularioServicios()
-        if (tab === "servicios") {
-          const hid = hotel === "-1" ? null : Number(hotel)
-          const listado = await listarServicioPorHotel(hid)
-          if (listado.success) setServicios(listado.data)
+        if (modalMode === "edit" && editingId != null) {
+          const r = await actualizarServicio(editingId, payload)
+          if (!r.success) {
+            setFormFeedback({ tipo: "error", msg: r.error || "Error al actualizar." })
+            return
+          }
+          setFormFeedback({ tipo: "ok", msg: `Registro actualizado correctamente.` })
+          if (tab === "servicios") {
+            const hid = hotel === "-1" ? null : Number(hotel)
+            const listado = await listarServicioPorHotel(hid, search)
+            if (listado.success) setServicios(listado.data)
+          }
+          setAgregarOpen(false)
+        } else {
+          const r = await crearServicio(payload)
+          if (!r.success) {
+            setFormFeedback({ tipo: "error", msg: r.error || "Error al guardar." })
+            return
+          }
+          setFormFeedback({ tipo: "ok", msg: `Registro guardado correctamente (id ${r.id}).` })
+          limpiarFormularioServicios()
+          if (tab === "servicios") {
+            const hid = hotel === "-1" ? null : Number(hotel)
+            const listado = await listarServicioPorHotel(hid, search)
+            if (listado.success) setServicios(listado.data)
+          }
         }
       } else if (formTipo === "cortesias") {
         if (!corFormNombre.trim()) {
@@ -375,23 +486,39 @@ export default function ElementosPage() {
           setFormFeedback({ tipo: "error", msg: "Costo inválido." })
           return
         }
-        const r = await crearCortesia({
+        const payload = {
           hotelid: Number(formHotel),
           nombre: corFormNombre,
           descripcion: corFormDescripcion,
           costo: costoNum,
           activo: corFormActivo === "true",
-        })
-        if (!r.success) {
-          setFormFeedback({ tipo: "error", msg: r.error || "Error al guardar." })
-          return
         }
-        setFormFeedback({ tipo: "ok", msg: `Registro guardado correctamente (id ${r.id}).` })
-        limpiarFormularioCortesias()
-        if (tab === "cortesias") {
-          const hid = hotel === "-1" ? null : Number(hotel)
-          const listado = await listarCortesiaPorHotel(hid)
-          if (listado.success) setCortesias(listado.data)
+        if (modalMode === "edit" && editingId != null) {
+          const r = await actualizarCortesia(editingId, payload)
+          if (!r.success) {
+            setFormFeedback({ tipo: "error", msg: r.error || "Error al actualizar." })
+            return
+          }
+          setFormFeedback({ tipo: "ok", msg: `Registro actualizado correctamente.` })
+          if (tab === "cortesias") {
+            const hid = hotel === "-1" ? null : Number(hotel)
+            const listado = await listarCortesiaPorHotel(hid, search)
+            if (listado.success) setCortesias(listado.data)
+          }
+          setAgregarOpen(false)
+        } else {
+          const r = await crearCortesia(payload)
+          if (!r.success) {
+            setFormFeedback({ tipo: "error", msg: r.error || "Error al guardar." })
+            return
+          }
+          setFormFeedback({ tipo: "ok", msg: `Registro guardado correctamente (id ${r.id}).` })
+          limpiarFormularioCortesias()
+          if (tab === "cortesias") {
+            const hid = hotel === "-1" ? null : Number(hotel)
+            const listado = await listarCortesiaPorHotel(hid, search)
+            if (listado.success) setCortesias(listado.data)
+          }
         }
       } else if (formTipo === "beneficios") {
         if (!benFormNombre.trim()) {
@@ -407,29 +534,65 @@ export default function ElementosPage() {
           setFormFeedback({ tipo: "error", msg: "Costo inválido." })
           return
         }
-        const r = await crearBeneficio({
+        const payload = {
           hotelid: Number(formHotel),
           nombre: benFormNombre,
           descripcion: benFormDescripcion,
           costo: costoNum,
           activo: benFormActivo === "true",
-        })
-        if (!r.success) {
-          setFormFeedback({ tipo: "error", msg: r.error || "Error al guardar." })
-          return
         }
-        setFormFeedback({ tipo: "ok", msg: `Registro guardado correctamente (id ${r.id}).` })
-        limpiarFormularioBeneficios()
-        if (tab === "beneficios") {
-          const hid = hotel === "-1" ? null : Number(hotel)
-          const listado = await listarBeneficioPorHotel(hid)
-          if (listado.success) setBeneficios(listado.data)
+        if (modalMode === "edit" && editingId != null) {
+          const r = await actualizarBeneficio(editingId, payload)
+          if (!r.success) {
+            setFormFeedback({ tipo: "error", msg: r.error || "Error al actualizar." })
+            return
+          }
+          setFormFeedback({ tipo: "ok", msg: `Registro actualizado correctamente.` })
+          if (tab === "beneficios") {
+            const hid = hotel === "-1" ? null : Number(hotel)
+            const listado = await listarBeneficioPorHotel(hid, search)
+            if (listado.success) setBeneficios(listado.data)
+          }
+          setAgregarOpen(false)
+        } else {
+          const r = await crearBeneficio(payload)
+          if (!r.success) {
+            setFormFeedback({ tipo: "error", msg: r.error || "Error al guardar." })
+            return
+          }
+          setFormFeedback({ tipo: "ok", msg: `Registro guardado correctamente (id ${r.id}).` })
+          limpiarFormularioBeneficios()
+          if (tab === "beneficios") {
+            const hid = hotel === "-1" ? null : Number(hotel)
+            const listado = await listarBeneficioPorHotel(hid, search)
+            if (listado.success) setBeneficios(listado.data)
+          }
         }
       } else {
         setFormFeedback({ tipo: "error", msg: `Tipo "${formTipo}" aún no implementado.` })
       }
     } finally {
       setGuardando(false)
+    }
+  }
+
+  async function onEliminar(tipo: string, id: number, hotelidRow: number | null) {
+    if (!confirm("¿Deseas eliminar este registro? Esta acción no se puede deshacer.")) return
+    setEliminandoId(id)
+    const r = await eliminarElemento(tipo, id, hotelidRow)
+    setEliminandoId(null)
+    if (!r.success) {
+      alert(r.error || "Error al eliminar")
+      return
+    }
+    if (tipo === "mobiliario") {
+      setMobiliario((prev) => prev.filter((x) => x.id !== id))
+    } else if (tipo === "servicios") {
+      setServicios((prev) => prev.filter((x) => x.id !== id))
+    } else if (tipo === "cortesias") {
+      setCortesias((prev) => prev.filter((x) => x.id !== id))
+    } else if (tipo === "beneficios") {
+      setBeneficios((prev) => prev.filter((x) => x.id !== id))
     }
   }
 
@@ -507,6 +670,24 @@ export default function ElementosPage() {
                 </Button>
               </div>
 
+              <div className="mt-4 flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar por nombre…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+                {search && (
+                  <Button variant="outline" onClick={() => setSearch("")} className="gap-2">
+                    <X className="h-4 w-4" />
+                    Limpiar
+                  </Button>
+                )}
+              </div>
+
               <TabsContent value="platillos" className="mt-4">
                 <p className="text-sm text-muted-foreground">Pendiente.</p>
               </TabsContent>
@@ -525,7 +706,7 @@ export default function ElementosPage() {
                         <TableHead>Nombre</TableHead>
                         <TableHead className="w-28 text-right">Costo</TableHead>
                         <TableHead className="w-24">Activo</TableHead>
-                        <TableHead className="w-28 text-right">Acciones</TableHead>
+                        <TableHead className="w-40 text-right">Acciones</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -561,10 +742,8 @@ export default function ElementosPage() {
                                     <Eye className="h-4 w-4" />
                                   </Link>
                                 </Button>
-                                <Button asChild variant="ghost" size="sm" title="Editar">
-                                  <Link href={`/hoteles/elementos/${m.id}/edit?tipo=mobiliario`}>
-                                    <Edit className="h-4 w-4" />
-                                  </Link>
+                                <Button variant="ghost" size="sm" title="Editar" onClick={() => abrirModalEditar("mobiliario", m)}>
+                                  <Edit className="h-4 w-4" />
                                 </Button>
                                 <Button
                                   variant="ghost"
@@ -579,6 +758,19 @@ export default function ElementosPage() {
                                     <Ban className="h-4 w-4 text-red-600" />
                                   ) : (
                                     <Power className="h-4 w-4 text-emerald-600" />
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  title="Eliminar"
+                                  disabled={eliminandoId === m.id}
+                                  onClick={() => onEliminar("mobiliario", m.id, m.hotelid)}
+                                >
+                                  {eliminandoId === m.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-4 w-4 text-red-600" />
                                   )}
                                 </Button>
                               </div>
@@ -601,7 +793,7 @@ export default function ElementosPage() {
                         <TableHead>Nombre</TableHead>
                         <TableHead className="w-28 text-right">Costo</TableHead>
                         <TableHead className="w-24">Activo</TableHead>
-                        <TableHead className="w-28 text-right">Acciones</TableHead>
+                        <TableHead className="w-40 text-right">Acciones</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -637,10 +829,8 @@ export default function ElementosPage() {
                                     <Eye className="h-4 w-4" />
                                   </Link>
                                 </Button>
-                                <Button asChild variant="ghost" size="sm" title="Editar">
-                                  <Link href={`/hoteles/elementos/${s.id}/edit?tipo=servicios`}>
-                                    <Edit className="h-4 w-4" />
-                                  </Link>
+                                <Button variant="ghost" size="sm" title="Editar" onClick={() => abrirModalEditar("servicios", s)}>
+                                  <Edit className="h-4 w-4" />
                                 </Button>
                                 <Button
                                   variant="ghost"
@@ -655,6 +845,19 @@ export default function ElementosPage() {
                                     <Ban className="h-4 w-4 text-red-600" />
                                   ) : (
                                     <Power className="h-4 w-4 text-emerald-600" />
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  title="Eliminar"
+                                  disabled={eliminandoId === s.id}
+                                  onClick={() => onEliminar("servicios", s.id, s.hotelid)}
+                                >
+                                  {eliminandoId === s.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-4 w-4 text-red-600" />
                                   )}
                                 </Button>
                               </div>
@@ -677,7 +880,7 @@ export default function ElementosPage() {
                         <TableHead>Nombre</TableHead>
                         <TableHead className="w-28 text-right">Costo</TableHead>
                         <TableHead className="w-24">Activo</TableHead>
-                        <TableHead className="w-28 text-right">Acciones</TableHead>
+                        <TableHead className="w-40 text-right">Acciones</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -713,10 +916,8 @@ export default function ElementosPage() {
                                     <Eye className="h-4 w-4" />
                                   </Link>
                                 </Button>
-                                <Button asChild variant="ghost" size="sm" title="Editar">
-                                  <Link href={`/hoteles/elementos/${c.id}/edit?tipo=cortesias`}>
-                                    <Edit className="h-4 w-4" />
-                                  </Link>
+                                <Button variant="ghost" size="sm" title="Editar" onClick={() => abrirModalEditar("cortesias", c)}>
+                                  <Edit className="h-4 w-4" />
                                 </Button>
                                 <Button
                                   variant="ghost"
@@ -731,6 +932,19 @@ export default function ElementosPage() {
                                     <Ban className="h-4 w-4 text-red-600" />
                                   ) : (
                                     <Power className="h-4 w-4 text-emerald-600" />
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  title="Eliminar"
+                                  disabled={eliminandoId === c.id}
+                                  onClick={() => onEliminar("cortesias", c.id, c.hotelid)}
+                                >
+                                  {eliminandoId === c.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-4 w-4 text-red-600" />
                                   )}
                                 </Button>
                               </div>
@@ -753,7 +967,7 @@ export default function ElementosPage() {
                         <TableHead>Nombre</TableHead>
                         <TableHead className="w-28 text-right">Costo</TableHead>
                         <TableHead className="w-24">Activo</TableHead>
-                        <TableHead className="w-28 text-right">Acciones</TableHead>
+                        <TableHead className="w-40 text-right">Acciones</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -789,10 +1003,8 @@ export default function ElementosPage() {
                                     <Eye className="h-4 w-4" />
                                   </Link>
                                 </Button>
-                                <Button asChild variant="ghost" size="sm" title="Editar">
-                                  <Link href={`/hoteles/elementos/${b.id}/edit?tipo=beneficios`}>
-                                    <Edit className="h-4 w-4" />
-                                  </Link>
+                                <Button variant="ghost" size="sm" title="Editar" onClick={() => abrirModalEditar("beneficios", b)}>
+                                  <Edit className="h-4 w-4" />
                                 </Button>
                                 <Button
                                   variant="ghost"
@@ -807,6 +1019,19 @@ export default function ElementosPage() {
                                     <Ban className="h-4 w-4 text-red-600" />
                                   ) : (
                                     <Power className="h-4 w-4 text-emerald-600" />
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  title="Eliminar"
+                                  disabled={eliminandoId === b.id}
+                                  onClick={() => onEliminar("beneficios", b.id, b.hotelid)}
+                                >
+                                  {eliminandoId === b.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-4 w-4 text-red-600" />
                                   )}
                                 </Button>
                               </div>
@@ -826,7 +1051,7 @@ export default function ElementosPage() {
       <Dialog open={agregarOpen} onOpenChange={setAgregarOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Agregar elemento</DialogTitle>
+            <DialogTitle>{modalMode === "edit" ? "Editar elemento" : "Agregar elemento"}</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4">
@@ -860,6 +1085,7 @@ export default function ElementosPage() {
                   setFormTipo(v)
                   setNombreValidacion(null)
                 }}
+                disabled={modalMode === "edit"}
               >
                 <SelectTrigger id="form-tipo" className="w-full">
                   <SelectValue />

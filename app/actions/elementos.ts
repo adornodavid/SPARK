@@ -23,6 +23,7 @@ export type MobiliarioRow = {
  */
 export async function listarMobiliarioPorHotel(
   hotelid: number | null = null,
+  search: string = "",
 ): Promise<{ success: boolean; error?: string; data: MobiliarioRow[] }> {
   try {
     let q = supabase
@@ -31,6 +32,10 @@ export async function listarMobiliarioPorHotel(
 
     if (hotelid && hotelid !== -1) {
       q = q.eq("hotelid", hotelid)
+    }
+    const s = (search ?? "").trim()
+    if (s) {
+      q = q.ilike("nombre", `%${s}%`)
     }
 
     const { data, error } = await q
@@ -67,10 +72,15 @@ export async function listarMobiliarioPorHotel(
         hotelnombre: r.hotelid != null ? nombresPorId.get(r.hotelid) ?? null : null,
       }))
       .sort((a, b) => {
-        const na = (a.hotelnombre ?? "").toLocaleLowerCase("es-MX")
-        const nb = (b.hotelnombre ?? "").toLocaleLowerCase("es-MX")
-        const byHotel = na.localeCompare(nb, "es-MX")
-        return byHotel !== 0 ? byHotel : a.id - b.id
+        const ha = (a.hotelnombre ?? "").toLocaleLowerCase("es-MX")
+        const hb = (b.hotelnombre ?? "").toLocaleLowerCase("es-MX")
+        const byHotel = ha.localeCompare(hb, "es-MX")
+        if (byHotel !== 0) return byHotel
+        const na = (a.nombre ?? "").toLocaleLowerCase("es-MX")
+        const nb = (b.nombre ?? "").toLocaleLowerCase("es-MX")
+        const byNombre = na.localeCompare(nb, "es-MX")
+        if (byNombre !== 0) return byNombre
+        return a.id - b.id
       })
 
     return { success: true, data: out }
@@ -92,6 +102,7 @@ export type ServicioRow = {
 
 export async function listarServicioPorHotel(
   hotelid: number | null = null,
+  search: string = "",
 ): Promise<{ success: boolean; error?: string; data: ServicioRow[] }> {
   try {
     let q = supabase
@@ -100,6 +111,10 @@ export async function listarServicioPorHotel(
 
     if (hotelid && hotelid !== -1) {
       q = q.eq("hotelid", hotelid)
+    }
+    const s = (search ?? "").trim()
+    if (s) {
+      q = q.ilike("nombre", `%${s}%`)
     }
 
     const { data, error } = await q
@@ -136,10 +151,15 @@ export async function listarServicioPorHotel(
         hotelnombre: r.hotelid != null ? nombresPorId.get(r.hotelid) ?? null : null,
       }))
       .sort((a, b) => {
-        const na = (a.hotelnombre ?? "").toLocaleLowerCase("es-MX")
-        const nb = (b.hotelnombre ?? "").toLocaleLowerCase("es-MX")
-        const byHotel = na.localeCompare(nb, "es-MX")
-        return byHotel !== 0 ? byHotel : a.id - b.id
+        const ha = (a.hotelnombre ?? "").toLocaleLowerCase("es-MX")
+        const hb = (b.hotelnombre ?? "").toLocaleLowerCase("es-MX")
+        const byHotel = ha.localeCompare(hb, "es-MX")
+        if (byHotel !== 0) return byHotel
+        const na = (a.nombre ?? "").toLocaleLowerCase("es-MX")
+        const nb = (b.nombre ?? "").toLocaleLowerCase("es-MX")
+        const byNombre = na.localeCompare(nb, "es-MX")
+        if (byNombre !== 0) return byNombre
+        return a.id - b.id
       })
 
     return { success: true, data: out }
@@ -152,19 +172,20 @@ export async function listarServicioPorHotel(
 export async function validarNombreServicio(
   nombre: string,
   hotelid: number | null,
+  excluirId: number | null = null,
 ): Promise<{ disponible: boolean; mensaje: string }> {
   try {
     const v = (nombre ?? "").trim()
     if (!v) return { disponible: false, mensaje: "El nombre está vacío." }
     if (!hotelid) return { disponible: false, mensaje: "Selecciona un hotel primero." }
 
-    const { data, error } = await supabase
+    let q = supabase
       .from("servicio")
       .select("id")
       .ilike("nombre", v)
       .eq("hotelid", hotelid)
-      .limit(1)
-      .maybeSingle()
+    if (excluirId != null) q = q.neq("id", excluirId)
+    const { data, error } = await q.limit(1).maybeSingle()
 
     if (error) return { disponible: false, mensaje: error.message }
     if (data) return { disponible: false, mensaje: "Ya existe un servicio con ese nombre para este hotel." }
@@ -226,6 +247,7 @@ export type CortesiaRow = {
 
 export async function listarCortesiaPorHotel(
   hotelid: number | null = null,
+  search: string = "",
 ): Promise<{ success: boolean; error?: string; data: CortesiaRow[] }> {
   try {
     let q = supabase
@@ -234,6 +256,10 @@ export async function listarCortesiaPorHotel(
 
     if (hotelid && hotelid !== -1) {
       q = q.eq("hotelid", hotelid)
+    }
+    const s = (search ?? "").trim()
+    if (s) {
+      q = q.ilike("nombre", `%${s}%`)
     }
 
     const { data, error } = await q
@@ -270,10 +296,15 @@ export async function listarCortesiaPorHotel(
         hotelnombre: r.hotelid != null ? nombresPorId.get(r.hotelid) ?? null : null,
       }))
       .sort((a, b) => {
-        const na = (a.hotelnombre ?? "").toLocaleLowerCase("es-MX")
-        const nb = (b.hotelnombre ?? "").toLocaleLowerCase("es-MX")
-        const byHotel = na.localeCompare(nb, "es-MX")
-        return byHotel !== 0 ? byHotel : a.id - b.id
+        const ha = (a.hotelnombre ?? "").toLocaleLowerCase("es-MX")
+        const hb = (b.hotelnombre ?? "").toLocaleLowerCase("es-MX")
+        const byHotel = ha.localeCompare(hb, "es-MX")
+        if (byHotel !== 0) return byHotel
+        const na = (a.nombre ?? "").toLocaleLowerCase("es-MX")
+        const nb = (b.nombre ?? "").toLocaleLowerCase("es-MX")
+        const byNombre = na.localeCompare(nb, "es-MX")
+        if (byNombre !== 0) return byNombre
+        return a.id - b.id
       })
 
     return { success: true, data: out }
@@ -286,19 +317,20 @@ export async function listarCortesiaPorHotel(
 export async function validarNombreCortesia(
   nombre: string,
   hotelid: number | null,
+  excluirId: number | null = null,
 ): Promise<{ disponible: boolean; mensaje: string }> {
   try {
     const v = (nombre ?? "").trim()
     if (!v) return { disponible: false, mensaje: "El nombre está vacío." }
     if (!hotelid) return { disponible: false, mensaje: "Selecciona un hotel primero." }
 
-    const { data, error } = await supabase
+    let q = supabase
       .from("cortesias")
       .select("id")
       .ilike("nombre", v)
       .eq("hotelid", hotelid)
-      .limit(1)
-      .maybeSingle()
+    if (excluirId != null) q = q.neq("id", excluirId)
+    const { data, error } = await q.limit(1).maybeSingle()
 
     if (error) return { disponible: false, mensaje: error.message }
     if (data) return { disponible: false, mensaje: "Ya existe una cortesía con ese nombre para este hotel." }
@@ -360,6 +392,7 @@ export type BeneficioRow = {
 
 export async function listarBeneficioPorHotel(
   hotelid: number | null = null,
+  search: string = "",
 ): Promise<{ success: boolean; error?: string; data: BeneficioRow[] }> {
   try {
     let q = supabase
@@ -368,6 +401,10 @@ export async function listarBeneficioPorHotel(
 
     if (hotelid && hotelid !== -1) {
       q = q.eq("hotelid", hotelid)
+    }
+    const s = (search ?? "").trim()
+    if (s) {
+      q = q.ilike("nombre", `%${s}%`)
     }
 
     const { data, error } = await q
@@ -404,10 +441,15 @@ export async function listarBeneficioPorHotel(
         hotelnombre: r.hotelid != null ? nombresPorId.get(r.hotelid) ?? null : null,
       }))
       .sort((a, b) => {
-        const na = (a.hotelnombre ?? "").toLocaleLowerCase("es-MX")
-        const nb = (b.hotelnombre ?? "").toLocaleLowerCase("es-MX")
-        const byHotel = na.localeCompare(nb, "es-MX")
-        return byHotel !== 0 ? byHotel : a.id - b.id
+        const ha = (a.hotelnombre ?? "").toLocaleLowerCase("es-MX")
+        const hb = (b.hotelnombre ?? "").toLocaleLowerCase("es-MX")
+        const byHotel = ha.localeCompare(hb, "es-MX")
+        if (byHotel !== 0) return byHotel
+        const na = (a.nombre ?? "").toLocaleLowerCase("es-MX")
+        const nb = (b.nombre ?? "").toLocaleLowerCase("es-MX")
+        const byNombre = na.localeCompare(nb, "es-MX")
+        if (byNombre !== 0) return byNombre
+        return a.id - b.id
       })
 
     return { success: true, data: out }
@@ -420,19 +462,20 @@ export async function listarBeneficioPorHotel(
 export async function validarNombreBeneficio(
   nombre: string,
   hotelid: number | null,
+  excluirId: number | null = null,
 ): Promise<{ disponible: boolean; mensaje: string }> {
   try {
     const v = (nombre ?? "").trim()
     if (!v) return { disponible: false, mensaje: "El nombre está vacío." }
     if (!hotelid) return { disponible: false, mensaje: "Selecciona un hotel primero." }
 
-    const { data, error } = await supabase
+    let q = supabase
       .from("beneficiosadicionales")
       .select("id")
       .ilike("nombre", v)
       .eq("hotelid", hotelid)
-      .limit(1)
-      .maybeSingle()
+    if (excluirId != null) q = q.neq("id", excluirId)
+    const { data, error } = await q.limit(1).maybeSingle()
 
     if (error) return { disponible: false, mensaje: error.message }
     if (data) return { disponible: false, mensaje: "Ya existe un beneficio con ese nombre para este hotel." }
@@ -485,19 +528,20 @@ export async function crearBeneficio(
 export async function validarNombreMobiliario(
   nombre: string,
   hotelid: number | null,
+  excluirId: number | null = null,
 ): Promise<{ disponible: boolean; mensaje: string }> {
   try {
     const v = (nombre ?? "").trim()
     if (!v) return { disponible: false, mensaje: "El nombre está vacío." }
     if (!hotelid) return { disponible: false, mensaje: "Selecciona un hotel primero." }
 
-    const { data, error } = await supabase
+    let q = supabase
       .from("mobiliario")
       .select("id")
       .ilike("nombre", v)
       .eq("hotelid", hotelid)
-      .limit(1)
-      .maybeSingle()
+    if (excluirId != null) q = q.neq("id", excluirId)
+    const { data, error } = await q.limit(1).maybeSingle()
 
     if (error) return { disponible: false, mensaje: error.message }
     if (data) return { disponible: false, mensaje: "Ya existe un mobiliario con ese nombre para este hotel." }
@@ -554,6 +598,135 @@ const TABLAS_ELEMENTOS: Record<string, string> = {
   servicios: "servicio",
   cortesias: "cortesias",
   beneficios: "beneficiosadicionales",
+}
+
+export async function actualizarMobiliario(
+  id: number,
+  payload: CrearMobiliarioPayload,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const nombre = (payload.nombre ?? "").trim()
+    if (!nombre) return { success: false, error: "El nombre es obligatorio." }
+    if (!payload.hotelid) return { success: false, error: "El hotel es obligatorio." }
+
+    const { error } = await supabase
+      .from("mobiliario")
+      .update({
+        nombre,
+        descripcion: (payload.descripcion ?? "").trim() || null,
+        costo: payload.costo,
+        activo: payload.activo,
+        hotelid: payload.hotelid,
+      })
+      .eq("id", id)
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error actualizando mobiliario: " + msg }
+  }
+}
+
+export async function actualizarServicio(
+  id: number,
+  payload: CrearServicioPayload,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const nombre = (payload.nombre ?? "").trim()
+    if (!nombre) return { success: false, error: "El nombre es obligatorio." }
+    if (!payload.hotelid) return { success: false, error: "El hotel es obligatorio." }
+
+    const { error } = await supabase
+      .from("servicio")
+      .update({
+        nombre,
+        descripcion: (payload.descripcion ?? "").trim() || null,
+        costo: payload.costo,
+        activo: payload.activo,
+        hotelid: payload.hotelid,
+      })
+      .eq("id", id)
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error actualizando servicio: " + msg }
+  }
+}
+
+export async function actualizarCortesia(
+  id: number,
+  payload: CrearCortesiaPayload,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const nombre = (payload.nombre ?? "").trim()
+    if (!nombre) return { success: false, error: "El nombre es obligatorio." }
+    if (!payload.hotelid) return { success: false, error: "El hotel es obligatorio." }
+
+    const { error } = await supabase
+      .from("cortesias")
+      .update({
+        nombre,
+        descripcion: (payload.descripcion ?? "").trim() || null,
+        costo: payload.costo,
+        activo: payload.activo,
+        hotelid: payload.hotelid,
+      })
+      .eq("id", id)
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error actualizando cortesía: " + msg }
+  }
+}
+
+export async function actualizarBeneficio(
+  id: number,
+  payload: CrearBeneficioPayload,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const nombre = (payload.nombre ?? "").trim()
+    if (!nombre) return { success: false, error: "El nombre es obligatorio." }
+    if (!payload.hotelid) return { success: false, error: "El hotel es obligatorio." }
+
+    const { error } = await supabase
+      .from("beneficiosadicionales")
+      .update({
+        nombre,
+        descripcion: (payload.descripcion ?? "").trim() || null,
+        costo: payload.costo,
+        activo: payload.activo,
+        hotelid: payload.hotelid,
+      })
+      .eq("id", id)
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error actualizando beneficio: " + msg }
+  }
+}
+
+export async function eliminarElemento(
+  tipo: string,
+  id: number,
+  hotelid: number | null,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const tabla = TABLAS_ELEMENTOS[tipo]
+    if (!tabla) return { success: false, error: `Tipo no soportado: ${tipo}` }
+
+    let q = supabase.from(tabla).delete().eq("id", id)
+    if (hotelid != null) q = q.eq("hotelid", hotelid)
+
+    const { error } = await q
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error eliminando: " + msg }
+  }
 }
 
 /**
