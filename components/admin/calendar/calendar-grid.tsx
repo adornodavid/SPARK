@@ -22,8 +22,7 @@ interface CalendarGridProps {
     cotizaciones: boolean
     reservaciones: boolean
     canceladas: boolean
-    confirmadas: boolean
-    pendientes: boolean
+    interno: boolean
   }
   onDayClick: (dateStr: string) => void
 }
@@ -120,17 +119,11 @@ export default function CalendarGrid({
   // Filter events based on type/status checkboxes
   const getFilteredEventos = useCallback(() => {
     return eventos.filter((evento) => {
-      if (evento.tipo === "Cotizacion" && !filters.cotizaciones) return false
-      if (evento.tipo === "Reservacion" && !filters.reservaciones) return false
+      const interno = (((evento as any).categoriaevento || "") as string).toLowerCase().trim() === "interno"
+      if (interno && !filters.interno) return false
+      if (!interno && evento.tipo === "Cotizacion" && !filters.cotizaciones) return false
+      if (!interno && evento.tipo === "Reservacion" && !filters.reservaciones) return false
       if (isCancelada(evento.estatus) && !filters.canceladas) return false
-      if (
-        (evento.estatus === "reservada" || evento.estatus === "confirmada") &&
-        evento.tipo === "Reservacion" &&
-        !filters.confirmadas
-      )
-        return false
-      if (evento.estatus === "pendiente" && evento.tipo === "Reservacion" && !filters.pendientes)
-        return false
       return true
     })
   }, [eventos, filters])
@@ -149,6 +142,8 @@ export default function CalendarGrid({
   // Color coding: amber=cotizado, purple=reservacion, rojo pastel=cotizacion cancelada, gray=otros cancelados
   const isCancelada = (estatus: string) => estatus?.toLowerCase().includes("cancelada") || estatus?.toLowerCase() === "cancelada"
 
+  const esInterno = (evento: oCalendario) => (((evento as any).categoriaevento || "") as string).toLowerCase().trim() === "interno"
+
   const getEventColor = (evento: oCalendario) => {
     // Cotización cancelada - Rojo pastel
     if (evento.tipo === "Cotizacion" && isCancelada(evento.estatus)) {
@@ -157,6 +152,10 @@ export default function CalendarGrid({
     // Otras canceladas / Realizado - Gray
     if (isCancelada(evento.estatus) || evento.estatus === "realizado") {
       return "bg-gray-400 text-white"
+    }
+    // Categoría Interno - Azul corporativo (#0c7da8)
+    if (esInterno(evento)) {
+      return "bg-[#0c7da8] text-white"
     }
     // Cotizacion activa - Amber/Yellow
     if (evento.tipo === "Cotizacion") {
@@ -183,27 +182,50 @@ export default function CalendarGrid({
     return { hasReservacion, hasCotizacion, hasCancelada }
   }
 
-  // Color sólido de fondo (para un solo tipo)
+  // Color sólido de fondo (para un solo tipo). Si hay >1 tipo activo, retorna "" (gradient lo maneja).
   const getDayStatusColor = (dayEvents: oCalendario[]) => {
     if (dayEvents.length === 0) return ""
-    const { hasReservacion, hasCotizacion } = getDayEventTypes(dayEvents)
-    if (hasReservacion && hasCotizacion) return "" // se maneja con diagonal
-    if (hasReservacion) return "bg-purple-900/80 text-white"
-    if (hasCotizacion) return "bg-amber-400 text-white"
+    const activos = dayEvents.filter((e) => !isCancelada(e.estatus) && e.estatus !== "realizado")
+    const hasReserv = activos.some((e) => e.tipo === "Reservacion" && !esInterno(e))
+    const hasCot = activos.some((e) => e.tipo === "Cotizacion" && !esInterno(e))
+    const hasInt = activos.some(esInterno)
+    const tiposActivos = [hasReserv, hasCot, hasInt].filter(Boolean).length
+    if (tiposActivos > 1) return "" // gradient
+    if (hasReserv) return "bg-purple-900/80 text-white"
+    if (hasInt) return "bg-[#0c7da8] text-white"
+    if (hasCot) return "bg-amber-400 text-white"
     // Solo cotizaciones canceladas
     const hasCotCancelada = dayEvents.some((e) => e.tipo === "Cotizacion" && isCancelada(e.estatus))
     if (hasCotCancelada) return "bg-red-600/85 text-white"
     return "bg-gray-400 text-white"
   }
 
-  // Estilo diagonal para días con reservación + cotización
+  // Estilo diagonal/franjas para días con múltiples tipos de evento
   const getDayDiagonalStyle = (dayEvents: oCalendario[]): React.CSSProperties | undefined => {
-    const { hasReservacion, hasCotizacion } = getDayEventTypes(dayEvents)
-    if (hasReservacion && hasCotizacion) {
+    const activos = dayEvents.filter((e) => !isCancelada(e.estatus) && e.estatus !== "realizado")
+    const hasReserv = activos.some((e) => e.tipo === "Reservacion" && !esInterno(e))
+    const hasCot = activos.some((e) => e.tipo === "Cotizacion" && !esInterno(e))
+    const hasInt = activos.some(esInterno)
+    const COLOR_RES = "rgb(88 28 135 / 0.8)"
+    const COLOR_COT = "rgb(251 191 36)"
+    const COLOR_INT = "#0c7da8"
+    const tiposActivos = [hasReserv, hasCot, hasInt].filter(Boolean).length
+    if (tiposActivos < 2) return undefined
+    if (tiposActivos === 3) {
       return {
-        background: "linear-gradient(135deg, rgb(88 28 135 / 0.8) 50%, rgb(251 191 36) 50%)",
+        background: `linear-gradient(135deg, ${COLOR_RES} 0%, ${COLOR_RES} 33%, ${COLOR_INT} 33%, ${COLOR_INT} 66%, ${COLOR_COT} 66%, ${COLOR_COT} 100%)`,
         color: "white",
       }
+    }
+    // 2 tipos: diagonal a 50/50
+    if (hasReserv && hasCot) {
+      return { background: `linear-gradient(135deg, ${COLOR_RES} 50%, ${COLOR_COT} 50%)`, color: "white" }
+    }
+    if (hasReserv && hasInt) {
+      return { background: `linear-gradient(135deg, ${COLOR_RES} 50%, ${COLOR_INT} 50%)`, color: "white" }
+    }
+    if (hasCot && hasInt) {
+      return { background: `linear-gradient(135deg, ${COLOR_INT} 50%, ${COLOR_COT} 50%)`, color: "white" }
     }
     return undefined
   }
@@ -301,6 +323,14 @@ export default function CalendarGrid({
           </div>
           <div className="flex items-center gap-2">
             {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            <Button
+              variant="outline"
+              onClick={() => router.push("/reservacion-interna/new")}
+              className="gap-2 border-amber-500 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+            >
+              <Plus className="h-4 w-4" />
+              Reservación Interna
+            </Button>
             <Button
               onClick={() => {
                 const params = new URLSearchParams()
@@ -411,8 +441,12 @@ export default function CalendarGrid({
                 const statusColor = getDayStatusColor(eventosDelDia)
                 const primaryEvento = eventosDelDia[0]
 
-                const diagonalStyle = hasEvents && !past ? getDayDiagonalStyle(eventosDelDia) : undefined
+                const diagonalStyle = hasEvents ? getDayDiagonalStyle(eventosDelDia) : undefined
                 const isDiagonal = !!diagonalStyle
+                // Aplicar opacidad reducida en días pasados (sigue mostrando color pero "deshabilitado")
+                const finalStyle: React.CSSProperties | undefined = diagonalStyle
+                  ? (past ? { ...diagonalStyle, opacity: 0.25 } : diagonalStyle)
+                  : undefined
                 const reservaciones = eventosDelDia.filter((e) => e.tipo === "Reservacion" && !isCancelada(e.estatus) && e.estatus !== "realizado")
                 const cotizaciones = eventosDelDia.filter((e) => e.tipo === "Cotizacion" && !isCancelada(e.estatus) && e.estatus !== "realizado")
 
@@ -420,20 +454,20 @@ export default function CalendarGrid({
                   <div
                     key={index}
                     onClick={() => day && handleDayClick(day)}
-                    style={diagonalStyle}
+                    style={finalStyle}
                     className={`
                       relative aspect-square p-2 rounded-lg transition-all duration-200 cursor-pointer
                       ${day === null ? "bg-transparent cursor-default" : ""}
-                      ${past && day !== null ? "bg-muted/20 text-muted-foreground/50" : ""}
+                      ${past && day !== null && !hasEvents ? "bg-muted/20 text-muted-foreground/50" : ""}
                       ${!past && day !== null && !hasEvents
                         ? "bg-card border border-border hover:border-lime-500 hover:shadow-lg hover:scale-105"
                         : ""
                       }
-                      ${!past && day !== null && hasEvents && !isDiagonal
-                        ? `hover:scale-105 hover:shadow-xl ${statusColor}`
+                      ${day !== null && hasEvents && !isDiagonal
+                        ? `hover:scale-105 hover:shadow-xl ${statusColor} ${past ? "opacity-25" : ""}`
                         : ""
                       }
-                      ${!past && day !== null && hasEvents && isDiagonal
+                      ${day !== null && hasEvents && isDiagonal
                         ? "hover:scale-105 hover:shadow-xl"
                         : ""
                       }
@@ -446,8 +480,8 @@ export default function CalendarGrid({
                           className={`
                             text-sm font-bold mb-1 text-center
                             ${isTodayDay && !hasEvents ? "text-lime-600" : ""}
-                            ${past ? "text-muted-foreground/50" : ""}
-                            ${hasEvents && !past ? "text-white" : ""}
+                            ${past && !hasEvents ? "text-muted-foreground/50" : ""}
+                            ${hasEvents ? "text-white" : ""}
                             ${!hasEvents && !past && !isTodayDay ? "text-foreground" : ""}
                           `}
                         >

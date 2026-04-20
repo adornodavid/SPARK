@@ -20,7 +20,8 @@ import {
   X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { obtenerElementosCotizacion, obtenerPlatillosCotizacion } from "@/app/actions/catalogos"
+import { useRouter } from "next/navigation"
+import { obtenerElementosCotizacion, obtenerPlatillosCotizacion, obtenerPrecioPaquetePorPlatillo } from "@/app/actions/catalogos"
 import { objetoSalon } from "@/app/actions/salones"
 import { createBrowserClient } from "@/lib/supabase/client"
 import type { oCotizacion } from "@/types/cotizaciones"
@@ -173,6 +174,7 @@ function getIcon(tipo: string) {
 }
 
 export function QuotationDetailModal({ open, onOpenChange, quotation }: QuotationDetailModalProps) {
+  const router = useRouter()
   const [elements, setElements] = useState<any[]>([])
   const [loadingElements, setLoadingElements] = useState(false)
   const [presupuestoItems, setPresupuestoItems] = useState<PresupuestoItem[]>([])
@@ -190,60 +192,199 @@ export function QuotationDetailModal({ open, onOpenChange, quotation }: Quotatio
   }, [open, quotation])
 
   async function loadData(q: oCotizacion) {
-    // Load elements
-    const elemRes = await obtenerElementosCotizacion(q.id)
-    if (elemRes.success && elemRes.data) {
-      setElements(elemRes.data)
-    }
+    const supabase = createBrowserClient()
 
-    // Build presupuesto (same logic as quotation-form)
+    // 1) Resolver reservacionid a partir del eventoid (q.id es eventoid)
+    const { data: resvRows } = await supabase
+      .from("eventoxreservaciones")
+      .select("id, paqueteid, horasextras")
+      .eq("eventoid", q.id)
+      .order("id", { ascending: true })
+    const reservacionId = Number(resvRows?.[0]?.id ?? q.id)
+    let paqueteId = resvRows?.[0]?.paqueteid ?? null
+    const horasExtras = Number(resvRows?.[0]?.horasextras ?? (q as any).horasextras ?? 0) || 0
+
+    // 2) Cargar elementos por reservacionid
+    const elemRes = await obtenerElementosCotizacion(reservacionId)
+    const elementosCotizacion: any[] = (elemRes.success && elemRes.data) ? elemRes.data : []
+    setElements(elementosCotizacion)
+
+    // 3) Cargar platillos por reservacionid
+    const platRes = await obtenerPlatillosCotizacion(reservacionId)
+    const platillosCotizacion: any[] = (platRes.success && platRes.data) ? platRes.data : []
+
     const dias = calcularDiasEvento(q.fechainicio, q.fechafin)
     const numInvitados = Number(q.numeroinvitados) || 0
     const presItems: PresupuestoItem[] = []
-    const supabase = createBrowserClient()
 
-    // Platillos
-    const platRes = await obtenerPlatillosCotizacion(q.id)
-    if (platRes.success && platRes.data) {
-      for (const pl of platRes.data) {
-        const plTotal = pl.costo ? Number(pl.costo) : 0
-        presItems.push(crearPresupuestoItem(pl.descripcion || pl.nombre || pl.elemento || "", "Platillo", plTotal, dias, 0, numInvitados))
+    // Fallback paqueteid via elementosxcotizacion
+    if (!paqueteId) {
+      const { data: rawElems } = await supabase
+        .from("elementosxcotizacion")
+        .select("paqueteid")
+        .eq("reservacionid", reservacionId)
+        .not("paqueteid", "is", null)
+        .limit(1)
+      if (rawElems && rawElems.length > 0 && rawElems[0].paqueteid != null) paqueteId = rawElems[0].paqueteid
+    }
+
+    // 4) Renglón "Paquete" — usa el menu principal (Completo o primero con platillos)
+    let menuPrincipalId = 0
+    if (paqueteId) {
+      const alimentosEls = elementosCotizacion.filter((el: any) => normalizarSeccion(el.tipoelemento || el.tipo || "") === "alimentos")
+      let menuPrincipal: any = null
+      let tipoMenuPrincipal = ""
+      if (alimentosEls.length > 0) {
+        const menuIds = alimentosEls.map((el: any) => Number(el.elementoid ?? el.id))
+        const { data: menusData } = await supabase.from("menus").select("id, tipomenu").in("id", menuIds)
+        const menuMap = new Map((menusData || []).map((m: any) => [Number(m.id), String(m.tipomenu || "")]))
+        for (const alim of alimentosEls) {
+          const alimId = Number(alim.elementoid ?? alim.id)
+          if ((menuMap.get(alimId) || "").toLowerCase() === "completo") {
+            menuPrincipal = alim
+            tipoMenuPrincipal = menuMap.get(alimId) || ""
+            break
+          }
+        }
+        if (!menuPrincipal) {
+          for (const alim of alimentosEls) {
+            const alimId = Number(alim.elementoid ?? alim.id)
+            if (platillosCotizacion.some((p: any) => Number(p.platilloid) === alimId)) {
+              menuPrincipal = alim
+              tipoMenuPrincipal = menuMap.get(alimId) || ""
+              break
+            }
+          }
+        }
+      }
+      if (menuPrincipal) {
+        menuPrincipalId = Number(menuPrincipal.elementoid ?? menuPrincipal.id)
+        const esCompleto = tipoMenuPrincipal.toLowerCase() === "completo"
+        const platillosDeMenu = platillosCotizacion.filter((p: any) => Number(p.platilloid) === menuPrincipalId)
+        const platilloClave = esCompleto
+          ? platillosDeMenu.find((p: any) => (p.tipo || "").toUpperCase() === "PLATO FUERTE")
+          : platillosDeMenu[0]
+        if (platilloClave) {
+          const { data: paqRow } = await supabase.from("paquetes").select("id, nombre, precioporpersona").eq("id", Number(paqueteId)).maybeSingle()
+          let precioPaquete = Number(paqRow?.precioporpersona ?? 0) || 0
+          if (precioPaquete === 0) {
+            const r = await obtenerPrecioPaquetePorPlatillo(Number(paqueteId), Number(platilloClave.elementoid ?? platilloClave.id))
+            precioPaquete = r.precio || 0
+          }
+          const nombreMenu = menuPrincipal?.descripcion || menuPrincipal?.nombre || menuPrincipal?.elemento || paqRow?.nombre || "Paquete"
+          presItems.push(crearPresupuestoItem(nombreMenu, "Paquete", precioPaquete, dias, 0, numInvitados))
+        }
       }
     }
 
-    // Audiovisual
-    const { data: avElems } = await supabase.from("elementosxcotizacion").select("*").eq("cotizacionid", q.id).eq("tipoelemento", "AudioVisual")
+    // 5) Salón
+    if (q.salonid) {
+      const salonRes = await objetoSalon(q.salonid)
+      if (salonRes.success && salonRes.data) {
+        const precioSalon = salonRes.data.preciopordia ? Number(salonRes.data.preciopordia) : 0
+        presItems.unshift(crearPresupuestoItem(salonRes.data.nombre || "Salón", "Salón", precioSalon, dias, 0, 1))
+      }
+    }
+
+    // 6) Audiovisual
+    const { data: avElems } = await supabase.from("elementosxcotizacion").select("*").eq("reservacionid", reservacionId).eq("tipoelemento", "AudioVisual")
     if (avElems && avElems.length > 0) {
-      const avIds = avElems.map((e: any) => e.elementoid)
+      const avIds = avElems.map((e: any) => e.elementoid).filter(Boolean)
       const { data: avData } = await supabase.from("audiovisual").select("id, nombre, costo").in("id", avIds)
       const avMap = new Map((avData || []).map((a: any) => [a.id, a]))
       for (const e of avElems) {
-        const av = avMap.get(e.elementoid)
+        const av = avMap.get(e.elementoid) as any
         const avTotal = av?.costo ? Number(av.costo) : 0
         presItems.push(crearPresupuestoItem(av?.nombre || "Audiovisual", "Audiovisual", avTotal, dias, 0, 1))
       }
     }
 
-    // Complementos
-    const { data: compElems } = await supabase.from("elementosxcotizacion").select("*").eq("cotizacionid", q.id).eq("tipoelemento", "Complemento")
+    // 7) Complementos
+    const { data: compElems } = await supabase.from("elementosxcotizacion").select("*").eq("reservacionid", reservacionId).eq("tipoelemento", "Complemento")
     if (compElems && compElems.length > 0) {
-      const compIds = compElems.map((e: any) => e.elementoid)
+      const compIds = compElems.map((e: any) => e.elementoid).filter(Boolean)
       const { data: compData } = await supabase.from("complementos").select("id, nombre, costo").in("id", compIds)
       const compMap = new Map((compData || []).map((c: any) => [c.id, c]))
       for (const e of compElems) {
-        const comp = compMap.get(e.elementoid)
+        const comp = compMap.get(e.elementoid) as any
         const compTotal = comp?.costo ? Number(comp.costo) : 0
         presItems.push(crearPresupuestoItem(comp?.nombre || "Complemento", "Complemento", compTotal, dias, 0, numInvitados))
       }
     }
 
-    // Salon al inicio
-    if (q.salonid) {
-      const salonRes = await objetoSalon(q.salonid)
-      if (salonRes.success && salonRes.data) {
-        const precioSalon = salonRes.data.preciopordia ? Number(salonRes.data.preciopordia) : 0
-        presItems.unshift(crearPresupuestoItem(salonRes.data.nombre || "Salon", "Salon", precioSalon, dias, 0, 1))
+    // 8) Adicionales (alimentos/bebidas no incluidos en el paquete)
+    let paqueteOriginalKeys = new Set<string>()
+    if (paqueteId) {
+      const { data: origElems } = await supabase.from("elementosxpaquete").select("elementoid, tipoelemento").eq("paqueteid", Number(paqueteId))
+      for (const row of (origElems || []) as any[]) {
+        const t = String(row.tipoelemento || "").toLowerCase().trim()
+        const id = Number(row.elementoid)
+        if (t && Number.isFinite(id)) paqueteOriginalKeys.add(`${t}-${id}`)
       }
+    }
+    // Tipomenu lookup para detectar Individual
+    const alimAdicIds = elementosCotizacion
+      .filter((el: any) => normalizarSeccion(el.tipoelemento || el.tipo || "") === "alimentos")
+      .map((el: any) => Number(el.elementoid ?? el.id))
+      .filter((n: number) => Number.isFinite(n))
+    let tipoMenuMap = new Map<number, string>()
+    if (alimAdicIds.length > 0) {
+      const { data: menusData } = await supabase.from("menus").select("id, tipomenu, costo").in("id", alimAdicIds)
+      tipoMenuMap = new Map((menusData || []).map((m: any) => [Number(m.id), String(m.tipomenu || "")]))
+      ;(menusData || []).forEach((m: any) => { (m as any)._costoLookup = Number(m.costo) || 0 })
+    }
+    for (const el of elementosCotizacion) {
+      const tipoSec = normalizarSeccion(el.tipoelemento || el.tipo || "")
+      if (tipoSec !== "alimentos" && tipoSec !== "bebidas") continue
+      const tipoCanon = String(el.tipoelemento || "").toLowerCase().trim()
+      const elemId = Number(el.elementoid ?? el.id)
+      if (!Number.isFinite(elemId)) continue
+      const key = `${tipoCanon}-${elemId}`
+      if (paqueteOriginalKeys.size > 0 && paqueteOriginalKeys.has(key)) continue
+      const nombreMenu = el.descripcion || el.nombre || el.elemento || (tipoSec === "alimentos" ? "Menú adicional" : "Bebida adicional")
+      const tipoLabel = tipoSec === "alimentos" ? "Alimento adicional" : "Bebida adicional"
+      if (tipoSec === "alimentos") {
+        const tipoMenu = (tipoMenuMap.get(elemId) || "").toLowerCase()
+        const platillosDeMenu = platillosCotizacion.filter((p: any) => Number(p.platilloid) === elemId)
+        if (tipoMenu === "individual" && platillosDeMenu.length > 0) {
+          for (const plat of platillosDeMenu) {
+            const cPlat = Number(plat?.costo) || 0
+            const nombrePlat = plat?.nombre || plat?.descripcion || "Platillo"
+            presItems.push(crearPresupuestoItem(`${nombreMenu} — ${nombrePlat}`, tipoLabel, cPlat, dias, 0, numInvitados))
+          }
+          continue
+        }
+      }
+      const costoRow = Number(el.costo) || 0
+      let costo = costoRow
+      if (costo <= 0) {
+        // fallback: menus.costo
+        if (tipoSec === "alimentos") {
+          const { data: m } = await supabase.from("menus").select("costo").eq("id", elemId).maybeSingle()
+          costo = Number(m?.costo) || 0
+        } else {
+          const { data: b } = await supabase.from("menubebidas").select("costo").eq("id", elemId).maybeSingle()
+          costo = Number(b?.costo) || 0
+        }
+        if (costo <= 0 && tipoSec === "alimentos") {
+          const platillosDeMenu = platillosCotizacion.filter((p: any) => Number(p.platilloid) === elemId)
+          const tipoMenu = (tipoMenuMap.get(elemId) || "").toLowerCase()
+          const platilloClave = tipoMenu === "completo"
+            ? platillosDeMenu.find((p: any) => (p.tipo || "").toUpperCase() === "PLATO FUERTE")
+            : platillosDeMenu[0]
+          costo = Number(platilloClave?.costo) || 0
+        }
+      }
+      presItems.push(crearPresupuestoItem(nombreMenu, tipoLabel, costo, dias, 0, numInvitados))
+    }
+
+    // 9) Hora extra
+    const salonItem = presItems.find(p => p.tipo === "Salón")
+    if (horasExtras > 0 && salonItem && salonItem.subtotal > 0) {
+      const precioPorHora = salonItem.subtotal / 8
+      const idxSalon = presItems.findIndex(p => p.tipo === "Salón")
+      const horaExtraItem = crearPresupuestoItem("Hora extra", "Hora extra", precioPorHora, 1, 0, horasExtras)
+      presItems.splice(idxSalon + 1, 0, horaExtraItem)
     }
 
     setPresupuestoItems(presItems)
@@ -505,16 +646,27 @@ export function QuotationDetailModal({ open, onOpenChange, quotation }: Quotatio
                         </tr>
                       </thead>
                       <tbody>
-                        {presupuestoItems.map((item, index) => (
+                        {(() => {
+                          // Misma regla de cortesía que en cotizaciones/new: si la suma de los demás conceptos
+                          // (excluyendo Audiovisual y Hora extra) cubre el total del salón, el salón queda en cortesía.
+                          const otrosTotal = presupuestoItems
+                            .filter(p => p.tipo !== "Salón" && p.tipo !== "Salon" && p.tipo !== "Audiovisual" && p.tipo !== "Hora extra")
+                            .reduce((s, p) => s + p.total, 0)
+                          return presupuestoItems.map((item, index) => {
+                            const esCortesiaSalon = (item.tipo === "Salón" || item.tipo === "Salon") && item.total > 0 && otrosTotal >= item.total
+                            const subTotalAjustado = item.subtotal + (item.servicio || 0) - ((item as any).descuento || 0)
+                            return (
                           <tr key={index} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                             <td className="px-2 py-2.5 text-gray-500">{index + 1}</td>
                             <td className="px-2 py-2.5 text-gray-900 font-medium truncate">{item.concepto}</td>
                             <td className="px-2 py-2.5">
                               <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[11px] font-medium whitespace-nowrap ${
-                                item.tipo === "Salon" ? "bg-blue-100 text-blue-700" :
+                                item.tipo === "Salón" || item.tipo === "Salon" ? "bg-blue-100 text-blue-700" :
+                                item.tipo === "Paquete" ? "bg-orange-100 text-orange-700" :
                                 item.tipo === "Platillo" ? "bg-orange-100 text-orange-700" :
                                 item.tipo === "Audiovisual" ? "bg-purple-100 text-purple-700" :
                                 item.tipo === "Complemento" ? "bg-teal-100 text-teal-700" :
+                                item.tipo === "Hora extra" ? "bg-indigo-100 text-indigo-700" :
                                 "bg-gray-100 text-gray-700"
                               }`}>
                                 {item.tipo}
@@ -530,23 +682,38 @@ export function QuotationDetailModal({ open, onOpenChange, quotation }: Quotatio
                               {item.servicio > 0 ? formatCurrency(item.servicio) : "-"}
                             </td>
                             <td className="px-2 py-2.5 text-right text-gray-900 tabular-nums">
-                              {item.subtotal > 0 ? formatCurrency(item.subtotal) : "Por definir"}
+                              {subTotalAjustado > 0
+                                ? formatCurrency(subTotalAjustado)
+                                : (item.subtotal > 0 ? formatCurrency(0) : "Por definir")}
                             </td>
                             <td className="px-2 py-2.5 text-center text-gray-900">{item.cantidad || "-"}</td>
                             <td className="px-2 py-2.5 text-center text-gray-900">{item.dias}</td>
                             <td className="px-2 py-2.5 text-right text-gray-900 font-medium tabular-nums">
-                              {item.total > 0 ? formatCurrency(item.total) : "Por definir"}
+                              {esCortesiaSalon ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
+                                  Cortesía
+                                </span>
+                              ) : (
+                                item.total > 0 ? formatCurrency(item.total) : "Por definir"
+                              )}
                             </td>
                           </tr>
-                        ))}
+                          )
+                          })
+                        })()}
                       </tbody>
                       <tfoot>
                         <tr className="bg-[#1a3d2e]/5 border-t-2 border-[#1a3d2e]/20">
                           <td colSpan={9} className="px-3 py-3 text-right font-semibold text-gray-900">Total</td>
                           <td className="px-3 py-3 text-right font-bold text-[#1a3d2e] text-base">
-                            {presupuestoItems.reduce((sum, i) => sum + i.total, 0) > 0
-                              ? formatCurrency(presupuestoItems.reduce((sum, i) => sum + i.total, 0))
-                              : "Por definir"}
+                            {(() => {
+                              const otrosTotal = presupuestoItems.filter(p => p.tipo !== "Salón" && p.tipo !== "Salon" && p.tipo !== "Audiovisual" && p.tipo !== "Hora extra").reduce((s, p) => s + p.total, 0)
+                              const total = presupuestoItems.reduce((sum, i) => {
+                                const esCortesia = (i.tipo === "Salón" || i.tipo === "Salon") && i.total > 0 && otrosTotal >= i.total
+                                return sum + (esCortesia ? 0 : i.total)
+                              }, 0)
+                              return total > 0 ? formatCurrency(total) : "Por definir"
+                            })()}
                           </td>
                         </tr>
                       </tfoot>
@@ -578,9 +745,29 @@ export function QuotationDetailModal({ open, onOpenChange, quotation }: Quotatio
           )}
 
           {/* Meta */}
-          <div className="px-6 pb-5 flex items-center justify-between text-xs text-gray-400">
+          <div className="px-6 pb-3 flex items-center justify-between text-xs text-gray-400">
             <span>Creada: {formatDate(quotation.fechacreacion)}</span>
             <span>Actualizada: {formatDate(quotation.fechaactualizacion)}</span>
+          </div>
+
+          {/* Acciones */}
+          <div className="px-6 pb-5 pt-2 border-t border-gray-100 flex items-center justify-end gap-3">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>Cerrar</Button>
+            <Button
+              onClick={() => {
+                onOpenChange(false)
+                const esInterno = (((quotation as any)?.categoriaevento || "") as string).toLowerCase().trim() === "interno"
+                const ruta = esInterno
+                  ? `/reservacion-interna/new?editId=${quotation.id}`
+                  : `/cotizaciones/new?editId=${quotation.id}`
+                router.push(ruta)
+              }}
+              className="bg-[#1a3d2e] hover:bg-[#1a3d2e]/90 text-white"
+            >
+              {(((quotation as any)?.categoriaevento || "") as string).toLowerCase().trim() === "interno"
+                ? "Editar Reservación"
+                : "Editar Cotización"}
+            </Button>
           </div>
         </div>
       </DialogContent>

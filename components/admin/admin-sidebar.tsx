@@ -44,33 +44,8 @@ const navItems = [
     icon: Building2,
   },
   {
-    title: "Habitaciones",
-    href: "/habitaciones",
-    icon: BedDouble,
-  },
-  {
     title: "Salones",
     href: "/salones",
-    icon: Building2,
-  },
-  {
-    title: "Paquetes",
-    href: "/packages",
-    icon: Package,
-  },
-  {
-    title: "Menus",
-    href: "/menus",
-    icon: Utensils,
-  },
-  {
-    title: "Clientes",
-    href: "/clientes",
-    icon: Users,
-  },
-  {
-    title: "Empresas",
-    href: "/empresas",
     icon: Building2,
   },
   {
@@ -84,20 +59,45 @@ const navItems = [
     icon: Calendar,
   },
   {
-    title: "Convenios",
-    href: "/agreements",
-    icon: Handshake,
+    title: "Clientes",
+    href: "/clientes",
+    icon: Users,
+  },
+  {
+    title: "Empresas",
+    href: "/empresas",
+    icon: Building2,
+  },
+  {
+    title: "Paquetes",
+    href: "/packages",
+    icon: Package,
+  },
+  {
+    title: "Menus",
+    href: "/menus",
+    icon: Utensils,
   },
   {
     title: "Reportes",
     href: "/reportes",
     icon: BarChart3,
   },
-  {
-    title: "Configuracion",
-    href: "/configuraciones",
-    icon: Settings,
-  },
+  // {
+  //   title: "Habitaciones",
+  //   href: "/habitaciones",
+  //   icon: BedDouble,
+  // },
+  // {
+  //   title: "Convenios",
+  //   href: "/agreements",
+  //   icon: Handshake,
+  // },
+  // {
+  //   title: "Configuracion",
+  //   href: "/configuraciones",
+  //   icon: Settings,
+  // },
 ]
 
 // CRM section — sub-navigation
@@ -135,11 +135,11 @@ const quickAccessItems = [
   //   href: "/salones",
   //   icon: Building2,
   // },
-  {
-    title: "CRM",
-    href: "/crm",
-    icon: Target,
-  },
+  // {
+  //   title: "CRM",
+  //   href: "/crm",
+  //   icon: Target,
+  // },
 ]
 
 export function AdminSidebar({ userRole }: { userRole: string }) {
@@ -265,7 +265,7 @@ export function AdminSidebar({ userRole }: { userRole: string }) {
             )
           })}
 
-          {/* CRM Section — collapsible */}
+          {/* CRM Section — ocultada temporalmente
           <div className="pt-3 mt-3 border-t border-sidebar-border">
             <button
               onClick={() => setIsCRMExpanded(!isCRMExpanded)}
@@ -311,6 +311,7 @@ export function AdminSidebar({ userRole }: { userRole: string }) {
               </div>
             )}
           </div>
+          */}
 
           {/* Admin — solo visible para SuperAdmin y Admin */}
           {isAdminRole && (

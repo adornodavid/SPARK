@@ -28,8 +28,7 @@ function DashboardContent() {
     cotizaciones: true,
     reservaciones: true,
     canceladas: false,
-    confirmadas: true,
-    pendientes: true,
+    interno: true,
   })
 
   // Calendar view mode: "classic" or "availability"
@@ -37,7 +36,16 @@ function DashboardContent() {
 
   // Day Detail Sheet state
   const [sheetOpen, setSheetOpen] = useState(false)
-  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [selectedDate, setSelectedDate] = useState<string | null>(searchParams.get("date"))
+
+  // Auto-open day sheet when URL trae ?date=YYYY-MM-DD (ej. tras crear una reservación interna)
+  useEffect(() => {
+    const d = searchParams.get("date")
+    if (d) {
+      setSelectedDate(d)
+      setSheetOpen(true)
+    }
+  }, [searchParams])
 
   // Session check
   useEffect(() => {

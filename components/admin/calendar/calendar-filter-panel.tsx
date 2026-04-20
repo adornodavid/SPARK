@@ -18,15 +18,13 @@ interface CalendarFilterPanelProps {
     cotizaciones: boolean
     reservaciones: boolean
     canceladas: boolean
-    confirmadas: boolean
-    pendientes: boolean
+    interno: boolean
   }
   onFiltersChange: (filters: {
     cotizaciones: boolean
     reservaciones: boolean
     canceladas: boolean
-    confirmadas: boolean
-    pendientes: boolean
+    interno: boolean
   }) => void
   userHoteles: string // Comma-separated hotel IDs from session
 }
@@ -199,35 +197,18 @@ export default function CalendarFilterPanel({
 
             <div className="flex items-center space-x-2">
               <Checkbox
-                id="confirmadas"
-                checked={filters.confirmadas}
+                id="interno"
+                checked={filters.interno}
                 onCheckedChange={(checked) =>
-                  onFiltersChange({ ...filters, confirmadas: checked as boolean })
+                  onFiltersChange({ ...filters, interno: checked as boolean })
                 }
               />
               <label
-                htmlFor="confirmadas"
+                htmlFor="interno"
                 className="text-sm font-medium leading-none cursor-pointer flex items-center gap-1.5"
               >
-                <span className="inline-block w-2.5 h-2.5 rounded-full bg-purple-900/80"></span>
-                Confirmadas
-              </label>
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="pendientes"
-                checked={filters.pendientes}
-                onCheckedChange={(checked) =>
-                  onFiltersChange({ ...filters, pendientes: checked as boolean })
-                }
-              />
-              <label
-                htmlFor="pendientes"
-                className="text-sm font-medium leading-none cursor-pointer flex items-center gap-1.5"
-              >
-                <span className="inline-block w-2.5 h-2.5 rounded-full bg-purple-700/75"></span>
-                Pendientes
+                <span className="inline-block w-2.5 h-2.5 rounded-full bg-[#0c7da8]"></span>
+                Interno
               </label>
             </div>
 

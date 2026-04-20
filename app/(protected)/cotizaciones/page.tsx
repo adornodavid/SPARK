@@ -50,12 +50,20 @@ export default function QuotationsPage() {
             Gestiona prospectos y cotizaciones de eventos
           </p>
         </div>
-        <Link href="/cotizaciones/new">
-          <Button>
-            <Plus className="h-4 w-4 mr-2" />
-            Nueva Cotización
-          </Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link href="/reservacion-interna/new">
+            <Button variant="outline" className="border-amber-500 text-amber-700 hover:bg-amber-50 hover:text-amber-800">
+              <Plus className="h-4 w-4 mr-2" />
+              Reservación Interna
+            </Button>
+          </Link>
+          <Link href="/cotizaciones/new">
+            <Button>
+              <Plus className="h-4 w-4 mr-2" />
+              Nueva Cotización
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <ProspectsQuotationsBoard />

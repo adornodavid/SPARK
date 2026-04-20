@@ -22,6 +22,7 @@ import {
   Plus,
   FileText,
   Loader2,
+  Pencil,
 } from "lucide-react"
 import { obtenerEventosPorDia } from "@/app/actions/calendario"
 import type { oCalendario } from "@/types/calendario"
@@ -76,26 +77,38 @@ export default function DayDetailSheet({
     fetchEventos()
   }, [open, selectedDate, selectedHotel, selectedSalon])
 
+  const esInterno = (evento: oCalendario) => (((evento as any).categoriaevento || "") as string).toLowerCase().trim() === "interno"
+  const estatusLc = (evento: oCalendario) => ((evento.estatus || "") as string).toLowerCase().trim()
+
   const getStatusColor = (evento: oCalendario) => {
-    if (evento.estatus === "cancelada") return "bg-muted border-border text-muted-foreground"
-    if (evento.estatus === "realizado") return "bg-muted border-border text-muted-foreground"
-    if (evento.tipo === "Reservacion" && (evento.estatus === "reservada" || evento.estatus === "confirmada"))
+    const e = estatusLc(evento)
+    if (e.includes("cancel")) return "bg-muted border-border text-muted-foreground"
+    if (e === "realizado") return "bg-muted border-border text-muted-foreground"
+    // Categoría Interno → azul corporativo (#0c7da8)
+    if (esInterno(evento)) return "bg-[#0c7da8]/10 border-[#0c7da8] text-[#0c7da8]"
+    if (evento.tipo === "Reservacion" && (e === "reservada" || e === "confirmada"))
       return "bg-red-50 border-red-300 text-red-800"
-    if (evento.tipo === "Reservacion" && evento.estatus === "pendiente")
+    if (evento.tipo === "Reservacion" && e === "pendiente")
       return "bg-cyan-50 border-cyan-300 text-cyan-800"
+    if (evento.tipo === "Reservacion") return "bg-purple-50 border-purple-300 text-purple-900"
     if (evento.tipo === "Cotizacion") return "bg-amber-50 border-amber-300 text-amber-800"
     return "bg-muted border-border text-muted-foreground"
   }
 
   const getStatusBadge = (evento: oCalendario) => {
-    if (evento.estatus === "cancelada")
+    const e = estatusLc(evento)
+    if (e.includes("cancel"))
       return <Badge variant="outline" className="border-gray-400 text-gray-600 text-[10px]">Cancelada</Badge>
-    if (evento.estatus === "realizado")
+    if (e === "realizado")
       return <Badge variant="outline" className="border-gray-500 text-gray-600 text-[10px]">Realizado</Badge>
-    if (evento.tipo === "Reservacion" && (evento.estatus === "reservada" || evento.estatus === "confirmada"))
+    if (esInterno(evento))
+      return <Badge variant="outline" className="border-[#0c7da8] text-[#0c7da8] text-[10px]">Interno</Badge>
+    if (evento.tipo === "Reservacion" && (e === "reservada" || e === "confirmada"))
       return <Badge variant="outline" className="border-red-500 text-red-700 text-[10px]">Confirmado</Badge>
-    if (evento.tipo === "Reservacion" && evento.estatus === "pendiente")
+    if (evento.tipo === "Reservacion" && e === "pendiente")
       return <Badge variant="outline" className="border-cyan-500 text-cyan-700 text-[10px]">Pendiente</Badge>
+    if (evento.tipo === "Reservacion")
+      return <Badge variant="outline" className="border-purple-500 text-purple-700 text-[10px]">Reservación</Badge>
     if (evento.tipo === "Cotizacion")
       return <Badge variant="outline" className="border-amber-500 text-amber-700 text-[10px]">Cotizado</Badge>
     return <Badge variant="outline" className="text-[10px]">{evento.estatus}</Badge>
@@ -198,9 +211,9 @@ export default function DayDetailSheet({
                     </Badge>
                   </div>
 
-                  {hotelEventos.map((evento) => (
+                  {hotelEventos.map((evento, idx) => (
                     <Card
-                      key={`${evento.tipo}-${evento.id}`}
+                      key={`${evento.tipo}-${evento.id}-${(evento as any).reservacionid ?? (evento as any).salonid ?? "x"}-${(evento as any).horainicio ?? "h"}-${idx}`}
                       className={`border-l-4 ${getStatusColor(evento)} cursor-pointer transition-all hover:shadow-md`}
                     >
                       <CardContent className="p-3 space-y-2">
@@ -259,6 +272,27 @@ export default function DayDetailSheet({
                             {evento.notas}
                           </p>
                         )}
+
+                        {/* Acciones */}
+                        <div className="flex justify-end pt-1.5 border-t mt-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-[11px] gap-1.5"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onOpenChange(false)
+                              const esInterno = (((evento as any).categoriaevento || "") as string).toLowerCase().trim() === "interno"
+                              const ruta = esInterno
+                                ? `/reservacion-interna/new?editId=${evento.id}`
+                                : `/cotizaciones/new?editId=${evento.id}`
+                              router.push(ruta)
+                            }}
+                          >
+                            <Pencil className="h-3 w-3" />
+                            Editar
+                          </Button>
+                        </div>
                       </CardContent>
                     </Card>
                   ))}

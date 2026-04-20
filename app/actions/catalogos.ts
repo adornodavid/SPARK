@@ -63,13 +63,13 @@ export async function listaEstatusSeguimiento() {
   }
 }
 
-// Función: listaEstatusCotizacion: obtiene id y nombre de estatus donde seccion = 'Cotizacion'
-export async function listaEstatusCotizacion() {
+// Función: listaEstatusCotizacion: obtiene id y nombre de estatus filtrado por seccion (default 'Cotizacion')
+export async function listaEstatusCotizacion(seccion = "Cotizacion") {
   try {
     const { data, error } = await supabase
       .from("estatus")
       .select("id, nombre")
-      .eq("seccion", "Cotizacion")
+      .eq("seccion", seccion)
       .order("orden", { ascending: true })
 
     if (error) {
@@ -416,13 +416,20 @@ export async function obtenerDocumentoPDF(elementoid: number, tipo: string) {
 }
 
 // Función: buscarElementosPorTabla: busca elementos en la tabla correspondiente al tipoelemento
-export async function buscarElementosPorTabla(tipo: string) {
+// Si se pasa hotelid, filtra por esa columna (aplica a tablas que tienen hotelid: menus, platillos, mobiliario, etc.)
+export async function buscarElementosPorTabla(tipo: string, hotelid?: number | null) {
   const tabla = resolverTabla(tipo)
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from(tabla)
       .select("*")
       .order("nombre", { ascending: true })
+
+    if (hotelid != null && hotelid > 0) {
+      query = query.eq("hotelid", hotelid)
+    }
+
+    const { data, error } = await query
 
     if (error) {
       console.error(`Error buscando elementos en tabla ${tabla}: `, error)
@@ -592,6 +599,25 @@ export async function agregarElementoACotizacion(cotizacionid: number, hotelid: 
   } catch (error) {
     console.error("Error en agregarElementoACotizacion: ", error)
     return { success: false, error: "Error interno del servidor" }
+  }
+}
+
+// Función: obtenerElementosPaqueteOriginal: lista los elementos que pertenecen al paquete original
+// Se usa para identificar qué elementos en la cotización son "adicionales" (no incluidos en el paquete).
+export async function obtenerElementosPaqueteOriginal(paqueteid: number) {
+  try {
+    const { data, error } = await supabase
+      .from("elementosxpaquete")
+      .select("elementoid, tipoelemento")
+      .eq("paqueteid", paqueteid)
+    if (error) {
+      console.error("Error obteniendo elementos originales del paquete: ", error)
+      return { success: false, error: error.message, data: [] as { elementoid: number; tipoelemento: string }[] }
+    }
+    return { success: true, data: (data || []) as { elementoid: number; tipoelemento: string }[] }
+  } catch (error) {
+    console.error("Error en obtenerElementosPaqueteOriginal: ", error)
+    return { success: false, error: "Error interno del servidor", data: [] as { elementoid: number; tipoelemento: string }[] }
   }
 }
 

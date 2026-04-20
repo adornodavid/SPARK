@@ -57,9 +57,13 @@ export default function CalendarSidebar({
       if (result.success && Array.isArray(result.data)) {
         const allEventos = result.data as oCalendario[]
 
-        // Upcoming events - solo reservaciones (next 7)
+        // Upcoming events - reservaciones + cotizaciones de categoría Interno (next 7)
         const upcoming = allEventos
-          .filter((e) => e.fechainicio >= rangoInicio && e.tipo === "Reservacion")
+          .filter((e) => {
+            if (e.fechainicio < rangoInicio) return false
+            const interno = (((e as any).categoriaevento || "") as string).toLowerCase().trim() === "interno"
+            return e.tipo === "Reservacion" || interno
+          })
           .sort((a, b) => a.fechainicio.localeCompare(b.fechainicio))
           .slice(0, 7)
         setUpcomingEvents(upcoming)
@@ -108,11 +112,23 @@ export default function CalendarSidebar({
     fetchData()
   }, [fetchData])
 
+  const esInterno = (evento: oCalendario) => (((evento as any).categoriaevento || "") as string).toLowerCase().trim() === "interno"
+
   const getStatusBadgeClass = (evento: oCalendario) => {
+    const e = ((evento.estatus || "") as string).toLowerCase().trim()
+    if (e.includes("cancel")) return "border-gray-400 text-gray-600"
+    if (esInterno(evento)) return "border-[#0c7da8] text-[#0c7da8]"
     if (evento.tipo === "Cotizacion") return "border-amber-500 text-amber-700"
-    if (evento.estatus === "cancelada") return "border-gray-400 text-gray-600"
-    if (evento.estatus === "pendiente") return "border-cyan-500 text-cyan-700"
+    if (e === "pendiente") return "border-cyan-500 text-cyan-700"
     return "border-red-500 text-red-700"
+  }
+
+  const getCardBorderClass = (evento: oCalendario) => {
+    const e = ((evento.estatus || "") as string).toLowerCase().trim()
+    if (e.includes("cancel")) return "border-l-4 border-l-gray-400 hover:border-gray-500"
+    if (esInterno(evento)) return "border-l-4 border-l-[#0c7da8] hover:border-[#0c7da8]"
+    if (evento.tipo === "Cotizacion") return "border-l-4 border-l-amber-400 hover:border-amber-500"
+    return "border-l-4 border-l-purple-900/80 hover:border-purple-900"
   }
 
   return (
@@ -145,14 +161,14 @@ export default function CalendarSidebar({
                   <div
                     key={`${evento.tipo}-${evento.id}-${index}`}
                     onClick={() => onEventClick(evento.fechainicio)}
-                    className="p-4 rounded-lg border border-border hover:border-lime-500 hover:shadow-md transition-all cursor-pointer"
+                    className={`p-4 rounded-lg border border-border hover:shadow-md transition-all cursor-pointer ${getCardBorderClass(evento)}`}
                   >
                     <div className="flex items-start justify-between mb-2">
                       <h3 className="font-semibold text-base truncate flex-1 mr-2">
                         {evento.nombreevento}
                       </h3>
                       <Badge variant="outline" className={getStatusBadgeClass(evento)}>
-                        {evento.estatus}
+                        {esInterno(evento) ? "Interno" : evento.estatus}
                       </Badge>
                     </div>
                     <div className="space-y-1 text-sm text-muted-foreground">

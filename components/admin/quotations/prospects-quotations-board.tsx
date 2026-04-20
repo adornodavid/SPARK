@@ -15,7 +15,10 @@ import { createBrowserClient } from "@/lib/supabase/client"
 import { listaDesplegableHoteles } from "@/app/actions/hoteles"
 import { listaDesplegableSalones } from "@/app/actions/salones"
 import { listaEstatusCotizacion, listaEstatusSeguimiento, listaEstatusReservacion } from "@/app/actions/catalogos"
+import { objetoCotizacion } from "@/app/actions/cotizaciones"
+import { QuotationDetailModal } from "./quotation-detail-modal"
 import type { ddlItem } from "@/types/common"
+import type { oCotizacion } from "@/types/cotizaciones"
 
 /* ==================================================
   Types
@@ -97,6 +100,23 @@ export function ProspectsQuotationsBoard() {
   // Filtro de estatus por columna
   const [colEstatusFilter, setColEstatusFilter] = useState<Record<string, string>>({})
 
+  // Modal de detalle de cotización (al hacer clic sobre una tarjeta)
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailQuotation, setDetailQuotation] = useState<oCotizacion | null>(null)
+
+  async function openCardDetail(itemId: number) {
+    setDetailLoading(true)
+    setDetailOpen(true)
+    setDetailQuotation(null)
+    try {
+      const r = await objetoCotizacion(itemId)
+      if (r.success && r.data) setDetailQuotation(r.data as oCotizacion)
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
   useEffect(() => { listaDesplegableHoteles().then((r) => { if (r.success && r.data) setHotels(r.data) }) }, [])
   useEffect(() => {
     const hId = filters.hotel_id && filters.hotel_id !== "all" ? Number(filters.hotel_id) : -1
@@ -136,10 +156,12 @@ export function ProspectsQuotationsBoard() {
       seen.add(row.id)
       return true
     })
-    // Separar por sección de estatus
-    setCotizaciones(uniqueEventos.filter((e: any) => e.tiporegistro === "Cotizacion" && !segIds.has(e.estatusid) && !resIds.has(e.estatusid)))
-    setSeguimiento(uniqueEventos.filter((e: any) => e.tiporegistro === "Cotizacion" && segIds.has(e.estatusid)))
-    setReservaciones(uniqueEventos.filter((e: any) => resIds.has(e.estatusid)))
+    // Helper: detecta categoria evento "Interno"
+    const esInternoRow = (e: any) => ((e.categoriaevento || "") as string).toLowerCase().trim() === "interno"
+    // Separar por sección de estatus. Los eventos con categoría "Interno" SIEMPRE caen en Eventos Programados.
+    setCotizaciones(uniqueEventos.filter((e: any) => !esInternoRow(e) && e.tiporegistro === "Cotizacion" && !segIds.has(e.estatusid) && !resIds.has(e.estatusid)))
+    setSeguimiento(uniqueEventos.filter((e: any) => !esInternoRow(e) && e.tiporegistro === "Cotizacion" && segIds.has(e.estatusid)))
+    setReservaciones(uniqueEventos.filter((e: any) => resIds.has(e.estatusid) || esInternoRow(e)))
 
     const saved = localStorage.getItem("spark-board-column-order")
     if (saved) {
@@ -365,7 +387,7 @@ export function ProspectsQuotationsBoard() {
                 </div>
                 <div className="p-2 space-y-2 max-h-[calc(100vh-440px)] overflow-y-auto">
                   {items.length === 0 && <div className="text-center py-12 text-muted-foreground text-sm">Sin {col.title.toLowerCase()}</div>}
-                  {items.map((item) => <BoardCard key={`${col.id}-${item.id}`} item={item} type={col.type} formatDate={formatDate} estatusList={[...estatusList, ...seguimientoEstatusList, ...reservacionEstatusList]} />)}
+                  {items.map((item) => <BoardCard key={`${col.id}-${item.id}`} item={item} type={col.type} formatDate={formatDate} estatusList={[...estatusList, ...seguimientoEstatusList, ...reservacionEstatusList]} onOpenDetail={openCardDetail} />)}
                 </div>
               </div>
             )
@@ -396,22 +418,22 @@ export function ProspectsQuotationsBoard() {
                 </div>
                 <div className="p-2 space-y-2 max-h-[calc(100vh-440px)] overflow-y-auto">
                   {segItems.length === 0 && <div className="text-center py-12 text-muted-foreground text-sm">Sin seguimiento</div>}
-                  {segItems.map((item) => <BoardCard key={`seg-${item.id}`} item={item} type="seguimiento" formatDate={formatDate} estatusList={[...estatusList, ...seguimientoEstatusList, ...reservacionEstatusList]} />)}
+                  {segItems.map((item) => <BoardCard key={`seg-${item.id}`} item={item} type="seguimiento" formatDate={formatDate} estatusList={[...estatusList, ...seguimientoEstatusList, ...reservacionEstatusList]} onOpenDetail={openCardDetail} />)}
                 </div>
               </div>
             )
           })()}
 
-          {/* Columna fija: Reservaciones */}
+          {/* Columna fija: Eventos Programados (incluye Reservaciones + categoría Interno) */}
           {(() => {
-            const resItems = getColumnItems({ id: "reservaciones", title: "Reservaciones", color: "bg-violet-500", type: "reservacion" })
+            const resItems = getColumnItems({ id: "reservaciones", title: "Eventos Programados", color: "bg-violet-500", type: "reservacion" })
             return (
               <div className="min-w-0 rounded-xl border border-violet-300 bg-violet-50/50 transition-all">
                 <div className="p-2 border-b border-violet-300">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <div className="h-2.5 w-2.5 rounded-full bg-violet-500 flex-shrink-0" />
-                      <span className="text-[10px] font-bold uppercase tracking-wide truncate">Reservaciones</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wide truncate">Eventos Programados</span>
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0">
                       <Select value={colEstatusFilter["reservaciones"] || "all"} onValueChange={(v) => setColEstatusFilter((p) => ({ ...p, reservaciones: v }))}>
@@ -426,14 +448,29 @@ export function ProspectsQuotationsBoard() {
                   </div>
                 </div>
                 <div className="p-2 space-y-2 max-h-[calc(100vh-440px)] overflow-y-auto">
-                  {resItems.length === 0 && <div className="text-center py-12 text-muted-foreground text-sm">Sin reservaciones</div>}
-                  {resItems.map((item) => <BoardCard key={`res-${item.id}`} item={item} type="reservacion" formatDate={formatDate} estatusList={[...estatusList, ...seguimientoEstatusList, ...reservacionEstatusList]} />)}
+                  {resItems.length === 0 && <div className="text-center py-12 text-muted-foreground text-sm">Sin eventos programados</div>}
+                  {resItems.map((item) => <BoardCard key={`res-${item.id}`} item={item} type="reservacion" formatDate={formatDate} estatusList={[...estatusList, ...seguimientoEstatusList, ...reservacionEstatusList]} onOpenDetail={openCardDetail} />)}
                 </div>
               </div>
             )
           })()}
         </div>
       </div>
+
+      {/* Modal de detalle de cotización (al hacer clic en una tarjeta) */}
+      <QuotationDetailModal
+        open={detailOpen}
+        onOpenChange={(o) => { setDetailOpen(o); if (!o) setDetailQuotation(null) }}
+        quotation={detailQuotation}
+      />
+      {detailOpen && detailLoading && !detailQuotation && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center pointer-events-none">
+          <div className="bg-white/90 backdrop-blur rounded-xl px-4 py-3 shadow-lg flex items-center gap-2">
+            <div className="h-4 w-4 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+            <span className="text-sm text-gray-700">Cargando detalle…</span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -441,45 +478,63 @@ export function ProspectsQuotationsBoard() {
 /* ==================================================
   Card Component
 ================================================== */
-function BoardCard({ item, type, formatDate, estatusList }: { item: BoardItem; type: "prospecto" | "cotizacion" | "estatus" | "seguimiento" | "reservacion"; formatDate: (d: string) => string; estatusList: ddlItem[] }) {
+function BoardCard({ item, type, formatDate, estatusList, onOpenDetail }: { item: BoardItem; type: "prospecto" | "cotizacion" | "estatus" | "seguimiento" | "reservacion"; formatDate: (d: string) => string; estatusList: ddlItem[]; onOpenDetail?: (id: number) => void }) {
   const router = useRouter()
-  const href = type === "prospecto" ? `/cotizaciones/new` : `/cotizaciones/${item.id}`
-  const editHref = `/cotizaciones/new?editId=${item.id}`
+  const esInterno = ((item.categoriaevento || "") as string).toLowerCase().trim() === "interno"
+  const editHref = esInterno ? `/reservacion-interna/new?editId=${item.id}` : `/cotizaciones/new?editId=${item.id}`
 
   const estIdx = item.estatus ? estatusList.findIndex((e) => e.text === item.estatus) : -1
   const estColors = estIdx >= 0 ? getEstatusColor(estIdx) : null
 
-  return (
-    <Link href={href}>
-      <div className="rounded-lg border border-border/60 bg-card px-2.5 py-1.5 hover:shadow-md hover:border-border transition-all cursor-pointer">
-        <div className="flex items-center justify-between gap-1">
-          <p className="text-xs font-semibold truncate flex-1">{item.nombreevento || "Sin nombre de evento"}</p>
-          {item.estatus && estColors && (
-            <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${estColors.bg} ${estColors.border} flex-shrink-0`}>
-              <span className={`inline-block w-1.5 h-1.5 rounded-full ${estColors.color} mr-0.5`} />
-              {item.estatus}
-            </span>
-          )}
-          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(editHref) }} className="p-0.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors flex-shrink-0" title="Editar">
-            <Pencil className="h-3 w-3" />
-          </button>
-        </div>
-        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span className="truncate">{item.cliente || "—"}</span>
-          <span className="text-border">|</span>
-          <PartyPopper className="h-2.5 w-2.5 flex-shrink-0" />
-          <span>{item.tipoevento || "—"}</span>
-          <span className="text-border">|</span>
-          <Users className="h-2.5 w-2.5 flex-shrink-0" />
-          <span>{item.numeroinvitados ?? "—"}</span>
-        </div>
-        <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-          <Calendar className="h-2.5 w-2.5 flex-shrink-0" />
-          <span>{formatDate(item.fechainicio)}</span>
-          <span className="text-muted-foreground/50">→</span>
-          <span>{formatDate(item.fechafin)}</span>
-        </div>
+  // Prospectos no tienen cotización todavía → siguen llevando a /cotizaciones/new
+  // Resto: clic abre modal de detalle
+  const cardContent = (
+    <div className={`rounded-lg border px-2.5 py-1.5 hover:shadow-md transition-all cursor-pointer ${
+      esInterno
+        ? "border-l-4 border-l-[#0c7da8] border-y-[#0c7da8]/30 border-r-[#0c7da8]/30 bg-[#0c7da8]/5 hover:border-[#0c7da8]"
+        : "border-border/60 bg-card hover:border-border"
+    }`}>
+      <div className="flex items-center justify-between gap-1">
+        <p className="text-xs font-semibold truncate flex-1">{item.nombreevento || "Sin nombre de evento"}</p>
+        {esInterno && (
+          <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-[#0c7da8] text-[#0c7da8] bg-white flex-shrink-0">
+            Interno
+          </span>
+        )}
+        {!esInterno && item.estatus && estColors && (
+          <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${estColors.bg} ${estColors.border} flex-shrink-0`}>
+            <span className={`inline-block w-1.5 h-1.5 rounded-full ${estColors.color} mr-0.5`} />
+            {item.estatus}
+          </span>
+        )}
+        <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(editHref) }} className="p-0.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors flex-shrink-0" title="Editar">
+          <Pencil className="h-3 w-3" />
+        </button>
       </div>
-    </Link>
+      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <span className="truncate">{item.cliente || "—"}</span>
+        <span className="text-border">|</span>
+        <PartyPopper className="h-2.5 w-2.5 flex-shrink-0" />
+        <span>{item.tipoevento || "—"}</span>
+        <span className="text-border">|</span>
+        <Users className="h-2.5 w-2.5 flex-shrink-0" />
+        <span>{item.numeroinvitados ?? "—"}</span>
+      </div>
+      <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+        <Calendar className="h-2.5 w-2.5 flex-shrink-0" />
+        <span>{formatDate(item.fechainicio)}</span>
+        <span className="text-muted-foreground/50">→</span>
+        <span>{formatDate(item.fechafin)}</span>
+      </div>
+    </div>
+  )
+
+  if (type === "prospecto") {
+    return <Link href="/cotizaciones/new">{cardContent}</Link>
+  }
+  return (
+    <div onClick={() => onOpenDetail?.(item.id)}>
+      {cardContent}
+    </div>
   )
 }

@@ -1,14 +1,15 @@
 "use client"
 
 import { CardDescription } from "@/components/ui/card"
-import { listaDesplegableClientes, objetoCliente, crearCliente } from "@/app/actions/clientes"
+import { listaDesplegableClientes, objetoCliente, crearCliente, buscarClientesParaContacto } from "@/app/actions/clientes"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { NuevoClienteModal } from "./nuevo-cliente-modal"
 import { listaDesplegableHoteles } from "@/app/actions/hoteles"
 import { listaDesplegableSalones, objetoSalon, objetoSalones } from "@/app/actions/salones"
 import { crearCotizacion, actualizarCotizacion, objetoCotizacion, crearReservacion, actualizarReservacion, eliminarReservacion } from "@/app/actions/cotizaciones"
 import { obtenerDisponibilidadSalon, obtenerReservacionesPorDia } from "@/app/actions/reservaciones"
 import { AvailabilityCalendar } from "./availability-calendar"
-import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, buscarConsumoPorMenu, agregarElementoACotizacion, obtenerPrecioPaquetePorPlatillo, duplicarElementosReservacion, asignarPaqueteAReservacion, buscarLugaresPorHotel, modificarLugarCotizacion, listaEstatusCotizacion, obtenerDocumentoPDF, obtenerPlatillosCotizacion, buscarPlatillosItems, obtenerFormatoCotizacion, obtenerUsuarioSesionActual, obtenerEmpresaPorCliente, obtenerGrupoEmpresa, obtenerComplementosPorHotel, obtenerPlatilloItemPorId, obtenerAudiovisualPorHotel } from "@/app/actions/catalogos"
+import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, buscarConsumoPorMenu, agregarElementoACotizacion, obtenerPrecioPaquetePorPlatillo, duplicarElementosReservacion, asignarPaqueteAReservacion, buscarLugaresPorHotel, modificarLugarCotizacion, listaEstatusCotizacion, obtenerDocumentoPDF, obtenerPlatillosCotizacion, buscarPlatillosItems, obtenerFormatoCotizacion, obtenerUsuarioSesionActual, obtenerEmpresaPorCliente, obtenerGrupoEmpresa, obtenerComplementosPorHotel, obtenerPlatilloItemPorId, obtenerAudiovisualPorHotel, obtenerElementosPaqueteOriginal } from "@/app/actions/catalogos"
 import { listaCategoriaEvento } from "@/app/actions/cotizaciones"
 import { Users, MapPin, DollarSign, User, Mail, Phone, Building2, Check, X, CalendarIcon, FileText, UserPlus } from "lucide-react"
 import { Calendar } from "@/components/ui/calendar"
@@ -73,12 +74,12 @@ async function getImageDimensions(base64: string): Promise<{ width: number; heig
   })
 }
 
-function crearPresupuestoItem(concepto: string, tipo: string, costo: number, dias: number, servicio = 0, cantidad = 0) {
+function crearPresupuestoItem(concepto: string, tipo: string, costo: number, dias: number, servicio = 0, cantidad = 0, descuento = 0) {
   const subtotal = costo
   const precio = subtotal > 0 ? subtotal / 1.16 : 0
   const iva = precio * 0.16
-  const total = (subtotal + servicio) * (cantidad || 1) * (dias || 1)
-  return { concepto, tipo, precio, iva, servicio, subtotal, cantidad, dias, total }
+  const total = (subtotal + servicio - descuento) * (cantidad || 1) * (dias || 1)
+  return { concepto, tipo, precio, iva, servicio, descuento, subtotal, cantidad, dias, total }
 }
 
 // Horarios permitidos: 8:00 AM a 1:00 AM (intervalos de 30 min)
@@ -101,7 +102,8 @@ const HORARIOS_EVENTO = (() => {
   return slots
 })()
 
-export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: boolean; initialEditId?: string } = {}) {
+export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizacion" }: { readOnly?: boolean; initialEditId?: string; mode?: "cotizacion" | "reservacion-interna" } = {}) {
+  const isReservacionInterna = mode === "reservacion-interna"
   const router = useRouter()
   const searchParams = useSearchParams()
   const effectiveEditId = searchParams.get("editId") || initialEditId || null
@@ -121,6 +123,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
   const [showClienteDropdown, setShowClienteDropdown] = useState(false)
   const [selectedClienteId, setSelectedClienteId] = useState<string>("")
   const [showNuevoClienteModal, setShowNuevoClienteModal] = useState(false)
+  const clienteSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [nuevoClienteLoading, setNuevoClienteLoading] = useState(false)
   const [nuevoClienteForm, setNuevoClienteForm] = useState({
     tipo: "",
@@ -160,6 +163,15 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
   const [selectedPaqueteInfo, setSelectedPaqueteInfo] = useState<any>(null)
   const [elementosPaquete, setElementosPaquete] = useState<any[]>([])
   const [platillosItems, setPlatillosItems] = useState<any[]>([])
+  // Conjunto de elementos originales del paquete actual (key = `${tipoelemento}-${elementoid}` en minúsculas).
+  // Se usa para identificar adicionales (alimentos/bebidas agregados fuera del paquete) y costearlos en presupuesto.
+  const [paqueteOriginalKeys, setPaqueteOriginalKeys] = useState<Set<string>>(new Set())
+  // Flag que indica si ya intentamos cargar paqueteOriginalKeys para la cotización actual
+  // (evita marcar elementos como "adicionales" antes de saber qué trae el paquete original).
+  const [paqueteOriginalKeysLoaded, setPaqueteOriginalKeysLoaded] = useState(false)
+  // Caché de costos por tipo+id (`${tipoCanon}-${elemId}` en minúsculas) — lookup directo a menus/menubebidas
+  // cuando el view vw_elementocotizacion no devuelve costo o devuelve null.
+  const [costoMap, setCostoMap] = useState<Record<string, number>>({})
   const [seccionesPaquete, setSeccionesPaquete] = useState<string[]>([
     "lugar", "alimentos", "platillos", "bebidas", "cortesias", "mobiliario", "beneficios adicionales", "servicio",
   ])
@@ -179,12 +191,16 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
   const [menuTipoActual, setMenuTipoActual] = useState<string | null>(null)
   // Grupos expandidos en la pestaña Alimento (agrupado por nombre)
   const [expandedAlimentoGroups, setExpandedAlimentoGroups] = useState<Set<string>>(new Set())
+  // Categorías expandidas en la pestaña Alimento (agrupado por menus.categoria: "Menu" / "Complemento")
+  const [expandedAlimentoCategorias, setExpandedAlimentoCategorias] = useState<Set<string>>(new Set())
   // Expansión de opciones de horas/precios por bebida (consumo). Key = bebidaid.
   const [expandedConsumoBebidas, setExpandedConsumoBebidas] = useState<Set<number>>(new Set())
   // Selección de precio por bebida en el modal de Consumo. Key = bebidaid, valor = bebidaprecioid elegido.
   const [selectedBebidaPrecios, setSelectedBebidaPrecios] = useState<Record<number, number>>({})
   // Alimento "activo" al que se le están agregando platillos en el modal (permite multi-menú)
   const [selectedAlimentoParentId, setSelectedAlimentoParentId] = useState<number | null>(null)
+  // PDF del menú activo (se preserva al cambiar de pestaña dentro del modal de Alimentos)
+  const [selectedAlimentoParentPdf, setSelectedAlimentoParentPdf] = useState<string>("")
   // Alimentos expandidos en la sección del paquete (muestra sus platillos)
   const [expandedAlimentos, setExpandedAlimentos] = useState<Set<number>>(new Set())
   // Mapa alimentoId → tipomenu ("Completo" | "Individual") para renderizar cada alimento correctamente
@@ -207,6 +223,12 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
   const PLATILLOS_TIPOS = ["ENTRADAS", "PLATO FUERTE", "POSTRES"] as const
   type PlatilloTipo = typeof PLATILLOS_TIPOS[number]
   const [showPlatillosModal, setShowPlatillosModal] = useState(false)
+  // Cola de menús del paquete recién asignado a los que se les debe pedir platillos.
+  // Cuando hay items aquí + processingPaqueteQueue=true, al cerrarse el modal de platillos abrimos el siguiente.
+  const [paqueteAlimentosQueue, setPaqueteAlimentosQueue] = useState<{ id: number; tipomenu: string }[]>([])
+  const [showAddPlatillosConfirm, setShowAddPlatillosConfirm] = useState(false)
+  const [processingPaqueteQueue, setProcessingPaqueteQueue] = useState(false)
+  const lastModalOpenRef = useRef(false)
   const [platillosActiveTipo, setPlatillosActiveTipo] = useState<PlatilloTipo>("ENTRADAS")
   const [platillosTabla, setPlatillosTabla] = useState<Record<PlatilloTipo, any[]>>({ "ENTRADAS": [], "PLATO FUERTE": [], "POSTRES": [] })
   const [platillosSeleccion, setPlatillosSeleccion] = useState<Record<PlatilloTipo, number | null>>({ "ENTRADAS": null, "PLATO FUERTE": null, "POSTRES": null })
@@ -239,7 +261,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
   const [showUnsavedModal, setShowUnsavedModal] = useState(false)
   const [pendingSwitchIdx, setPendingSwitchIdx] = useState<number | null>(null)
   const [savingFromModal, setSavingFromModal] = useState(false)
-  const [presupuestoItems, setPresupuestoItems] = useState<{ concepto: string; tipo: string; precio: number; iva: number; servicio: number; subtotal: number; cantidad: number; dias: number; total: number }[]>([])
+  const [presupuestoItems, setPresupuestoItems] = useState<{ concepto: string; tipo: string; precio: number; iva: number; servicio: number; descuento: number; subtotal: number; cantidad: number; dias: number; total: number }[]>([])
   const [audiovisualItems, setAudiovisualItems] = useState<any[]>([])
   const [showAudiovisualModal, setShowAudiovisualModal] = useState(false)
   const [audiovisualTabla, setAudiovisualTabla] = useState<any[]>([])
@@ -866,6 +888,248 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
     }
   }
 
+  // Cargar elementos originales del paquete (para distinguir "adicionales" en presupuesto).
+  // Si no hay selectedPaqueteId pero sí cotizacionId, intenta resolverlo desde eventoxreservaciones / elementosxcotizacion.
+  useEffect(() => {
+    let cancelado = false
+    setPaqueteOriginalKeysLoaded(false)
+    ;(async () => {
+      let paqId = selectedPaqueteId ? Number(selectedPaqueteId) : 0
+      if (!paqId && cotizacionId) {
+        try {
+          const supa = (await import("@/lib/supabase/client")).createClient()
+          const { data: resRow } = await supa
+            .from("eventoxreservaciones")
+            .select("paqueteid")
+            .eq("id", cotizacionId)
+            .not("paqueteid", "is", null)
+            .limit(1)
+            .maybeSingle()
+          if (resRow?.paqueteid) {
+            paqId = Number(resRow.paqueteid)
+            if (!cancelado) setSelectedPaqueteId(String(paqId))
+          } else {
+            const { data: rawElems } = await supa
+              .from("elementosxcotizacion")
+              .select("paqueteid")
+              .eq("reservacionid", cotizacionId)
+              .not("paqueteid", "is", null)
+              .limit(1)
+            if (rawElems && rawElems.length > 0 && rawElems[0].paqueteid != null) {
+              paqId = Number(rawElems[0].paqueteid)
+              if (!cancelado) setSelectedPaqueteId(String(paqId))
+            }
+          }
+        } catch {}
+      }
+      if (cancelado) return
+      if (!paqId) {
+        setPaqueteOriginalKeys(new Set())
+        setPaqueteOriginalKeysLoaded(true)
+        return
+      }
+      const r = await obtenerElementosPaqueteOriginal(paqId)
+      if (cancelado) return
+      const set = new Set<string>()
+      for (const row of (r.data || [])) {
+        const tipo = String(row.tipoelemento || "").toLowerCase().trim()
+        const id = Number(row.elementoid)
+        if (tipo && Number.isFinite(id)) set.add(`${tipo}-${id}`)
+      }
+      setPaqueteOriginalKeys(set)
+      setPaqueteOriginalKeysLoaded(true)
+    })()
+    return () => { cancelado = true }
+  }, [selectedPaqueteId, cotizacionId])
+
+  // Llena costoMap para alimentos/bebidas en elementosPaquete cuyo costo no esté disponible en el view
+  useEffect(() => {
+    const faltantesAlimentos: number[] = []
+    const faltantesBebidas: number[] = []
+    for (const el of elementosPaquete) {
+      const tipoSec = normalizarSeccion(el.tipoelemento || el.tipo || "")
+      if (tipoSec !== "alimentos" && tipoSec !== "bebidas") continue
+      const elemId = Number(el.elementoid ?? el.id)
+      if (!Number.isFinite(elemId)) continue
+      const tipoCanon = String(el.tipoelemento || "").toLowerCase().trim()
+      const key = `${tipoCanon}-${elemId}`
+      const tieneEnRow = el.costo != null && Number(el.costo) > 0
+      if (tieneEnRow) continue
+      if (key in costoMap) continue
+      if (tipoSec === "alimentos") faltantesAlimentos.push(elemId)
+      else faltantesBebidas.push(elemId)
+    }
+    if (faltantesAlimentos.length === 0 && faltantesBebidas.length === 0) return
+    let cancelado = false
+    ;(async () => {
+      try {
+        const supa = (await import("@/lib/supabase/client")).createClient()
+        const update: Record<string, number> = {}
+        if (faltantesAlimentos.length > 0) {
+          const { data } = await supa.from("menus").select("id, costo").in("id", faltantesAlimentos)
+          for (const m of (data as any[]) || []) update[`alimento-${Number(m.id)}`] = Number(m.costo) || 0
+        }
+        if (faltantesBebidas.length > 0) {
+          const { data } = await supa.from("menubebidas").select("id, costo").in("id", faltantesBebidas)
+          for (const b of (data as any[]) || []) update[`bebidas-${Number(b.id)}`] = Number(b.costo) || 0
+        }
+        if (!cancelado && Object.keys(update).length > 0) setCostoMap(prev => ({ ...prev, ...update }))
+      } catch {}
+    })()
+    return () => { cancelado = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [elementosPaquete])
+
+  // Recalcula renglones "Alimento adicional" / "Bebida adicional" en presupuesto
+  // (alimentos o bebidas que están en la cotización pero NO formaban parte del paquete original)
+  // Precio para alimentos: 1) menus.costo si > 0; 2) si no, costo del platillo clave elegido
+  //   (platillos.id = id del platillo que el usuario agregó al menú, platillos.platilloid = id del menú).
+  useEffect(() => {
+    // Esperar a que sepamos qué trae el paquete original antes de decidir qué es "adicional".
+    // Sin este guard, durante la carga inicial todos los menús del paquete se marcarían adicionales por error.
+    if (!paqueteOriginalKeysLoaded) return
+    const dias = calcularDiasEvento(formData.fechaInicial, formData.fechaFinal)
+    const numInvitados = Number(formData.numeroInvitados) || 0
+    const adicionales: { concepto: string; tipo: string; precio: number; iva: number; servicio: number; descuento: number; subtotal: number; cantidad: number; dias: number; total: number }[] = []
+    for (const el of elementosPaquete) {
+      const tipoSec = normalizarSeccion(el.tipoelemento || el.tipo || "")
+      if (tipoSec !== "alimentos" && tipoSec !== "bebidas") continue
+      const tipoCanon = String(el.tipoelemento || "").toLowerCase().trim()
+      const elemId = Number(el.elementoid ?? el.id)
+      if (!Number.isFinite(elemId)) continue
+      const key = `${tipoCanon}-${elemId}`
+      // Si el paquete tiene elementos definidos y este sí está incluido, no es adicional
+      if (paqueteOriginalKeys.size > 0 && paqueteOriginalKeys.has(key)) continue
+
+      const nombreMenu = el.descripcion || el.nombre || el.elemento || (tipoSec === "alimentos" ? "Menú adicional" : "Bebida adicional")
+      const tipoLabel = tipoSec === "alimentos" ? "Alimento adicional" : "Bebida adicional"
+
+      // Caso especial: alimentos de tipomenu "Individual" → un renglón POR cada platillo seleccionado
+      if (tipoSec === "alimentos") {
+        const tipoMenu = (alimentosTipoMenu[elemId] || "").toLowerCase()
+        const platillosDeMenu = platillosItems.filter((p: any) => Number(p.platilloid) === elemId)
+        if (tipoMenu === "individual" && platillosDeMenu.length > 0) {
+          for (const plat of platillosDeMenu) {
+            const cPlat = Number(plat?.costo) || 0
+            const nombrePlat = plat?.nombre || plat?.descripcion || "Platillo"
+            adicionales.push(crearPresupuestoItem(`${nombreMenu} — ${nombrePlat}`, tipoLabel, cPlat, dias, 0, numInvitados))
+          }
+          continue
+        }
+      }
+
+      // Resolver costo: 1) costo del row del view; 2) menus.costo (costoMap); 3) costo del platillo clave
+      const costoRow = Number(el.costo) || 0
+      let costo = costoRow > 0 ? costoRow : (costoMap[key] ?? 0)
+      if (tipoSec === "alimentos" && costo <= 0) {
+        const platillosDeMenu = platillosItems.filter((p: any) => Number(p.platilloid) === elemId)
+        const tipoMenu = (alimentosTipoMenu[elemId] || "").toLowerCase()
+        const platilloClave = tipoMenu === "completo"
+          ? platillosDeMenu.find((p: any) => (p.tipo || "").toUpperCase() === "PLATO FUERTE")
+          : platillosDeMenu[0]
+        const cPlat = Number(platilloClave?.costo) || 0
+        if (cPlat > 0) costo = cPlat
+      }
+
+      adicionales.push(crearPresupuestoItem(nombreMenu, tipoLabel, costo, dias, 0, numInvitados))
+    }
+    setPresupuestoItems(prev => {
+      const sinAdicionales = prev.filter(p => p.tipo !== "Alimento adicional" && p.tipo !== "Bebida adicional")
+      return [...sinAdicionales, ...adicionales]
+    })
+  }, [elementosPaquete, platillosItems, alimentosTipoMenu, paqueteOriginalKeys, paqueteOriginalKeysLoaded, costoMap, selectedPaqueteId, formData.fechaInicial, formData.fechaFinal, formData.numeroInvitados])
+
+  // Renglón "Hora extra" en presupuesto: precio por hora = salón.subtotal / 8, total = precio × horasExtras.
+  // Se mantiene sincronizado con horasExtras y el salón asignado; se inserta justo después del renglón Salón.
+  useEffect(() => {
+    const horasExtras = Number(formData.horasExtras) || 0
+    setPresupuestoItems(prev => {
+      const sinHoraExtra = prev.filter(p => p.tipo !== "Hora extra")
+      const salon = sinHoraExtra.find(p => p.tipo === "Salón")
+      const subtotalSalon = Number(salon?.subtotal) || 0
+      if (horasExtras <= 0 || subtotalSalon <= 0) {
+        // Solo retornar prev si era idéntico para evitar renders innecesarios
+        return prev.length === sinHoraExtra.length ? prev : sinHoraExtra
+      }
+      const precioPorHora = subtotalSalon / 8
+      const horaExtraItem = crearPresupuestoItem("Hora extra", "Hora extra", precioPorHora, 1, 0, horasExtras)
+      const idxSalon = sinHoraExtra.findIndex(p => p.tipo === "Salón")
+      if (idxSalon === -1) return [...sinHoraExtra, horaExtraItem]
+      return [...sinHoraExtra.slice(0, idxSalon + 1), horaExtraItem, ...sinHoraExtra.slice(idxSalon + 1)]
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.horasExtras, presupuestoItems.find(p => p.tipo === "Salón")?.subtotal])
+
+  // Auto-advance de la cola de platillos por menú del paquete asignado.
+  // Al cerrarse el modal activo (Agregar/Platillos), si quedan menús en cola, abrir el siguiente.
+  useEffect(() => {
+    if (!processingPaqueteQueue) {
+      lastModalOpenRef.current = showAgregarModal || showPlatillosModal
+      return
+    }
+    const anyOpen = showAgregarModal || showPlatillosModal
+    if (lastModalOpenRef.current && !anyOpen) {
+      // Transición open → closed: avanzar
+      if (paqueteAlimentosQueue.length === 0) {
+        setProcessingPaqueteQueue(false)
+      } else {
+        const next = paqueteAlimentosQueue[0]
+        setPaqueteAlimentosQueue(prev => prev.slice(1))
+        abrirPlatillosParaMenu(next)
+      }
+    }
+    lastModalOpenRef.current = anyOpen
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [processingPaqueteQueue, showAgregarModal, showPlatillosModal])
+
+  // ESC cierra cualquier modal abierto de la sección "Agregar paquete"
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return
+      if (showAgregarModal) {
+        setShowAgregarModal(false)
+        setSelectedElementoIds(new Set())
+        setSelectedElementoId("")
+        setPreviewElementoId(null)
+        setPreviewElementoPdf("")
+        setElementoSearch("")
+        return
+      }
+      if (showPlatillosModal) {
+        setShowPlatillosModal(false)
+        setPlatillosSearch("")
+        setPlatillosPreviewPdf("")
+        setPlatillosPreviewId(null)
+        return
+      }
+      if (showAudiovisualModal) {
+        setShowAudiovisualModal(false)
+        setSelectedAudiovisualIds(new Set())
+        setPreviewAudiovisualId(null)
+        setAvPdfUrl("")
+        setAudiovisualSearch("")
+        return
+      }
+      if (showComplementoModal) {
+        setShowComplementoModal(false)
+        setSelectedComplementoIds(new Set())
+        setPreviewComplementoId(null)
+        setCompPdfUrl("")
+        setComplementoSearch("")
+        return
+      }
+      if (showPaqueteModal) {
+        setShowPaqueteModal(false)
+        setPreviewPaqueteId("")
+        setPreviewPaqueteInfo(null)
+        setElementosPreviewPaquete([])
+        return
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [showAgregarModal, showPlatillosModal, showAudiovisualModal, showComplementoModal, showPaqueteModal])
+
   // Sincroniza tipomenu para menubebidas y mapa de consumo→padre + flag de tiene consumo
   useEffect(() => {
     const bebidaIdsAll = elementosPaquete
@@ -972,16 +1236,34 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
   useEffect(() => {
     loadHoteles()
     loadClientes()
-    listaCategoriaEvento().then(r => { if (r.success && r.data) setCategoriasEvento(r.data as { id: number; nombre: string }[]) })
-    listaEstatusCotizacion().then(r => {
+    listaCategoriaEvento().then(r => {
+      if (r.success && r.data) {
+        const lista = r.data as { id: number; nombre: string }[]
+        setCategoriasEvento(lista)
+        // Reservación interna en modo creación: precargar categoría id=4
+        if (isReservacionInterna && !effectiveEditId) {
+          const def = lista.find((c) => c.id === 4)
+          if (def) {
+            setFormData(prev => ({ ...prev, categoriaEvento: "4", tipoEvento: "" }))
+            loadTiposEvento("4")
+          }
+        }
+      }
+    })
+    listaEstatusCotizacion(isReservacionInterna ? "Reservacion" : "Cotizacion").then(r => {
       if (r.success && r.data) {
         const lista = r.data as ddlItem[]
         setEstatusList(lista)
-        // En modo creación, pre-seleccionar "Borrador" via pending state
+        // En modo creación, pre-seleccionar el estatus por defecto
         if (!effectiveEditId) {
-          const borrador = lista.find((e) => e.text.trim().toLowerCase() === "borrador")
-          if (borrador) {
-            setPendingEstatusId(borrador.value)
+          if (isReservacionInterna) {
+            // Reservación interna: estatus por defecto id=14
+            const def = lista.find((e) => e.value === "14")
+            if (def) setPendingEstatusId(def.value)
+            else if (lista.length > 0) setPendingEstatusId(lista[0].value)
+          } else {
+            const borrador = lista.find((e) => e.text.trim().toLowerCase() === "borrador")
+            if (borrador) setPendingEstatusId(borrador.value)
           }
         }
       }
@@ -1173,7 +1455,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
             if (elemRes.success && elemRes.data) {
               const dias = calcularDiasEvento(fi, ff)
               const numInvitados = Number(c.numeroinvitados) || 0
-              const presItems: { concepto: string; tipo: string; precio: number; iva: number; servicio: number; subtotal: number; cantidad: number; dias: number; total: number }[] = []
+              const presItems: { concepto: string; tipo: string; precio: number; iva: number; servicio: number; descuento: number; subtotal: number; cantidad: number; dias: number; total: number }[] = []
               // Paquete (reemplaza la agregación por platillo individual)
               ;(async () => {
                 const supaCli = (await import("@/lib/supabase/client")).createClient()
@@ -1299,17 +1581,25 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                   }
                 }
                 // Agregar salón al inicio
+                const aplicarPresItems = (items: typeof presItems) => {
+                  // Preservar adicionales (Alimento/Bebida adicional) que el useEffect de recálculo
+                  // pueda haber agregado mientras esta IIFE corría asíncronamente.
+                  setPresupuestoItems(prev => {
+                    const adicionales = prev.filter(p => p.tipo === "Alimento adicional" || p.tipo === "Bebida adicional")
+                    return [...items, ...adicionales]
+                  })
+                }
                 if (salonId) {
                   objetoSalon(Number(salonId)).then((salonRes) => {
                     if (salonRes.success && salonRes.data) {
                       const precioSalon = salonRes.data.preciopordia ? Number(salonRes.data.preciopordia) : 0
                       presItems.unshift(crearPresupuestoItem(salonRes.data.nombre || "Salón", "Salón", precioSalon, dias, 0, 1))
                     }
-                    setPresupuestoItems(presItems)
+                    aplicarPresItems(presItems)
                     setLoadingEdit(false)
                   })
                 } else {
-                  setPresupuestoItems(presItems)
+                  aplicarPresItems(presItems)
                   setLoadingEdit(false)
                 }
               })()
@@ -2294,10 +2584,10 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
         }
         y += headerH
 
-        // Regla de cortesía: si la suma de los otros conceptos cubre el total del salón,
+        // Regla de cortesía: si la suma de los otros conceptos (excluyendo Audiovisual) cubre el total del salón,
         // el salón se muestra como "Cortesía" y no suma al total.
         const otrosTotalPdf = presupuestoItems
-          .filter((p: any) => p.tipo !== "Salón")
+          .filter((p: any) => p.tipo !== "Salón" && p.tipo !== "Audiovisual" && p.tipo !== "Hora extra")
           .reduce((s: number, p: any) => s + (p.total || 0), 0)
 
         // Data rows
@@ -2496,6 +2786,18 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
       const pdfUrl = URL.createObjectURL(pdfBlob)
       window.open(pdfUrl, "_blank")
       setPdfGenerated(true)
+
+      // Cambiar estatus de la cotización a "Cotizacion Generada" (id = 3)
+      try {
+        const eventoIdActual = eventoId ?? (effectiveEditId ? Number(effectiveEditId) : null)
+        if (eventoIdActual) {
+          const supa = (await import("@/lib/supabase/client")).createClient()
+          await supa.from("eventos").update({ estatusid: 3 }).eq("id", eventoIdActual)
+          setFormData(prev => ({ ...prev, estatusId: "3" }))
+        }
+      } catch (e) {
+        console.error("Error actualizando estatus a 'Cotizacion Generada':", e)
+      }
     } catch (error) {
       console.error("Error generando PDF:", error)
       alert("Error al generar el PDF de cotización.")
@@ -2554,9 +2856,10 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
         setElementosTabla(result.data.filter((el: any) => !yaAsignados.has(Number(el.id))))
       }
     } else {
+      const hotelIdNum = formData.hotel ? Number(formData.hotel) : null
       const result = tipo === "lugar"
-        ? await buscarLugaresPorHotel(Number(formData.hotel))
-        : await buscarElementosPorTabla(tipo)
+        ? await buscarLugaresPorHotel(hotelIdNum ?? -1)
+        : await buscarElementosPorTabla(tipo, tipo === "alimentos" ? hotelIdNum : null)
       if (result.success && result.data) {
         if (tipo === "alimentos") {
           // Multi-alimento: filtrar los ya agregados para evitar duplicados
@@ -2573,6 +2876,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
           // Multi-alimento: no pre-seleccionar. Reset estado del modal.
           setMenuTipoActual(null)
           setExpandedAlimentoGroups(new Set())
+          setExpandedAlimentoCategorias(new Set())
           setSelectedAlimentoParentId(null)
         } else {
           const yaAsignados = new Set(
@@ -2756,6 +3060,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
       setAlimentosTipoMenu(prev => ({ ...prev, [elementoId]: tipoMenu }))
     }
     setSelectedAlimentoParentId(elementoId)
+    setSelectedAlimentoParentPdf(elemento?.documentopdf || "")
     setSavingElemento(true)
     try {
       const yaExiste = elementosPaquete.some((el: any) =>
@@ -2778,6 +3083,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
       // Cargar platillos disponibles para este alimento y avanzar pestaña según tipomenu
       const hotelId = Number(formData.hotel)
       const isCompleto = tipoMenu === "Completo"
+      const menuPdf = elemento?.documentopdf || ""
       if (isCompleto) {
         const [rE, rP, rPo] = await Promise.all([
           buscarPlatillosItems(elementoId, hotelId, "ENTRADAS"),
@@ -2791,14 +3097,18 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
         })
         setPlatillosSeleccion({ "ENTRADAS": null, "PLATO FUERTE": null, "POSTRES": null })
         setAlimentosTab("ENTRADAS")
+        // Preservar el PDF del menú seleccionado en la pestaña de platillos
+        setPreviewElementoId(elementoId)
+        setPreviewElementoPdf(menuPdf)
       } else {
         const r = await buscarPlatillosItems(elementoId, hotelId, null)
         setElementosTabla(r.success && r.data ? r.data : [])
         setSelectedElementoIds(new Set())
         setSelectedElementoId("")
-        setPreviewElementoId(null)
-        setPreviewElementoPdf("")
         setAlimentosTab("platillos")
+        // Preservar el PDF del menú seleccionado en la pestaña de platillos
+        setPreviewElementoId(elementoId)
+        setPreviewElementoPdf(menuPdf)
       }
     } catch (err: any) {
       alert(`Error al seleccionar alimento: ${err?.message || err}`)
@@ -2810,9 +3120,15 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
   // Cambia de pestaña dentro del modal unificado de Alimentos
   async function cambiarAlimentosTab(tab: string) {
     setAlimentosTab(tab)
-    setPreviewElementoId(null)
-    setPreviewElementoPdf("")
     setElementoSearch("")
+    if (tab === "alimento") {
+      setPreviewElementoId(null)
+      setPreviewElementoPdf("")
+    } else {
+      // Al pasar a una pestaña de platillos, mostrar el PDF del menú seleccionado
+      setPreviewElementoId(selectedAlimentoParentId)
+      setPreviewElementoPdf(selectedAlimentoParentPdf || "")
+    }
     if (tab === "alimento") {
       // Recargar lista de alimentos
       setLoadingTabla(true)
@@ -2892,6 +3208,16 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
     setLoadingPlatillosModal(false)
   }
 
+  // Abre el modal de platillos correcto según tipomenu del alimento (Completo → 3 tabs; Individual → multi-select)
+  async function abrirPlatillosParaMenu(item: { id: number; tipomenu: string }) {
+    const tipo = (item.tipomenu || "").toLowerCase()
+    if (tipo === "completo") {
+      await handleAbrirPlatillosModal("ENTRADAS", item.id)
+    } else {
+      await handleAbrirAgregar("platillos", null, item.id)
+    }
+  }
+
   async function handleGuardarPlatillos(selectionOverride?: Record<PlatilloTipo, number | null>) {
     if (!cotizacionId) return
     setSavingPlatillos(true)
@@ -2947,8 +3273,10 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
         setSelectedPaqueteId(previewPaqueteId)
         setSelectedPaqueteInfo(previewPaqueteInfo)
         const elementosResult = await obtenerElementosCotizacion(cotizacionId)
+        let alimentosEls: any[] = []
         if (elementosResult.success && elementosResult.data) {
           setElementosPaquete(elementosResult.data)
+          alimentosEls = elementosResult.data.filter((el: any) => normalizarSeccion(el.tipoelemento || el.tipo || "") === "alimentos")
         }
         // Limpiar platillos legacy del presupuesto; el renglón "Paquete" se creará al guardar platillos
         setPresupuestoItems(prev => prev.filter(p => p.tipo !== "Paquete" && p.tipo !== "Platillo"))
@@ -2962,6 +3290,32 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
         setPreviewPaqueteId("")
         setPreviewPaqueteInfo(null)
         setElementosPreviewPaquete([])
+        // Encolar menús del paquete y preguntar al usuario si quiere cargar sus platillos
+        if (alimentosEls.length > 0) {
+          const ids = alimentosEls.map((el: any) => Number(el.elementoid ?? el.id)).filter((n: number) => Number.isFinite(n))
+          if (ids.length > 0) {
+            try {
+              const supa = (await import("@/lib/supabase/client")).createClient()
+              const { data: menusData } = await supa.from("menus").select("id, tipomenu").in("id", ids)
+              const tipoMap = new Map<number, string>((menusData || []).map((m: any) => [Number(m.id), String(m.tipomenu || "")]))
+              const queue = alimentosEls
+                .map((el: any) => {
+                  const id = Number(el.elementoid ?? el.id)
+                  return { id, tipomenu: tipoMap.get(id) || "" }
+                })
+                .filter((q: any) => Number.isFinite(q.id))
+              const tipoMenuUpdate: Record<number, string> = {}
+              for (const q of queue) if (q.tipomenu) tipoMenuUpdate[q.id] = q.tipomenu
+              if (Object.keys(tipoMenuUpdate).length > 0) setAlimentosTipoMenu(prev => ({ ...prev, ...tipoMenuUpdate }))
+              if (queue.length > 0) {
+                setPaqueteAlimentosQueue(queue)
+                setShowAddPlatillosConfirm(true)
+              }
+            } catch (e) {
+              console.error("Error preparando cola de platillos del paquete:", e)
+            }
+          }
+        }
       } else {
         alert(`Error al asignar paquete: ${result.error}`)
       }
@@ -3104,22 +3458,39 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
     setSelectedClienteId("") // invalidar selección al tipear manualmente
     if (value.trim() === "") {
       setFormData(prev => ({ ...prev, nombreCliente: "", empresa: "", grupo: "", email: "", telefono: "" }))
-      setFilteredClientes(clientes)
+      setFilteredClientes([])
       setShowClienteDropdown(false)
-      setSelectedClienteId("")
+      if (clienteSearchTimerRef.current) clearTimeout(clienteSearchTimerRef.current)
       return
     }
 
     setFormData(prev => ({ ...prev, nombreCliente: value }))
-    const searchTerm = value.toLowerCase()
-    const filtered = clientes.filter((cliente) =>
-      cliente.text.toLowerCase().includes(searchTerm) ||
-      cliente.email.toLowerCase().includes(searchTerm) ||
-      cliente.telefono.includes(searchTerm)
-    )
+    const q = value.trim()
+    if (clienteSearchTimerRef.current) clearTimeout(clienteSearchTimerRef.current)
 
-    setFilteredClientes(filtered)
-    setShowClienteDropdown(filtered.length > 0)
+    if (q.length < 2) {
+      setFilteredClientes([])
+      setShowClienteDropdown(true)
+      return
+    }
+
+    clienteSearchTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await buscarClientesParaContacto(q)
+        const adapted = res.map((c) => ({
+          value: c.id.toString(),
+          text: [c.nombre, c.apellidos].filter(Boolean).join(" ").trim() || `Cliente #${c.id}`,
+          email: c.email || "",
+          telefono: c.telefono || "",
+        }))
+        setFilteredClientes(adapted)
+        setShowClienteDropdown(true)
+      } catch (error) {
+        console.error("Error buscando clientes:", error)
+        setFilteredClientes([])
+        setShowClienteDropdown(true)
+      }
+    }, 250)
   }
 
   const handleClienteSelect = async (cliente: { value: string; text: string }) => {
@@ -3396,13 +3767,26 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
 
     <form onSubmit={handleSubmit} className="space-y-8">
       <fieldset disabled={readOnly} className="contents">
-      {renderReservacionTabs()}
+      {isReservacionInterna && (
+        <div className="rounded-lg border-2 border-amber-500 bg-amber-50 px-4 py-3 flex items-center gap-3">
+          <div className="flex-shrink-0 w-9 h-9 rounded-full bg-amber-500 flex items-center justify-center">
+            <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" className="w-5 h-5">
+              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+            </svg>
+          </div>
+          <div>
+            <p className="text-sm font-bold text-amber-900 uppercase tracking-wide">Reservación Interna</p>
+            <p className="text-xs text-amber-700">Captura una reservación interna</p>
+          </div>
+        </div>
+      )}
+      {!isReservacionInterna && renderReservacionTabs()}
 
-      <Card className="border-l-4 border-l-blue-500 shadow-lg">
-        <CardHeader className="bg-gradient-to-r from-blue-50 to-transparent">
+      <Card className={`border-l-4 shadow-lg ${isReservacionInterna ? "border-l-amber-500" : "border-l-blue-500"}`}>
+        <CardHeader className={`bg-gradient-to-r ${isReservacionInterna ? "from-amber-50" : "from-blue-50"} to-transparent`}>
           <div className="flex items-center gap-2">
-            <MapPin className="h-5 w-5 text-blue-600" />
-            <CardTitle className="text-blue-900">Selección de Espacio</CardTitle>
+            <MapPin className={`h-5 w-5 ${isReservacionInterna ? "text-amber-600" : "text-blue-600"}`} />
+            <CardTitle className={isReservacionInterna ? "text-amber-900" : "text-blue-900"}>Selección de Espacio</CardTitle>
           </div>
           <CardDescription>Elige el hotel, salón, tipo de montaje y datos del cliente</CardDescription>
         </CardHeader>
@@ -3415,7 +3799,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
               <div className="space-y-2 relative">
                 <Label htmlFor="nombreCliente" className="text-sm font-medium flex items-center gap-2">
                   <User className="h-4 w-4" />
-                  Nombre del Cliente <span className="text-red-500">*</span>
+                  Buscar Cliente <span className="text-red-500">*</span>
                   <span className="relative inline-flex group/tip">
                     <span
                       tabIndex={0}
@@ -3430,7 +3814,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                     >
                       <span className="block rounded-lg bg-slate-900 text-white text-xs font-normal leading-relaxed px-3 py-2 shadow-xl ring-1 ring-black/5">
                         <span className="block font-semibold text-blue-200 mb-0.5">Búsqueda flexible</span>
-                        Puedes buscar al cliente escribiendo su <span className="font-semibold text-white">nombre</span>, <span className="font-semibold text-white">email</span> o <span className="font-semibold text-white">teléfono</span>.
+                        Puedes buscar al cliente escribiendo su <span className="font-semibold text-white">nombre</span>, <span className="font-semibold text-white">apellidos</span>, <span className="font-semibold text-white">email</span> o <span className="font-semibold text-white">teléfono</span>.
                       </span>
                       <span className="absolute left-1/2 -bottom-1 -translate-x-1/2 w-2 h-2 rotate-45 bg-slate-900 ring-1 ring-black/5" />
                     </span>
@@ -3442,38 +3826,31 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                   value={formData.nombreCliente}
                   onChange={(e) => handleClienteInputChange(e.target.value)}
                   onFocus={() => {
-                    if (filteredClientes.length > 0) setShowClienteDropdown(true)
+                    if (formData.nombreCliente.trim() !== "") setShowClienteDropdown(true)
                   }}
                   onBlur={() => {
                     setTimeout(() => setShowClienteDropdown(false), 200)
                   }}
-                  placeholder="Escribe para buscar cliente..."
+                  placeholder="Nombre, apellidos, email o teléfono..."
                   className={`border-blue-200 focus:ring-blue-500 ${formData.nombreCliente && !selectedClienteId ? "border-red-400 focus:ring-red-400" : ""}`}
                   autoComplete="off"
                 />
-                {formData.nombreCliente && !selectedClienteId && !showClienteDropdown && (
-                  <div className="flex items-start gap-2 mt-1">
-                    <p className="text-xs text-red-500 leading-tight line-clamp-2">Cliente no encontrado en contactos, regístralo haciendo clic aquí →</p>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowNuevoClienteModal(true)}
-                      className="h-6 text-[11px] gap-1 border-blue-300 text-blue-700 hover:bg-blue-50 hover:text-blue-800 flex-shrink-0"
-                    >
-                      <UserPlus className="h-3 w-3" />
-                      Registrar
-                    </Button>
-                  </div>
-                )}
-                {showClienteDropdown && filteredClientes.length > 0 && (
-                  <div className="absolute z-50 w-full mt-1 bg-white border border-blue-300 rounded-lg shadow-lg max-h-60 overflow-y-auto min-w-[480px]">
+                {showClienteDropdown && formData.nombreCliente.trim() !== "" && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-blue-300 rounded-lg shadow-lg max-h-72 overflow-y-auto min-w-[480px]">
+                    {filteredClientes.length === 0 && (
+                      <div className="px-4 py-2.5 text-xs text-gray-500 border-b border-blue-100">
+                        {formData.nombreCliente.trim().length < 2
+                          ? "Escribe al menos 2 caracteres para buscar…"
+                          : "Sin coincidencias"}
+                      </div>
+                    )}
                     {filteredClientes.map((cliente) => (
                       <button
                         key={cliente.value}
                         type="button"
+                        onMouseDown={(e) => e.preventDefault()}
                         onClick={() => handleClienteSelect(cliente)}
-                        className="w-full text-left px-4 py-2.5 hover:bg-blue-50 transition-colors border-b border-blue-100 last:border-b-0"
+                        className="w-full text-left px-4 py-2.5 hover:bg-blue-50 transition-colors border-b border-blue-100"
                       >
                         <div className="text-sm font-medium text-gray-800">{cliente.text}</div>
                         <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
@@ -3490,6 +3867,18 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                         </div>
                       </button>
                     ))}
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setShowClienteDropdown(false)
+                        setShowNuevoClienteModal(true)
+                      }}
+                      className="w-full text-left px-4 py-2.5 bg-blue-50/50 hover:bg-blue-100 transition-colors flex items-center gap-2 text-blue-700 font-medium text-sm"
+                    >
+                      <UserPlus className="h-4 w-4" />
+                      Registrar nuevo cliente
+                    </button>
                   </div>
                 )}
               </div>
@@ -3578,8 +3967,9 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                     setTiposEvento([])
                     loadTiposEvento(v)
                   }}
+                  disabled={isReservacionInterna}
                 >
-                  <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full">
+                  <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full disabled:opacity-100 disabled:cursor-not-allowed">
                     <SelectValue placeholder="Selecciona categoría" />
                   </SelectTrigger>
                   <SelectContent>
@@ -4010,7 +4400,8 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
               </div>
             </div>
 
-            {/* Checkbox Requerimiento de Habitaciones */}
+            {/* Checkbox Requerimiento de Habitaciones (oculto en modo reservación interna) */}
+            {!isReservacionInterna && (
             <div className="mt-4 space-y-3">
               <label className="flex items-center gap-2 cursor-pointer select-none w-fit">
                 <input
@@ -4088,6 +4479,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                 )
               })()}
             </div>
+            )}
           </div>
 
         </CardContent>
@@ -4100,7 +4492,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
             disabled={loading || !selectedClienteId}
             className="min-w-[120px] bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:opacity-50"
           >
-            {loading ? "Guardando..." : (effectiveEditId || cotizacionId) ? "Actualizar Cotización" : "Crear Cotización"}
+            {loading ? "Guardando..." : isReservacionInterna ? ((effectiveEditId || cotizacionId) ? "Actualizar Reservación" : "Reservar Salón") : ((effectiveEditId || cotizacionId) ? "Actualizar Cotización" : "Crear Cotización")}
           </Button>
         </div>
       )}
@@ -4109,7 +4501,9 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
         <Card className="shadow-lg mt-4 border border-gray-200">
           <CardHeader className="border-b border-gray-100 pb-4">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-gray-900 text-lg font-semibold">Asignación de Paquete</CardTitle>
+              <CardTitle className="text-gray-900 text-lg font-semibold">
+                {isReservacionInterna ? "Agregar elementos a la reservación" : "Asignación de Paquete"}
+              </CardTitle>
               <div className="flex items-center gap-2">
                 {elementosPaquete.length > 0 && (
                   <Button
@@ -4119,24 +4513,30 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                     onClick={() => setShowLimpiarModal(true)}
                     className="border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
                   >
-                    Limpiar Paquete
+                    {isReservacionInterna ? "Limpiar elementos" : "Limpiar Paquete"}
                   </Button>
                 )}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowPaqueteModal(true)}
-                  disabled={!formData.tipoEvento}
-                >
-                  Agregar Paquete
-                </Button>
+                {!isReservacionInterna && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowPaqueteModal(true)}
+                    disabled={!formData.tipoEvento}
+                  >
+                    Agregar Paquete
+                  </Button>
+                )}
               </div>
             </div>
             <CardDescription>
-              {!formData.tipoEvento
-                ? "Selecciona un Tipo de Evento para poder agregar un paquete."
-                : "Haz clic en Agregar Paquete para seleccionar el paquete de esta cotización."}
+              {isReservacionInterna
+                ? (!formData.tipoEvento
+                    ? "Selecciona un Tipo de Evento para poder agregar elementos."
+                    : "Agrega los elementos que necesite la reservación.")
+                : (!formData.tipoEvento
+                    ? "Selecciona un Tipo de Evento para poder agregar un paquete."
+                    : "Haz clic en Agregar Paquete para seleccionar el paquete de esta cotización.")}
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-6">
@@ -4223,7 +4623,9 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                   }
 
                   // "platillos" y "consumo" se renderizan como subsecciones (de "alimentos" y "bebidas"), no como grupo top-level
-                  const grupos = Object.entries(grouped).filter(([tipo]) => tipo !== "platillos" && tipo !== "consumo")
+                  // En reservación interna: ocultar mobiliario y beneficios adicionales
+                  const seccionesOcultas = isReservacionInterna ? new Set(["mobiliario", "beneficios adicionales"]) : new Set<string>()
+                  const grupos = Object.entries(grouped).filter(([tipo]) => tipo !== "platillos" && tipo !== "consumo" && !seccionesOcultas.has(tipo))
                   const mitad = Math.ceil(grupos.length / 2)
                   const leftGroups = grupos.slice(0, mitad)
                   const rightGroups = grupos.slice(mitad)
@@ -5290,8 +5692,8 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
         </div>
       )}
 
-      {/* Sección Presupuesto */}
-      {cotizacionId && presupuestoItems.length > 0 && (
+      {/* Sección Presupuesto (oculta en modo reservación interna) */}
+      {!isReservacionInterna && cotizacionId && presupuestoItems.length > 0 && (
         <Card className="border border-gray-200 shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="text-gray-900 text-lg font-semibold flex items-center gap-2">
@@ -5310,6 +5712,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                     <th className="text-right px-3 py-3 font-medium w-28">Precio</th>
                     <th className="text-right px-3 py-3 font-medium w-24">IVA</th>
                     <th className="text-right px-3 py-3 font-medium w-28">Servicio (propina)</th>
+                    <th className="text-right px-3 py-3 font-medium w-28">Descuento (MXN)</th>
                     <th className="text-right px-3 py-3 font-medium w-28">Subtotal</th>
                     <th className="text-center px-3 py-3 font-medium w-20">Cantidad</th>
                     <th className="text-center px-3 py-3 font-medium w-16">Días</th>
@@ -5318,10 +5721,10 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                 </thead>
                 <tbody>
                   {(() => {
-                    // Regla de cortesía: si la suma de los demás conceptos (paquete, complementos, etc.)
+                    // Regla de cortesía: si la suma de los demás conceptos (excluyendo Audiovisual)
                     // es >= total del salón, el salón queda como cortesía y no suma al total.
                     const otrosTotal = presupuestoItems
-                      .filter(p => p.tipo !== "Salón")
+                      .filter(p => p.tipo !== "Salón" && p.tipo !== "Audiovisual" && p.tipo !== "Hora extra")
                       .reduce((s, p) => s + p.total, 0)
                     return presupuestoItems.map((item, index) => {
                       const esCortesiaSalon = item.tipo === "Salón" && item.total > 0 && otrosTotal >= item.total
@@ -5335,6 +5738,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                           item.tipo === "Paquete" ? "bg-orange-100 text-orange-700" :
                           item.tipo === "Audiovisual" ? "bg-purple-100 text-purple-700" :
                           item.tipo === "Complemento" ? "bg-teal-100 text-teal-700" :
+                          item.tipo === "Hora extra" ? "bg-indigo-100 text-indigo-700" :
                           "bg-gray-100 text-gray-700"
                         }`}>
                           {item.tipo}
@@ -5359,7 +5763,28 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                               if (i !== index) return p
                               const cant = p.cantidad || 1
                               const dias = p.dias || 1
-                              return { ...p, servicio: val, total: (p.subtotal + val) * cant * dias }
+                              const desc = p.descuento || 0
+                              return { ...p, servicio: val, total: (p.subtotal + val - desc) * cant * dias }
+                            }))
+                          }}
+                          className="w-24 text-right border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[#1a3d2e] focus:border-[#1a3d2e]"
+                        />
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={item.descuento || ""}
+                          placeholder="-"
+                          onChange={(e) => {
+                            const val = e.target.value ? Number(e.target.value) : 0
+                            setPresupuestoItems(prev => prev.map((p, i) => {
+                              if (i !== index) return p
+                              const cant = p.cantidad || 1
+                              const dias = p.dias || 1
+                              const serv = p.servicio || 0
+                              return { ...p, descuento: val, total: (p.subtotal + serv - val) * cant * dias }
                             }))
                           }}
                           className="w-24 text-right border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[#1a3d2e] focus:border-[#1a3d2e]"
@@ -5367,10 +5792,10 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                       </td>
                       <td className="px-3 py-3 text-right text-gray-900">
                         {(() => {
-                          const subTotalConServicio = item.subtotal + (item.servicio || 0)
-                          return subTotalConServicio > 0
-                            ? `$${subTotalConServicio.toLocaleString("es-MX", { minimumFractionDigits: 2 })}`
-                            : "Por definir"
+                          const subTotalAjustado = item.subtotal + (item.servicio || 0) - (item.descuento || 0)
+                          return subTotalAjustado > 0
+                            ? `$${subTotalAjustado.toLocaleString("es-MX", { minimumFractionDigits: 2 })}`
+                            : (item.subtotal > 0 ? `$${(0).toLocaleString("es-MX", { minimumFractionDigits: 2 })}` : "Por definir")
                         })()}
                       </td>
                       <td className="px-3 py-3 text-center text-gray-900">{item.cantidad || "-"}</td>
@@ -5391,10 +5816,10 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                 </tbody>
                 <tfoot>
                   <tr className="bg-[#1a3d2e]/5 border-t-2 border-[#1a3d2e]/20">
-                    <td colSpan={9} className="px-3 py-3 text-right font-semibold text-gray-900">Total</td>
+                    <td colSpan={10} className="px-3 py-3 text-right font-semibold text-gray-900">Total</td>
                     <td className="px-3 py-3 text-right font-bold text-[#1a3d2e] text-base">
                       {(() => {
-                        const otrosTotal = presupuestoItems.filter(p => p.tipo !== "Salón").reduce((s, p) => s + p.total, 0)
+                        const otrosTotal = presupuestoItems.filter(p => p.tipo !== "Salón" && p.tipo !== "Audiovisual" && p.tipo !== "Hora extra").reduce((s, p) => s + p.total, 0)
                         const total = presupuestoItems.reduce((sum, i) => {
                           const esCortesiaSalon = i.tipo === "Salón" && i.total > 0 && otrosTotal >= i.total
                           return sum + (esCortesiaSalon ? 0 : i.total)
@@ -5411,10 +5836,10 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
       )}
 
       {/* Tabs de reservaciones (réplica inferior, después de la sección de presupuesto) */}
-      {renderReservacionTabs()}
+      {!isReservacionInterna && renderReservacionTabs()}
 
       {/* Botón Agregar Nueva Reservación: solo visible cuando el evento ya existe en DB */}
-      {eventoId && !readOnly && (
+      {!isReservacionInterna && eventoId && !readOnly && (
         <div className="flex justify-center">
           <Button
             type="button"
@@ -5579,7 +6004,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
         </div>
       )}
 
-      {cotizacionId && (
+      {!isReservacionInterna && cotizacionId && (
         <div className="space-y-4">
           <div className="flex justify-end">
             <Button
@@ -5918,6 +6343,54 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
         </div>
       )}
 
+      {/* Modal confirmar carga de platillos por menú tras asignar paquete */}
+      {showAddPlatillosConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-[55] flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5 text-emerald-700">
+                  <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z"/>
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">Cargar platillos del paquete</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  El paquete asignó {paqueteAlimentosQueue.length} {paqueteAlimentosQueue.length === 1 ? "menú" : "menús"} a la cotización. ¿Deseas configurar sus platillos ahora? Se abrirá un modal por cada menú.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setShowAddPlatillosConfirm(false)
+                  setPaqueteAlimentosQueue([])
+                }}
+              >
+                Más tarde
+              </Button>
+              <Button
+                type="button"
+                onClick={async () => {
+                  setShowAddPlatillosConfirm(false)
+                  const queue = paqueteAlimentosQueue
+                  if (queue.length === 0) return
+                  setProcessingPaqueteQueue(true)
+                  const first = queue[0]
+                  setPaqueteAlimentosQueue(queue.slice(1))
+                  await abrirPlatillosParaMenu(first)
+                }}
+                className="bg-[#1a3d2e] hover:bg-[#1a3d2e]/90 text-white"
+              >
+                Aceptar
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal Platillos (entradas / plato fuerte / postres) — tabs compartidos, single-select por tipo */}
       {showPlatillosModal && (() => {
         const activos = platillosTabla[platillosActiveTipo] || []
@@ -6056,12 +6529,6 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                               setPlatillosPreviewPdf("")
                             }
                           }}
-                          onMouseEnter={() => {
-                            if (platillosPreviewId !== id) {
-                              setPlatillosPreviewId(id)
-                              setPlatillosPreviewPdf(el?.documentopdf || "")
-                            }
-                          }}
                           className={`group relative cursor-pointer rounded-lg border-2 px-3 py-2.5 transition-all hover:shadow-md ${indent ? "ml-5" : ""} ${
                             isSelected ? "border-[#1a3d2e] bg-emerald-50 shadow-sm" : isPreviewing ? "border-[#1a3d2e]/40 bg-white" : "border-gray-200 bg-white hover:border-[#1a3d2e]/40"
                           }`}
@@ -6136,7 +6603,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                           <polyline points="14 2 14 8 20 8"/>
                         </svg>
                       </div>
-                      <p className="text-sm text-gray-500">Pasa el mouse para ver el PDF</p>
+                      <p className="text-sm text-gray-500">Haz clic en un registro para ver el PDF</p>
                     </div>
                   </div>
                 )}
@@ -6218,12 +6685,18 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
             </div>
             <div className="px-8 pt-6 pb-8 text-center">
               <h3 className="text-xl font-bold text-[#1a3d2e] mb-2">
-                {successModal.created ? "¡Cotización creada exitosamente!" : "¡Cotización actualizada!"}
+                {isReservacionInterna
+                  ? (successModal.created ? "¡Reservación creada exitosamente!" : "¡Reservación actualizada!")
+                  : (successModal.created ? "¡Cotización creada exitosamente!" : "¡Cotización actualizada!")}
               </h3>
               <p className="text-sm text-gray-500 mb-6">
-                {successModal.created
-                  ? "Tu cotización se guardó correctamente. Ya puedes continuar agregando elementos al paquete."
-                  : "Los cambios se guardaron correctamente."}
+                {isReservacionInterna
+                  ? (successModal.created
+                      ? "Tu reservación se guardó correctamente. Ya puedes continuar agregando elementos."
+                      : "Los cambios se guardaron correctamente.")
+                  : (successModal.created
+                      ? "Tu cotización se guardó correctamente. Ya puedes continuar agregando elementos al paquete."
+                      : "Los cambios se guardaron correctamente.")}
               </p>
               <Button
                 type="button"
@@ -6519,7 +6992,6 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                           <div
                             onClick={handleClick}
                             onDoubleClick={handleDoubleClick}
-                            onMouseEnter={() => { if (supportsPreview && previewElementoId !== id) loadElementoPreview(el) }}
                             className="cursor-pointer px-3 py-2.5"
                           >
                             <div className="flex items-start gap-2.5">
@@ -6612,7 +7084,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                         </div>
                       )
                     }
-                    return Array.from(grupos.entries()).map(([nombre, opciones]) => {
+                    const renderGrupo = (nombre: string, opciones: any[], keyPrefix: string) => {
                       if (opciones.length === 1) return renderOpcion(opciones[0], false)
                       const isExpanded = expandedAlimentoGroups.has(nombre)
                       const groupHasSelected = opciones.some((op: any) => {
@@ -6621,7 +7093,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                         return multiSelIds?.has(oid) || false
                       })
                       return (
-                        <div key={`grp-${nombre}`} className="space-y-1.5">
+                        <div key={`${keyPrefix}-${nombre}`} className="space-y-1.5">
                           <button
                             type="button"
                             onClick={() => toggleGroup(nombre)}
@@ -6650,7 +7122,74 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                           )}
                         </div>
                       )
-                    })
+                    }
+
+                    if (isAlimentoTab) {
+                      // Agrupar primero por categoría (menus.categoria: "Menu" / "Complemento")
+                      const porCategoria = new Map<string, any[]>()
+                      for (const el of filtrados) {
+                        const cat = ((el.categoria || "") as string).trim() || "Otros"
+                        if (!porCategoria.has(cat)) porCategoria.set(cat, [])
+                        porCategoria.get(cat)!.push(el)
+                      }
+                      const categoriaOrder = (c: string) => {
+                        const lc = c.toLowerCase()
+                        if (lc.startsWith("men")) return 0
+                        if (lc.startsWith("compl")) return 1
+                        return 2
+                      }
+                      const sortedCats = Array.from(porCategoria.entries()).sort((a, b) => {
+                        const d = categoriaOrder(a[0]) - categoriaOrder(b[0])
+                        return d !== 0 ? d : a[0].localeCompare(b[0], "es")
+                      })
+                      const toggleCategoria = (cat: string) => {
+                        setExpandedAlimentoCategorias(prev => {
+                          const next = new Set(prev)
+                          if (next.has(cat)) next.delete(cat); else next.add(cat)
+                          return next
+                        })
+                      }
+                      return sortedCats.map(([categoria, itemsCat]) => {
+                        const isCatExpanded = expandedAlimentoCategorias.has(categoria)
+                        const catHasSelected = itemsCat.some((it: any) => Number(it.id) === currentSelId)
+                        const subGrupos = new Map<string, any[]>()
+                        for (const el of itemsCat) {
+                          const key = ((el.nombre || "") as string).trim() || "(sin nombre)"
+                          if (!subGrupos.has(key)) subGrupos.set(key, [])
+                          subGrupos.get(key)!.push(el)
+                        }
+                        return (
+                          <div key={`cat-${categoria}`} className="space-y-1.5">
+                            <button
+                              type="button"
+                              onClick={() => toggleCategoria(categoria)}
+                              className={`w-full flex items-center justify-between gap-2 rounded-lg border-2 px-3 py-3 text-left transition-all hover:shadow-md ${
+                                catHasSelected
+                                  ? "border-amber-600 bg-amber-100 shadow-sm"
+                                  : "border-amber-400 bg-amber-50 hover:border-amber-500 hover:bg-amber-100/70"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`w-4 h-4 text-amber-700 transition-transform ${isCatExpanded ? "rotate-90" : ""}`}>
+                                  <polyline points="9 18 15 12 9 6"/>
+                                </svg>
+                                <p className="text-sm font-bold uppercase tracking-wide text-amber-900">{categoria}</p>
+                              </div>
+                              <span className="text-xs font-semibold text-amber-700 flex-shrink-0">
+                                {itemsCat.length} {itemsCat.length === 1 ? "registro" : "registros"}
+                              </span>
+                            </button>
+                            {isCatExpanded && (
+                              <div className="space-y-1.5 pl-3">
+                                {Array.from(subGrupos.entries()).map(([nombre, opciones]) => renderGrupo(nombre, opciones, `grp-${categoria}`))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })
+                    }
+
+                    return Array.from(grupos.entries()).map(([nombre, opciones]) => renderGrupo(nombre, opciones, "grp"))
                   })() : filtrados.map((el: any) => {
                     const id = Number(el.id)
                     const nombre = el.nombre || el.descripcion || el.name || ""
@@ -6704,7 +7243,6 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                             await handleAgregarElemento("platillos", Array.from(newIds))
                           }
                         }}
-                        onMouseEnter={() => { if (supportsPreview && previewElementoId !== id) loadElementoPreview(el) }}
                         className={`group relative cursor-pointer rounded-lg border-2 px-3 py-2.5 transition-all hover:shadow-md ${
                           isSelected
                             ? "border-[#1a3d2e] bg-emerald-50 shadow-sm"
@@ -6775,7 +7313,7 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
                           </svg>
                         </div>
                         <p className="text-sm text-gray-500">
-                          {previewElementoId ? "Este elemento no tiene PDF asociado" : "Pasa el mouse sobre un elemento para ver su PDF"}
+                          {previewElementoId ? "Este elemento no tiene PDF asociado" : "Haz clic en un elemento para ver su PDF"}
                         </p>
                       </div>
                     </div>
@@ -7069,6 +7607,26 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
         </div>
       )}
 
+      {/* Ver Reservación: navega al dashboard y abre el modal del día seleccionado */}
+      {isReservacionInterna && cotizacionId && formData.fechaInicial && (
+        <div className="flex justify-end pt-2">
+          <Button
+            type="button"
+            onClick={() => {
+              const params = new URLSearchParams()
+              if (formData.hotel) params.set("hotelId", formData.hotel)
+              if (formData.salon) params.set("salonId", formData.salon)
+              params.set("date", formData.fechaInicial)
+              router.push(`/dashboard?${params.toString()}`)
+            }}
+            className="min-w-[160px] bg-amber-600 hover:bg-amber-700 text-white"
+          >
+            <CalendarIcon className="h-4 w-4 mr-2" />
+            Ver Reservación
+          </Button>
+        </div>
+      )}
+
       <style>{`
         @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
         @keyframes scaleIn { from { opacity: 0; transform: scale(0.88) } to { opacity: 1; transform: scale(1) } }
@@ -7077,14 +7635,17 @@ export function QuotationForm({ readOnly = false, initialEditId }: { readOnly?: 
       </fieldset>
     </form>
 
-    {/* Modal Nuevo Cliente */}
-    <Dialog open={showNuevoClienteModal} onOpenChange={(open) => {
-      setShowNuevoClienteModal(open)
-      if (!open) {
-        setNuevoClienteForm({ tipo: "", nombre: "", apellidopaterno: "", apellidomaterno: "", email: "", telefono: "", celular: "", direccion: "", empresa: "" })
-        setNuevoClienteError("")
-      }
-    }}>
+    {/* Modal Nuevo Cliente — flujo completo con validación Pipedrive */}
+    <NuevoClienteModal
+      open={showNuevoClienteModal}
+      onOpenChange={setShowNuevoClienteModal}
+      onRegistered={async (id, nombreCompleto) => {
+        await handleClienteSelect({ value: id.toString(), text: nombreCompleto })
+      }}
+    />
+
+    {/* Modal Nuevo Cliente (legacy, oculto — reemplazado arriba) */}
+    <Dialog open={false} onOpenChange={() => {}}>
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-blue-900">
