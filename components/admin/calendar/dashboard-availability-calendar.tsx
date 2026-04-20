@@ -86,11 +86,13 @@ export default function DashboardAvailabilityCalendar({ hotelId, onDayClick }: D
     if (!hotelId || hotelId === "all") return
     setLoading(true)
     const result = await obtenerEventosPorHotel(Number(hotelId), toDateStr(dateRange.start), toDateStr(dateRange.end))
-    const all: CalendarEvent[] = []
+    const byKey = new Map<string, CalendarEvent>()
     if (result.success && result.data) {
       for (const e of result.data) {
         const tipo = String(e.tiporegistro).toLowerCase() === "reservacion" ? "reservacion" : "cotizacion"
-        all.push({
+        const k = `${tipo}-${e.id}-${e.salonid}`
+        if (byKey.has(k)) continue
+        byKey.set(k, {
           id: e.id, nombreevento: e.nombreevento || (tipo === "reservacion" ? "Reservación" : "Cotización"),
           salonName: e.salon || salonNameMap.get(String(e.salonid)) || "Salón",
           salonid: e.salonid, fechainicio: e.fechainicio, fechafin: e.fechafin,
@@ -100,7 +102,7 @@ export default function DashboardAvailabilityCalendar({ hotelId, onDayClick }: D
         })
       }
     }
-    setEvents(all); setLoading(false)
+    setEvents(Array.from(byKey.values())); setLoading(false)
   }, [hotelId, dateRange, salonNameMap])
 
   useEffect(() => { loadEvents() }, [loadEvents])
@@ -327,14 +329,14 @@ function WeekView({ days, salones, getEventsForCell, onDayClick, isToday, isPast
                 past ? "bg-gray-50/80" : "cursor-pointer hover:bg-blue-50/50"
               }`} onClick={() => { if (!past) onDayClick(d) }}>
                 {res.slice(0, 2).map(r => (
-                  <div key={`r-${r.id}`} className="rounded px-1.5 py-0.5 mb-0.5 border text-[10px] leading-tight truncate bg-purple-100 border-purple-400 text-purple-900">
+                  <div key={`r-${r.id}-${r.salonid}-${ds}`} className="rounded px-1.5 py-0.5 mb-0.5 border text-[10px] leading-tight truncate bg-purple-100 border-purple-400 text-purple-900">
                     <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-purple-900 flex-shrink-0" /><span className="font-semibold truncate">{r.nombreevento?.slice(0, 10)}</span></div>
                     <div className="text-[9px] text-purple-600 opacity-70">{r.horainicio?.slice(0, 5)} – {r.horafin?.slice(0, 5)}</div>
                   </div>
                 ))}
                 {res.length > 2 && <div className="text-[9px] text-purple-700 pl-1">+{res.length - 2}</div>}
                 {cot.slice(0, 2).map(c => (
-                  <div key={`c-${c.id}`} className="rounded px-1.5 py-0.5 mb-0.5 border text-[10px] leading-tight truncate bg-amber-50 border-amber-200 text-amber-800">
+                  <div key={`c-${c.id}-${c.salonid}-${ds}`} className="rounded px-1.5 py-0.5 mb-0.5 border text-[10px] leading-tight truncate bg-amber-50 border-amber-200 text-amber-800">
                     <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" /><span className="font-semibold truncate">{c.nombreevento?.slice(0, 10)}</span></div>
                     <div className="text-[9px] text-amber-600 opacity-70">{c.horainicio?.slice(0, 5)} – {c.horafin?.slice(0, 5)}</div>
                   </div>

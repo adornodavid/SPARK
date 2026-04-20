@@ -261,7 +261,7 @@ export default function EmpresasPage() {
             </Popover>
           </div>
 
-          {[1, 2, 3].includes(rolId) && (
+          {rolId === 1 && (
             <div className="flex items-center gap-1">
               <Button variant="outline" onClick={onImportarNuevos} disabled={importing || updating}>
                 {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}

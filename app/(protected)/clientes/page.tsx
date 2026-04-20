@@ -31,6 +31,7 @@ const PAGE_SIZE = 50
 export default function ClientsPage() {
   const router = useRouter()
   const cancelRef = useRef(false)
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [rolId, setRolId] = useState(0)
@@ -49,8 +50,14 @@ export default function ClientsPage() {
   // Progreso extracción Pipedrive → pip_persons
   const [progreso, setProgreso] = useState({ insertados: 0, omitidos: 0, errores: 0, procesados: 0, loteActual: 0 })
   const [erroresDetalle, setErroresDetalle] = useState<ErrorDetalle[]>([])
-  const [fase, setFase] = useState<"idle" | "extrayendo" | "transfiriendo" | "hecho">("idle")
+  const [fase, setFase] = useState<"idle" | "extrayendo" | "transfiriendo" | "actualizando" | "hecho">("idle")
   const [resultadoTransfer, setResultadoTransfer] = useState<{ insertados: number; skipeados_dup: number } | null>(null)
+  const [resultadoActualizacion, setResultadoActualizacion] = useState<{ actualizados: number } | null>(null)
+  const [progresoOculto, setProgresoOculto] = useState(false)
+
+  useEffect(() => {
+    return () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current) }
+  }, [])
 
   async function fetchRows(s: string, p: number) {
     setFetching(true)
@@ -123,11 +130,14 @@ export default function ClientsPage() {
     if (!confirm("Se extraerán nuevas personas desde Pipedrive → pip_persons, luego se insertarán en clientes (omitiendo duplicados por pipedrive_id, email o teléfono). ¿Continuar?")) return
 
     cancelRef.current = false
+    if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null }
+    setProgresoOculto(false)
     setUpdating(true)
     setFeedback(null)
     setProgreso({ insertados: 0, omitidos: 0, errores: 0, procesados: 0, loteActual: 0 })
     setErroresDetalle([])
     setResultadoTransfer(null)
+    setResultadoActualizacion(null)
     setFase("extrayendo")
 
     let start = 0
@@ -136,6 +146,7 @@ export default function ClientsPage() {
     let totalOmitidos = 0
     let totalErrores = 0
     let totalProcesados = 0
+    let huboError = false
 
     try {
       while (true) {
@@ -148,6 +159,7 @@ export default function ClientsPage() {
         const resultado = await extraerLotePersons(start)
 
         if (!resultado.success) {
+          huboError = true
           setFeedback({ tipo: "error", msg: resultado.mensaje })
           break
         }
@@ -183,22 +195,39 @@ export default function ClientsPage() {
       const r = await transferirNuevosDesdePipedrive()
       if (r.success) {
         setResultadoTransfer({ insertados: r.insertados ?? 0, skipeados_dup: r.skipeados_dup ?? 0 })
-        setFeedback({
-          tipo: "ok",
-          msg: `Pipedrive → pip_persons: ${totalInsertados} insertados. pip_persons → clientes: ${r.insertados} insertados, ${r.skipeados_dup} duplicados omitidos.`,
-        })
       } else {
+        huboError = true
         setFeedback({ tipo: "error", msg: r.error || "Error en transferencia a clientes" })
+      }
+
+      // Tercera fase: actualiza clientes existentes desde pip_persons (omite editado=true)
+      if (!huboError) {
+        setFase("actualizando")
+        const a = await actualizarClientesDesdePipedrive()
+        if (a.success) {
+          setResultadoActualizacion({ actualizados: a.actualizados ?? 0 })
+          setFeedback({
+            tipo: "ok",
+            msg: `Pipedrive → pip_persons: ${totalInsertados} insertados. pip_persons → clientes: ${r.insertados} insertados, ${r.skipeados_dup} duplicados omitidos. Clientes actualizados desde tabla especial: ${a.actualizados}.`,
+          })
+        } else {
+          huboError = true
+          setFeedback({ tipo: "error", msg: a.error || "Error actualizando clientes desde tabla especial" })
+        }
       }
 
       await fetchRows(searchActive, 1)
       setPage(1)
     } catch (err: unknown) {
+      huboError = true
       const m = err instanceof Error ? err.message : "Error desconocido"
       setFeedback({ tipo: "error", msg: `Error inesperado: ${m}` })
     } finally {
       setFase("hecho")
       setUpdating(false)
+      if (!huboError) {
+        hideTimerRef.current = setTimeout(() => { setProgresoOculto(true) }, 15000)
+      }
     }
   }
 
@@ -231,7 +260,7 @@ export default function ClientsPage() {
   }
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  const porcentaje = fase === "extrayendo" ? Math.min(progreso.loteActual * 2, 95) : fase === "transfiriendo" ? 97 : fase === "hecho" ? 100 : 0
+  const porcentaje = fase === "extrayendo" ? Math.min(progreso.loteActual * 2, 93) : fase === "transfiriendo" ? 96 : fase === "actualizando" ? 98 : fase === "hecho" ? 100 : 0
 
   return (
     <div className="mx-auto max-w-7xl space-y-4">
@@ -272,11 +301,12 @@ export default function ClientsPage() {
               <PopoverContent align="start" className="w-80 text-sm">
                 <p className="font-semibold mb-2">Actualizar con Pipedrive</p>
                 <p className="text-muted-foreground mb-2">
-                  Proceso en 2 fases:
+                  Proceso en 3 fases:
                 </p>
                 <ol className="list-decimal list-inside text-muted-foreground space-y-1 mb-2">
                   <li><strong>Fase 1:</strong> consulta la API de Pipedrive en lotes y agrega a <code className="font-mono text-xs">pip_persons</code> las personas nuevas (corta al encontrar un lote completamente ya existente).</li>
                   <li><strong>Fase 2:</strong> transfiere los nuevos de <code className="font-mono text-xs">pip_persons</code> a <code className="font-mono text-xs">clientes</code> con dedupe por pipedrive_id, email y teléfono.</li>
+                  <li><strong>Fase 3:</strong> actualiza los clientes existentes con los valores de <code className="font-mono text-xs">pip_persons</code> (omite los que tienen <code className="font-mono text-xs">editado=true</code>).</li>
                 </ol>
                 <p className="text-muted-foreground">
                   Puedes detener el proceso en cualquier momento con el botón Detener.
@@ -285,7 +315,7 @@ export default function ClientsPage() {
             </Popover>
           </div>
 
-          {[1, 2, 3].includes(rolId) && (
+          {rolId === 1 && (
             <div className="flex items-center gap-1">
               <Button variant="outline" onClick={onImportarNuevos} disabled={importing || updating || syncing}>
                 {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
@@ -310,7 +340,7 @@ export default function ClientsPage() {
             </div>
           )}
 
-          {[1, 2, 3].includes(rolId) && (
+          {rolId === 1 && (
             <div className="flex items-center gap-1">
               <Button variant="outline" onClick={onActualizarDesdeTablaEspecial} disabled={importing || updating || syncing}>
                 {syncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <DatabaseZap className="mr-2 h-4 w-4" />}
@@ -340,12 +370,13 @@ export default function ClientsPage() {
         </div>
       </div>
 
-      {(updating || fase === "hecho") && (
+      {(updating || fase === "hecho") && !progresoOculto && (
         <div className="rounded-xl border bg-card p-4 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-sm font-medium">
               {fase === "extrayendo" && <><Loader2 className="h-4 w-4 animate-spin" /> Extrayendo desde Pipedrive → pip_persons (lote {progreso.loteActual})</>}
               {fase === "transfiriendo" && <><Loader2 className="h-4 w-4 animate-spin" /> Transfiriendo pip_persons → clientes</>}
+              {fase === "actualizando" && <><Loader2 className="h-4 w-4 animate-spin" /> Actualizando clientes desde tabla especial</>}
               {fase === "hecho" && <>Proceso finalizado</>}
             </div>
             {updating && (
@@ -367,6 +398,12 @@ export default function ClientsPage() {
             <div className="rounded-md border bg-muted/30 p-3 text-sm grid grid-cols-2 gap-3">
               <div><p className="text-muted-foreground text-xs">Insertados en clientes</p><p className="font-semibold text-emerald-600">{resultadoTransfer.insertados}</p></div>
               <div><p className="text-muted-foreground text-xs">Duplicados omitidos (pipedrive_id / email / teléfono)</p><p className="font-semibold text-amber-600">{resultadoTransfer.skipeados_dup}</p></div>
+            </div>
+          )}
+          {resultadoActualizacion && (
+            <div className="rounded-md border bg-muted/30 p-3 text-sm">
+              <p className="text-muted-foreground text-xs">Clientes actualizados desde tabla especial (omite editados manualmente)</p>
+              <p className="font-semibold text-emerald-600">{resultadoActualizacion.actualizados}</p>
             </div>
           )}
           {erroresDetalle.length > 0 && (
