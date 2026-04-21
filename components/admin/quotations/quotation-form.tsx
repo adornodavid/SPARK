@@ -3983,7 +3983,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                   }}
                   disabled={isReservacionInterna}
                 >
-                  <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full disabled:opacity-100 disabled:cursor-not-allowed">
+                  <SelectTrigger id="categoriaEvento" className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full disabled:opacity-100 disabled:cursor-not-allowed">
                     <SelectValue placeholder="Selecciona categoría" />
                   </SelectTrigger>
                   <SelectContent>
@@ -4001,7 +4001,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                   Tipo de Evento <span className="text-red-500">*</span>
                 </Label>
                 <Select value={formData.tipoEvento} onValueChange={handleTipoEventoChange} disabled={!formData.categoriaEvento} required>
-                  <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full">
+                  <SelectTrigger id="tipoEvento" className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full">
                     <SelectValue placeholder={formData.categoriaEvento ? "Selecciona tipo" : "Selecciona categoría primero"} />
                   </SelectTrigger>
                   <SelectContent>
@@ -4409,7 +4409,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                   onValueChange={(v) => setFormData(prev => ({ ...prev, estatusId: v }))}
                   disabled={!effectiveEditId && !cotizacionId}
                 >
-                  <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full">
+                  <SelectTrigger id="estatus" className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full">
                     <SelectValue placeholder="Selecciona estatus" />
                   </SelectTrigger>
                   <SelectContent>
