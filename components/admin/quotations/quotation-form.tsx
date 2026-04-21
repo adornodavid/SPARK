@@ -1713,29 +1713,34 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
     }
   }
 
+  async function loadPaquetesList(tipoEventoId: string, hotelId: string) {
+    // Requiere ambos: sin hotel no se muestran paquetes (evita listar paquetes de otros hoteles)
+    if (!tipoEventoId || !hotelId) {
+      setPaquetes([])
+      return
+    }
+    setLoadingPaquetes(true)
+    const result = await listaDesplegablePaquetes(Number(tipoEventoId), Number(hotelId))
+    if (result.success && result.data) {
+      const seen = new Set<string>()
+      const unique = (result.data as any[]).filter((p: any) => {
+        const k = String(p.paqueteid ?? p.id ?? "")
+        if (!k || seen.has(k)) return false
+        seen.add(k); return true
+      })
+      setPaquetes(unique)
+    } else {
+      setPaquetes([])
+    }
+    setLoadingPaquetes(false)
+  }
+
   async function handleTipoEventoChange(tipoeventoid: string) {
     setFormData(prev => ({ ...prev, tipoEvento: tipoeventoid }))
     setSelectedPaqueteId("")
     setSelectedPaqueteInfo(null)
     setElementosPaquete([])
-    setPaquetes([])
-
-    if (tipoeventoid) {
-      setLoadingPaquetes(true)
-      const hotelId = formData.hotel ? Number(formData.hotel) : undefined
-      const result = await listaDesplegablePaquetes(Number(tipoeventoid), hotelId)
-      if (result.success && result.data) {
-        // Dedup por paqueteid/id para evitar keys duplicadas en Select
-        const seen = new Set<string>()
-        const unique = (result.data as any[]).filter((p: any) => {
-          const k = String(p.paqueteid ?? p.id ?? "")
-          if (!k || seen.has(k)) return false
-          seen.add(k); return true
-        })
-        setPaquetes(unique)
-      }
-      setLoadingPaquetes(false)
-    }
+    await loadPaquetesList(tipoeventoid, formData.hotel)
   }
 
   async function handlePaqueteChange(paqueteid: string) {
@@ -3973,9 +3978,11 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                     <SelectValue placeholder="Selecciona categoría" />
                   </SelectTrigger>
                   <SelectContent>
-                    {categoriasEvento.map((cat) => (
-                      <SelectItem key={cat.id} value={cat.id.toString()}>{cat.nombre}</SelectItem>
-                    ))}
+                    {categoriasEvento
+                      .filter((cat) => isReservacionInterna || cat.nombre?.trim().toLowerCase() !== "interno")
+                      .map((cat) => (
+                        <SelectItem key={cat.id} value={cat.id.toString()}>{cat.nombre}</SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -4102,6 +4109,11 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                   setCurrentPhotoIndex(0)
                   setSalonReservaciones([])
                   loadSalones(value)
+                  // Recargar paquetes filtrados por el hotel nuevo + limpiar selección del modal
+                  setPreviewPaqueteId("")
+                  setPreviewPaqueteInfo(null)
+                  setElementosPreviewPaquete([])
+                  loadPaquetesList(formData.tipoEvento, value)
                 }}
                 required
               >

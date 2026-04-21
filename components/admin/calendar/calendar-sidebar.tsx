@@ -20,12 +20,19 @@ import type { oCalendario } from "@/types/calendario"
 interface CalendarSidebarProps {
   selectedHotel: string
   selectedSalon: string
+  filters: {
+    cotizaciones: boolean
+    reservaciones: boolean
+    canceladas: boolean
+    interno: boolean
+  }
   onEventClick: (dateStr: string) => void
 }
 
 export default function CalendarSidebar({
   selectedHotel,
   selectedSalon,
+  filters,
   onEventClick,
 }: CalendarSidebarProps) {
   const [upcomingEvents, setUpcomingEvents] = useState<oCalendario[]>([])
@@ -57,12 +64,18 @@ export default function CalendarSidebar({
       if (result.success && Array.isArray(result.data)) {
         const allEventos = result.data as oCalendario[]
 
-        // Upcoming events - reservaciones + cotizaciones de categoría Interno (next 7)
+        // Upcoming events: aplica los mismos filtros de tipo/estatus del CalendarGrid
+        const isCancelada = (estatus: string) =>
+          (estatus || "").toLowerCase().includes("cancel")
         const upcoming = allEventos
           .filter((e) => {
             if (e.fechainicio < rangoInicio) return false
             const interno = (((e as any).categoriaevento || "") as string).toLowerCase().trim() === "interno"
-            return e.tipo === "Reservacion" || interno
+            if (interno && !filters.interno) return false
+            if (!interno && e.tipo === "Cotizacion" && !filters.cotizaciones) return false
+            if (!interno && e.tipo === "Reservacion" && !filters.reservaciones) return false
+            if (isCancelada(e.estatus) && !filters.canceladas) return false
+            return true
           })
           .sort((a, b) => a.fechainicio.localeCompare(b.fechainicio))
           .slice(0, 7)
@@ -106,7 +119,7 @@ export default function CalendarSidebar({
     } finally {
       setLoading(false)
     }
-  }, [selectedHotel, selectedSalon])
+  }, [selectedHotel, selectedSalon, filters])
 
   useEffect(() => {
     fetchData()

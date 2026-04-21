@@ -215,6 +215,7 @@ function DashboardContent() {
           <CalendarSidebar
             selectedHotel={selectedHotel}
             selectedSalon={selectedSalon}
+            filters={filters}
             onEventClick={handleDayClick}
           />
         </div>
