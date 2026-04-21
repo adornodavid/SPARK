@@ -1237,15 +1237,20 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
     loadHoteles()
     loadClientes()
     listaCategoriaEvento().then(r => {
+      // [DEBUG categoria-default]
+      console.log("[DEBUG-CAT] listaCategoriaEvento result:", { success: r.success, error: (r as any).error, dataLen: r.data?.length, sample: r.data?.slice(0, 5), isReservacionInterna, effectiveEditId, mode })
       if (r.success && r.data) {
         const lista = r.data as { id: number; nombre: string }[]
         setCategoriasEvento(lista)
         // Reservación interna en modo creación: precargar categoría id=4
         if (isReservacionInterna && !effectiveEditId) {
           const def = lista.find((c) => c.id?.toString() === "4")
+          console.log("[DEBUG-CAT] default lookup id=4 →", def, "tipos lista ids:", lista.map(c => ({ id: c.id, tipo: typeof c.id, nombre: c.nombre })))
           if (def) {
             setFormData(prev => ({ ...prev, categoriaEvento: "4", tipoEvento: "" }))
             loadTiposEvento("4")
+          } else {
+            console.warn("[DEBUG-CAT] No se encontró categoría con id=4 en la lista devuelta por Supabase")
           }
         }
       }
