@@ -1,32 +1,31 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-21T15:25:31.448Z",
-  "phase": "ui-fixes-cotizaciones-dashboard",
-  "phase_name": "Fixes UI: filtro paquetes por hotel, filtros dashboard en proximos eventos, ocultar Interno en cotizaciones/new",
+  "timestamp": "2026-04-21T22:24:13.951Z",
+  "phase": "fix-precarga-categoria-interno-reservacion-interna",
+  "phase_name": "Fix precarga categoria 'Interno' en /reservacion-interna/new + a11y SelectTrigger ids",
   "phase_dir": ".planning",
   "plan": 1,
   "task": 3,
   "total_tasks": 3,
   "status": "paused",
-  "last_commit": "8f9d6b2",
+  "last_commit": "c0ad619",
   "branch": "main",
   "completed_tasks": [
-    {"id": 1, "name": "Filtrar paquetes por hotelid en cotizaciones/new (extract loadPaquetesList + reload on hotel change)", "status": "done", "commit": "8f9d6b2"},
-    {"id": 2, "name": "Ocultar opcion 'Interno' en dropdown de Categoria en cotizaciones/new (condicionado por isReservacionInterna)", "status": "done", "commit": "8f9d6b2"},
-    {"id": 3, "name": "Filtros del dashboard (tipo/estatus) aplican tambien al sidebar 'Proximos Eventos'", "status": "done", "commit": "8f9d6b2"}
+    {"id": 1, "name": "Fix precarga categoria Interno - intento 1 (comparacion c.id.toString() === '4')", "status": "done", "commit": "0236207"},
+    {"id": 2, "name": "Refactor robusto: useEffect dedicado que reacciona a categoriasEvento, busqueda por nombre 'interno' con id=4 fallback", "status": "done", "commit": "6f7ab82"},
+    {"id": 3, "name": "Fix a11y: agregar id a SelectTrigger de categoriaEvento/tipoEvento/estatus para que Label htmlFor resuelva", "status": "done", "commit": "c0ad619"}
   ],
   "remaining_tasks": [],
   "blockers": [],
   "human_actions_pending": [
-    {"action": "Probar los tres fixes en producción o localhost:3002", "context": "1) Hotel A → Tipo Evento → Agregar Paquete (solo paquetes de A), cambiar a Hotel B, reabrir modal (solo paquetes de B). 2) Dropdown Categoría en /cotizaciones/new no debe mostrar 'Interno'; en /reservacion-interna/new sí. 3) Toggle checkboxes del panel de filtros del dashboard y verificar que la lista 'Próximos Eventos' responde.", "blocking": false}
+    {"action": "Validar en deploy que los 3 Select (Categoria, Tipo, Estatus) ya no emiten warning de accesibilidad en DevTools Console tras hard reload", "context": "Cambio mecanico (solo agregar id), pero confirma en la prod URL", "blocking": false}
   ],
   "decisions": [
-    {"decision": "loadPaquetesList requiere ambos tipoEvento+hotel; sin hotel devuelve lista vacía", "rationale": "Antes listaDesplegablePaquetes sin hotelId no aplicaba filtro y traía todos los paquetes de todos los hoteles"},
-    {"decision": "Al cambiar hotel, limpiar solo estado del modal (previewPaqueteId/info/elementos), no selectedPaqueteId en BD", "rationale": "En flujo new el paquete se asigna después de hotel/salon/fechas; no hay selección previa a invalidar"},
-    {"decision": "Filtro de 'Interno' por nombre case-insensitive en lugar de id fijo", "rationale": "Más robusto que acoplar al id=4; el flag isReservacionInterna ya distingue los dos modos del form compartido"},
-    {"decision": "CalendarSidebar reusa la semántica de filtro de CalendarGrid (interno/cotizaciones/reservaciones/canceladas)", "rationale": "Coherencia visual: el sidebar y el grid responden a los mismos toggles"}
+    {"decision": "Separar la precarga del default 'Interno' a un useEffect dedicado en vez de hacerlo dentro del .then() del fetch inicial", "rationale": "El intento inicial (c.id.toString() === '4' dentro del callback del fetch) funcionaba en local pero fallaba en produccion, probablemente por un race de batching entre setCategoriasEvento y setFormData cuando Radix Select lee value antes de que SelectContent renderice el SelectItem"},
+    {"decision": "Buscar categoria default por nombre 'interno' (case-insensitive) con id=4 como fallback", "rationale": "Hace el codigo independiente del id especifico en cada DB (local vs prod) y resiliente a cambios futuros en la tabla categoriaeventos"},
+    {"decision": "Agregar id a SelectTrigger en lugar de mover htmlFor a otra parte", "rationale": "Radix SelectTrigger acepta id prop y lo aplica al boton rendereado; es la solucion estandar para asociar Label con Select sin romper comportamiento"}
   ],
   "uncommitted_files": [],
-  "next_action": "Esperar siguiente solicitud del usuario. Dev server aún corriendo en localhost:3002; relevantar si es necesario con `npm run dev` en C:/Claude/proyects/SPARK.",
-  "context_notes": "Sesión corta de 3 fixes UI de alcance controlado, todos en el flujo cotizaciones/dashboard. Sin blockers. Omar pusheó 2 commits en hoteles/elementos (c569fce, 857bba1) — fast-forward limpio, sin conflictos con trabajo de esta sesión. Vercel auto-deploy desde GitHub integration OK (Ready, 34s)."
+  "next_action": "Esperar siguiente solicitud. Dev server corriendo en localhost:3002 (monitor bc348369r, iniciado al resumir esta sesion). Deploy actual: commit c0ad619 en Vercel produccion.",
+  "context_notes": "Sesion corta enfocada en un unico sintoma reportado por usuario: la categoria 'Interno' no precargaba en /reservacion-interna/new en el deploy, aunque en local si lo hacia. Tres iteraciones: (1) fix de comparacion de tipos sin entender causa real, (2) debug logs temporales (revertidos) para pedir al usuario DevTools output, (3) antes de que respondiera con logs, el usuario pidio fix directo - resuelto con refactor robusto que separa la precarga a un useEffect dedicado. Sospecha de la causa raiz: batching diferente en React prod build + Radix Select sync entre value y items cuando ambos se actualizan en la misma promesa. El useEffect separado garantiza orden determinista: primero se setea categoriasEvento, luego un render posterior dispara el efecto que setea el default. Confirmado por usuario que ya funciona en ambos ambientes. Bonus: fix a11y de 3 SelectTrigger sin id que emitian warning de Label/htmlFor en DevTools. Vercel auto-deploy desde GitHub integration OK en los 4 commits. Sin commits de Omar durante esta sesion."
 }
