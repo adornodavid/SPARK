@@ -1242,7 +1242,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
         setCategoriasEvento(lista)
         // Reservación interna en modo creación: precargar categoría id=4
         if (isReservacionInterna && !effectiveEditId) {
-          const def = lista.find((c) => c.id === 4)
+          const def = lista.find((c) => c.id?.toString() === "4")
           if (def) {
             setFormData(prev => ({ ...prev, categoriaEvento: "4", tipoEvento: "" }))
             loadTiposEvento("4")
