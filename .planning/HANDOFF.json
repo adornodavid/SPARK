@@ -1,71 +1,32 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-20T05:32:00.026Z",
-  "phase": "reservacion-interna-flow",
-  "phase_name": "Página Reservación Interna + flujo de cotizaciones extendido (presupuesto, modal detalle, dashboard)",
-  "phase_dir": ".planning/phases/current",
+  "timestamp": "2026-04-21T15:25:31.448Z",
+  "phase": "ui-fixes-cotizaciones-dashboard",
+  "phase_name": "Fixes UI: filtro paquetes por hotel, filtros dashboard en proximos eventos, ocultar Interno en cotizaciones/new",
+  "phase_dir": ".planning",
   "plan": 1,
-  "task": 25,
-  "total_tasks": 25,
+  "task": 3,
+  "total_tasks": 3,
   "status": "paused",
+  "last_commit": "8f9d6b2",
+  "branch": "main",
   "completed_tasks": [
-    {"id": 1, "name": "Fix duplicate React keys en availability-calendar (cotizaciones del mismo eventoid)", "status": "done"},
-    {"id": 2, "name": "Modal Alimentos: agrupar registros por categoria (Menu/Complemento) con headers ámbar colapsables", "status": "done"},
-    {"id": 3, "name": "Modal Alimentos: PDF preview solo al clic (quité onMouseEnter)", "status": "done"},
-    {"id": 4, "name": "Modal Alimentos: filtrar listado por hotelid del input Hotel", "status": "done"},
-    {"id": 5, "name": "ESC cierra cualquier modal de la sección Agregar paquete", "status": "done"},
-    {"id": 6, "name": "Presupuesto: renglón Alimento/Bebida adicional (con/sin paquete) con fallback de costo (vw → menus.costo → platillo clave)", "status": "done"},
-    {"id": 7, "name": "Individual: un renglón por platillo en presupuesto", "status": "done"},
-    {"id": 8, "name": "Edit load preserva adicionales (paqueteOriginalKeysLoaded guard + fallback eventoxreservaciones.paqueteid)", "status": "done"},
-    {"id": 9, "name": "Cortesía Salón excluye Audiovisual y Hora extra del cálculo otrosTotal", "status": "done"},
-    {"id": 10, "name": "Modal confirmar carga de platillos por menú tras asignar paquete (cola con auto-advance Completo/Individual)", "status": "done"},
-    {"id": 11, "name": "Pestañas platillos preservan PDF del menú (selectedAlimentoParentPdf)", "status": "done"},
-    {"id": 12, "name": "Renglón Hora extra (salon.subtotal/8 × horas) + columna Descuento (MXN) en UI (PDF sin esa col)", "status": "done"},
-    {"id": 13, "name": "Página /reservacion-interna/new con prop mode='reservacion-interna' (oculta presupuesto, tabs, AgregarPaquete, Mobiliario, BeneficiosAdicionales, GenerarPDF, Habitaciones)", "status": "done"},
-    {"id": 14, "name": "Reservación interna: estatus filtrado por seccion='Reservacion' default id=14, categoría=4 disabled, botón 'Reservar Salón'", "status": "done"},
-    {"id": 15, "name": "Modal éxito y secciones renombradas para reservación interna (incluye 'Agregar elementos a la reservación')", "status": "done"},
-    {"id": 16, "name": "Botón 'Ver Reservación' al pie del form → /dashboard?hotelId&salonId&date abre DayDetailSheet automáticamente", "status": "done"},
-    {"id": 17, "name": "Modal QuotationDetailModal en cards: resuelve reservacionid, presupuesto completo (paquete/salón/AV/comp/adicionales/hora extra), botón Editar dinámico Cotización/Reservación", "status": "done"},
-    {"id": 18, "name": "Routing por categoria 'Interno' (BoardCard, modal, DaySheet) → /reservacion-interna/new?editId=", "status": "done"},
-    {"id": 19, "name": "Botón Editar en cada tarjeta del DayDetailSheet", "status": "done"},
-    {"id": 20, "name": "Color #0c7da8 para eventos Interno (DaySheet, calendar-grid, sidebar Próximos Eventos, BoardCard)", "status": "done"},
-    {"id": 21, "name": "Filtros del dashboard: agregado 'Interno', removidos 'Pendientes' y 'Confirmadas'", "status": "done"},
-    {"id": 22, "name": "Calendar-grid: gradient con 3 franjas para días con Reservación+Cotización+Interno; días pasados con color a opacity 0.25", "status": "done"},
-    {"id": 23, "name": "Botón 'Reservación Interna' (outline ámbar) en /cotizaciones y a la izquierda de 'Generar Cotizacion' en calendar-grid del dashboard", "status": "done"},
-    {"id": 24, "name": "PDF Cotización: tras generar, eventos.estatusid se actualiza a 3 (Cotizacion Generada) y reflejado en formData", "status": "done"},
-    {"id": 25, "name": "Board /cotizaciones: columna 'Reservaciones' renombrada a 'Eventos Programados', incluye Internos con borde+badge azul #0c7da8", "status": "done"}
+    {"id": 1, "name": "Filtrar paquetes por hotelid en cotizaciones/new (extract loadPaquetesList + reload on hotel change)", "status": "done", "commit": "8f9d6b2"},
+    {"id": 2, "name": "Ocultar opcion 'Interno' en dropdown de Categoria en cotizaciones/new (condicionado por isReservacionInterna)", "status": "done", "commit": "8f9d6b2"},
+    {"id": 3, "name": "Filtros del dashboard (tipo/estatus) aplican tambien al sidebar 'Proximos Eventos'", "status": "done", "commit": "8f9d6b2"}
   ],
-  "remaining_tasks": [
-    {"id": "verify", "name": "Verificación funcional end-to-end por el usuario (crear reservación interna, ver en dashboard, editar desde cards/modal/daysheet, generar PDF y validar cambio de estatus)", "status": "not_started"}
-  ],
+  "remaining_tasks": [],
   "blockers": [],
   "human_actions_pending": [
-    {"action": "Probar el flujo completo de Reservación Interna y los nuevos comportamientos en navegador", "context": "Cambios extensos en quotation-form.tsx, quotation-detail-modal.tsx, prospects-quotations-board.tsx, calendar-grid.tsx, calendar-sidebar.tsx, day-detail-sheet.tsx, dashboard/page.tsx", "blocking": false},
-    {"action": "Ejecutar SQL si falta el estatus 'Cotizacion Generada' (id=3) o estatus de seccion='Reservacion'/'Reservacion Interna' en la tabla estatus", "context": "El form actualiza directo eventos.estatusid=3 y consulta listaEstatusCotizacion(seccion). Si los registros no existen, los dropdowns vienen vacíos.", "blocking": false}
+    {"action": "Probar los tres fixes en producción o localhost:3002", "context": "1) Hotel A → Tipo Evento → Agregar Paquete (solo paquetes de A), cambiar a Hotel B, reabrir modal (solo paquetes de B). 2) Dropdown Categoría en /cotizaciones/new no debe mostrar 'Interno'; en /reservacion-interna/new sí. 3) Toggle checkboxes del panel de filtros del dashboard y verificar que la lista 'Próximos Eventos' responde.", "blocking": false}
   ],
   "decisions": [
-    {"decision": "Reusar QuotationForm con prop mode en lugar de duplicar para reservacion-interna", "rationale": "Evita duplicación de ~7600 líneas; toggles puntuales por isReservacionInterna en cada sección a ocultar/cambiar"},
-    {"decision": "Color corporativo Interno = #0c7da8 (oscuro)", "rationale": "Iteración a petición del usuario desde #10a9e2 → más oscuro para mejor legibilidad sobre fondos claros"},
-    {"decision": "Adicionales en presupuesto: 'Alimento/Bebida adicional' con fallback de costo en cadena (view.costo > menus.costo > platillo clave)", "rationale": "vw_elementocotizacion no siempre devuelve costo; tipomenu Individual usa el primer platillo, Completo usa PLATO FUERTE"},
-    {"decision": "paqueteOriginalKeysLoaded flag para gating del recálculo en edit load", "rationale": "Sin guard, los menús del paquete original se marcaban como adicionales al recargar antes de que paqueteOriginalKeys terminara de cargar"},
-    {"decision": "Hora extra como tipo separado, excluido de cortesía y de la sumatoria que destraba la cortesía del Salón", "rationale": "Es costo derivado del salón; incluirlo crearía un loop conceptual (la cortesía del salón se destrabaría con horas extras del propio salón)"},
-    {"decision": "Internos en columna 'Eventos Programados' (no 'Cotizaciones') sin importar estatus", "rationale": "Decisión del usuario: aunque sean tiporegistro Cotizacion, conceptualmente son eventos ya programados"},
-    {"decision": "Días pasados con eventos: opacity 0.25 sobre el color (sólido o gradient)", "rationale": "El usuario quiso ver el color en pasados pero atenuado significativamente; opacity afecta texto+badge pero el conteo numérico sigue siendo legible como overlay"}
+    {"decision": "loadPaquetesList requiere ambos tipoEvento+hotel; sin hotel devuelve lista vacía", "rationale": "Antes listaDesplegablePaquetes sin hotelId no aplicaba filtro y traía todos los paquetes de todos los hoteles"},
+    {"decision": "Al cambiar hotel, limpiar solo estado del modal (previewPaqueteId/info/elementos), no selectedPaqueteId en BD", "rationale": "En flujo new el paquete se asigna después de hotel/salon/fechas; no hay selección previa a invalidar"},
+    {"decision": "Filtro de 'Interno' por nombre case-insensitive en lugar de id fijo", "rationale": "Más robusto que acoplar al id=4; el flag isReservacionInterna ya distingue los dos modos del form compartido"},
+    {"decision": "CalendarSidebar reusa la semántica de filtro de CalendarGrid (interno/cotizaciones/reservaciones/canceladas)", "rationale": "Coherencia visual: el sidebar y el grid responden a los mismos toggles"}
   ],
-  "uncommitted_files": [
-    "components/admin/quotations/quotation-form.tsx",
-    "components/admin/quotations/quotation-detail-modal.tsx",
-    "components/admin/quotations/prospects-quotations-board.tsx",
-    "components/admin/quotations/availability-calendar.tsx",
-    "components/admin/calendar/calendar-grid.tsx",
-    "components/admin/calendar/calendar-filter-panel.tsx",
-    "components/admin/calendar/calendar-sidebar.tsx",
-    "components/admin/calendar/day-detail-sheet.tsx",
-    "app/(protected)/cotizaciones/page.tsx",
-    "app/(protected)/dashboard/page.tsx",
-    "app/(protected)/reservacion-interna/new/page.tsx (nuevo)",
-    "app/actions/catalogos.ts (listaEstatusCotizacion(seccion?), buscarElementosPorTabla(hotelid?), obtenerElementosPaqueteOriginal nuevo)"
-  ],
-  "next_action": "El usuario debe probar el flujo completo en navegador. Si todo OK, considerar inicializar git en C:/Claude/proyects/SPARK y commitear (proyecto no tiene .git).",
-  "context_notes": "Sesión muy extensa enfocada en (1) extender presupuesto con renglones derivados (adicionales, hora extra, descuento), (2) crear página /reservacion-interna que reusa QuotationForm con mode prop, (3) integrar Internos en dashboard/calendar/board con color #0c7da8 distintivo, (4) modal detalle de cotización con misma lógica de presupuesto que el form. Proyecto SPARK no tiene .git inicializado, por eso pause-work no commitea. DoH activo en Wi-Fi para resolver Supabase (legacy del handoff anterior). Dev server corre en localhost:3000 con Turbopack, todos los cambios compilaron OK durante la sesión."
+  "uncommitted_files": [],
+  "next_action": "Esperar siguiente solicitud del usuario. Dev server aún corriendo en localhost:3002; relevantar si es necesario con `npm run dev` en C:/Claude/proyects/SPARK.",
+  "context_notes": "Sesión corta de 3 fixes UI de alcance controlado, todos en el flujo cotizaciones/dashboard. Sin blockers. Omar pusheó 2 commits en hoteles/elementos (c569fce, 857bba1) — fast-forward limpio, sin conflictos con trabajo de esta sesión. Vercel auto-deploy desde GitHub integration OK (Ready, 34s)."
 }
