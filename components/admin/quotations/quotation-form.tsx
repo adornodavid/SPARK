@@ -1237,22 +1237,9 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
     loadHoteles()
     loadClientes()
     listaCategoriaEvento().then(r => {
-      // [DEBUG categoria-default]
-      console.log("[DEBUG-CAT] listaCategoriaEvento result:", { success: r.success, error: (r as any).error, dataLen: r.data?.length, sample: r.data?.slice(0, 5), isReservacionInterna, effectiveEditId, mode })
       if (r.success && r.data) {
         const lista = r.data as { id: number; nombre: string }[]
         setCategoriasEvento(lista)
-        // Reservación interna en modo creación: precargar categoría id=4
-        if (isReservacionInterna && !effectiveEditId) {
-          const def = lista.find((c) => c.id?.toString() === "4")
-          console.log("[DEBUG-CAT] default lookup id=4 →", def, "tipos lista ids:", lista.map(c => ({ id: c.id, tipo: typeof c.id, nombre: c.nombre })))
-          if (def) {
-            setFormData(prev => ({ ...prev, categoriaEvento: "4", tipoEvento: "" }))
-            loadTiposEvento("4")
-          } else {
-            console.warn("[DEBUG-CAT] No se encontró categoría con id=4 en la lista devuelta por Supabase")
-          }
-        }
       }
     })
     listaEstatusCotizacion(isReservacionInterna ? "Reservacion" : "Cotizacion").then(r => {
@@ -1285,6 +1272,23 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
       setPendingEstatusId(null)
     }
   }, [pendingEstatusId, estatusList])
+
+  // Reservación interna en modo creación: precargar categoría "Interno" cuando la lista esté cargada.
+  // Separado del fetch inicial para evitar races de batching en producción.
+  useEffect(() => {
+    if (!isReservacionInterna || effectiveEditId) return
+    if (categoriasEvento.length === 0) return
+    if (formData.categoriaEvento) return
+    const def = categoriasEvento.find(
+      (c) => c.nombre?.trim().toLowerCase() === "interno" || c.id?.toString() === "4"
+    )
+    if (def) {
+      const defId = def.id.toString()
+      setFormData((prev) => ({ ...prev, categoriaEvento: defId, tipoEvento: "" }))
+      loadTiposEvento(defId)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categoriasEvento, isReservacionInterna, effectiveEditId])
 
   // Cargar cotización existente si viene editId en URL o como prop
   useEffect(() => {
