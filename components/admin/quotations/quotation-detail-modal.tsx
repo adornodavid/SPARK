@@ -249,7 +249,7 @@ export function QuotationDetailModal({ open, onOpenChange, quotation }: Quotatio
         if (!menuPrincipal) {
           for (const alim of alimentosEls) {
             const alimId = Number(alim.elementoid ?? alim.id)
-            if (platillosCotizacion.some((p: any) => Number(p.platilloid) === alimId)) {
+            if (platillosCotizacion.some((p: any) => Number(p.menuid) === alimId)) {
               menuPrincipal = alim
               tipoMenuPrincipal = menuMap.get(alimId) || ""
               break
@@ -260,7 +260,7 @@ export function QuotationDetailModal({ open, onOpenChange, quotation }: Quotatio
       if (menuPrincipal) {
         menuPrincipalId = Number(menuPrincipal.elementoid ?? menuPrincipal.id)
         const esCompleto = tipoMenuPrincipal.toLowerCase() === "completo"
-        const platillosDeMenu = platillosCotizacion.filter((p: any) => Number(p.platilloid) === menuPrincipalId)
+        const platillosDeMenu = platillosCotizacion.filter((p: any) => Number(p.menuid) === menuPrincipalId)
         const platilloClave = esCompleto
           ? platillosDeMenu.find((p: any) => (p.tipo || "").toUpperCase() === "PLATO FUERTE")
           : platillosDeMenu[0]
@@ -268,7 +268,7 @@ export function QuotationDetailModal({ open, onOpenChange, quotation }: Quotatio
           const { data: paqRow } = await supabase.from("paquetes").select("id, nombre, precioporpersona").eq("id", Number(paqueteId)).maybeSingle()
           let precioPaquete = Number(paqRow?.precioporpersona ?? 0) || 0
           if (precioPaquete === 0) {
-            const r = await obtenerPrecioPaquetePorPlatillo(Number(paqueteId), Number(platilloClave.elementoid ?? platilloClave.id))
+            const r = await obtenerPrecioPaquetePorPlatillo(Number(paqueteId), Number(platilloClave.elementoid ?? platilloClave.id), q.fechainicio)
             precioPaquete = r.precio || 0
           }
           const nombreMenu = menuPrincipal?.descripcion || menuPrincipal?.nombre || menuPrincipal?.elemento || paqRow?.nombre || "Paquete"
@@ -345,7 +345,7 @@ export function QuotationDetailModal({ open, onOpenChange, quotation }: Quotatio
       const tipoLabel = tipoSec === "alimentos" ? "Alimento adicional" : "Bebida adicional"
       if (tipoSec === "alimentos") {
         const tipoMenu = (tipoMenuMap.get(elemId) || "").toLowerCase()
-        const platillosDeMenu = platillosCotizacion.filter((p: any) => Number(p.platilloid) === elemId)
+        const platillosDeMenu = platillosCotizacion.filter((p: any) => Number(p.menuid) === elemId)
         if (tipoMenu === "individual" && platillosDeMenu.length > 0) {
           for (const plat of platillosDeMenu) {
             const cPlat = Number(plat?.costo) || 0
@@ -367,7 +367,7 @@ export function QuotationDetailModal({ open, onOpenChange, quotation }: Quotatio
           costo = Number(b?.costo) || 0
         }
         if (costo <= 0 && tipoSec === "alimentos") {
-          const platillosDeMenu = platillosCotizacion.filter((p: any) => Number(p.platilloid) === elemId)
+          const platillosDeMenu = platillosCotizacion.filter((p: any) => Number(p.menuid) === elemId)
           const tipoMenu = (tipoMenuMap.get(elemId) || "").toLowerCase()
           const platilloClave = tipoMenu === "completo"
             ? platillosDeMenu.find((p: any) => (p.tipo || "").toUpperCase() === "PLATO FUERTE")

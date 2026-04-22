@@ -151,6 +151,13 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
   const [loadingPreviewPaquete, setLoadingPreviewPaquete] = useState(false)
   const [previewPaqueteId, setPreviewPaqueteId] = useState<string>("")
   const [previewPaqueteInfo, setPreviewPaqueteInfo] = useState<any>(null)
+  // PDF del paquete actualmente seleccionado en el modal "Seleccionar Paquete"
+  const [previewPaquetePdf, setPreviewPaquetePdf] = useState<string>("")
+  // Pestaña activa en el modal de paquete: "elementos" (lista de elementos) | "pdf" (vista previa)
+  const [paqueteModalTab, setPaqueteModalTab] = useState<"elementos" | "pdf">("elementos")
+  // Menús del paquete marcados con opcional=true en la tabla menus — el usuario debe elegir UNO.
+  const [opcionalMenusInfo, setOpcionalMenusInfo] = useState<{ id: number; nombre: string }[]>([])
+  const [opcionalMenuSeleccionado, setOpcionalMenuSeleccionado] = useState<number | null>(null)
   const [requerirHabitaciones, setRequerirHabitaciones] = useState(false)
   const [showConfirmReemplazarModal, setShowConfirmReemplazarModal] = useState(false)
   const [showConfirmEliminarModal, setShowConfirmEliminarModal] = useState(false)
@@ -201,8 +208,13 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
   const [selectedAlimentoParentId, setSelectedAlimentoParentId] = useState<number | null>(null)
   // PDF del menú activo (se preserva al cambiar de pestaña dentro del modal de Alimentos)
   const [selectedAlimentoParentPdf, setSelectedAlimentoParentPdf] = useState<string>("")
+  // Nombre del menú padre cuyos platillos se están configurando (para mostrarlo en el header del modal)
+  const [selectedAlimentoParentNombre, setSelectedAlimentoParentNombre] = useState<string>("")
   // Alimentos expandidos en la sección del paquete (muestra sus platillos)
   const [expandedAlimentos, setExpandedAlimentos] = useState<Set<number>>(new Set())
+  // Ids de alimentos ya auto-expandidos al cargar sus platillos; evita reabrir después
+  // de que el usuario colapse manualmente.
+  const autoExpandedAlimentosRef = useRef<Set<number>>(new Set())
   // Mapa alimentoId → tipomenu ("Completo" | "Individual") para renderizar cada alimento correctamente
   const [alimentosTipoMenu, setAlimentosTipoMenu] = useState<Record<number, string>>({})
   // Mapa alimentoId → tiene al menos un platillo en la tabla platillos
@@ -488,7 +500,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
         if (!menuPrincipal) {
           for (const alim of alimentosEls) {
             const alimId = Number(alim.elementoid ?? alim.id)
-            if (platillos.some((p: any) => Number(p.platilloid) === alimId)) {
+            if (platillos.some((p: any) => Number(p.menuid) === alimId)) {
               menuPrincipal = alim; menuPrincipalTipo = menuMap.get(alimId) || ""
               break
             }
@@ -498,14 +510,14 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
       if (menuPrincipal) {
         const menuPrincipalId = Number(menuPrincipal.elementoid ?? menuPrincipal.id)
         const esCompleto = menuPrincipalTipo.toLowerCase() === "completo"
-        const platillosDeEseMenu = platillos.filter((p: any) => Number(p.platilloid) === menuPrincipalId)
+        const platillosDeEseMenu = platillos.filter((p: any) => Number(p.menuid) === menuPrincipalId)
         const platilloClave = esCompleto
           ? platillosDeEseMenu.find((p: any) => (p.tipo || "").toUpperCase() === "PLATO FUERTE")
           : platillosDeEseMenu[0]
         if (platilloClave) {
           let precioPaquete = Number(pqInfo.precioporpersona ?? 0) || 0
           if (precioPaquete === 0) {
-            const res = await obtenerPrecioPaquetePorPlatillo(Number(row.paqueteid), Number(platilloClave.elementoid ?? platilloClave.id))
+            const res = await obtenerPrecioPaquetePorPlatillo(Number(row.paqueteid), Number(platilloClave.elementoid ?? platilloClave.id), fd.fechaInicial)
             precioPaquete = res.precio || 0
           }
           const nombreMenu = menuPrincipal?.descripcion || menuPrincipal?.nombre || menuPrincipal?.elemento || pqInfo.nombre || "Paquete"
@@ -983,7 +995,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
   // Recalcula renglones "Alimento adicional" / "Bebida adicional" en presupuesto
   // (alimentos o bebidas que están en la cotización pero NO formaban parte del paquete original)
   // Precio para alimentos: 1) menus.costo si > 0; 2) si no, costo del platillo clave elegido
-  //   (platillos.id = id del platillo que el usuario agregó al menú, platillos.platilloid = id del menú).
+  //   (platillos.id = id del platillo que el usuario agregó al menú, platillos.menuid = id del menú).
   useEffect(() => {
     // Esperar a que sepamos qué trae el paquete original antes de decidir qué es "adicional".
     // Sin este guard, durante la carga inicial todos los menús del paquete se marcarían adicionales por error.
@@ -1007,7 +1019,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
       // Caso especial: alimentos de tipomenu "Individual" → un renglón POR cada platillo seleccionado
       if (tipoSec === "alimentos") {
         const tipoMenu = (alimentosTipoMenu[elemId] || "").toLowerCase()
-        const platillosDeMenu = platillosItems.filter((p: any) => Number(p.platilloid) === elemId)
+        const platillosDeMenu = platillosItems.filter((p: any) => Number(p.menuid) === elemId)
         if (tipoMenu === "individual" && platillosDeMenu.length > 0) {
           for (const plat of platillosDeMenu) {
             const cPlat = Number(plat?.costo) || 0
@@ -1022,7 +1034,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
       const costoRow = Number(el.costo) || 0
       let costo = costoRow > 0 ? costoRow : (costoMap[key] ?? 0)
       if (tipoSec === "alimentos" && costo <= 0) {
-        const platillosDeMenu = platillosItems.filter((p: any) => Number(p.platilloid) === elemId)
+        const platillosDeMenu = platillosItems.filter((p: any) => Number(p.menuid) === elemId)
         const tipoMenu = (alimentosTipoMenu[elemId] || "").toLowerCase()
         const platilloClave = tipoMenu === "completo"
           ? platillosDeMenu.find((p: any) => (p.tipo || "").toUpperCase() === "PLATO FUERTE")
@@ -1038,6 +1050,17 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
       return [...sinAdicionales, ...adicionales]
     })
   }, [elementosPaquete, platillosItems, alimentosTipoMenu, paqueteOriginalKeys, paqueteOriginalKeysLoaded, costoMap, selectedPaqueteId, formData.fechaInicial, formData.fechaFinal, formData.numeroInvitados])
+
+  // Recalcular el renglón "Paquete" cuando cambia fechaInicial: year + esfinsemana
+  // derivados de la fecha son filtros de paqueteprecios, así que un cambio de fecha puede
+  // resultar en un precio distinto para el mismo paquete/platillo clave.
+  useEffect(() => {
+    if (!formData.fechaInicial) return
+    if (!selectedPaqueteId) return
+    if (platillosItems.length === 0) return
+    recalcularPresupuestoPaquete(platillosItems, elementosPaquete)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.fechaInicial])
 
   // Renglón "Hora extra" en presupuesto: precio por hora = salón.subtotal / 8, total = precio × horasExtras.
   // Se mantiene sincronizado con horasExtras y el salón asignado; se inserta justo después del renglón Salón.
@@ -1219,9 +1242,9 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
           }
         }
         if (faltantesPlatillos.length > 0) {
-          const { data } = await supa.from("platillos").select("platilloid").in("platilloid", faltantesPlatillos)
+          const { data } = await supa.from("platillos").select("menuid").in("menuid", faltantesPlatillos)
           if (!cancelado) {
-            const tiene = new Set((data || []).map((r: any) => Number(r.platilloid)))
+            const tiene = new Set((data || []).map((r: any) => Number(r.menuid)))
             const update: Record<number, boolean> = {}
             for (const id of faltantesPlatillos) update[id] = tiene.has(id)
             setAlimentosConPlatillos(prev => ({ ...prev, ...update }))
@@ -1498,7 +1521,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                   }
                 }
                 if (paqueteid) {
-                  // Cargar platillos ya guardados de esta cotización (con sus datos para conocer tipo y platilloid)
+                  // Cargar platillos ya guardados de esta cotización (con sus datos para conocer tipo y menuid)
                   const { data: platElems } = await supaCli
                     .from("elementosxcotizacion")
                     .select("elementoid")
@@ -1508,7 +1531,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                   if (platIds.length > 0) {
                     const { data: platillosData } = await supaCli
                       .from("platillos")
-                      .select("id, tipo, platilloid")
+                      .select("id, tipo, menuid")
                       .in("id", platIds)
                     const platillosInfo = platillosData || []
                     // Determinar menú principal por tipomenu="Completo"; si no, el primer alimento con platillos
@@ -1532,7 +1555,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                       if (!menuPrincipal) {
                         for (const alim of alimentosEls) {
                           const alimId = Number(alim.elementoid ?? alim.id)
-                          if (platillosInfo.some((p: any) => Number(p.platilloid) === alimId)) {
+                          if (platillosInfo.some((p: any) => Number(p.menuid) === alimId)) {
                             menuPrincipal = alim
                             menuPrincipalTipo = menuMap.get(alimId) || ""
                             break
@@ -1544,7 +1567,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                       const menuPrincipalId = Number(menuPrincipal.elementoid ?? menuPrincipal.id)
                       // Platillo clave: Plato Fuerte (Completo) o primero (Individual/otros)
                       const esCompleto = menuPrincipalTipo.toLowerCase() === "completo"
-                      const platillosDeEseMenu = platillosInfo.filter((p: any) => Number(p.platilloid) === menuPrincipalId)
+                      const platillosDeEseMenu = platillosInfo.filter((p: any) => Number(p.menuid) === menuPrincipalId)
                       const platilloClave = esCompleto
                         ? platillosDeEseMenu.find((p: any) => (p.tipo || "").toUpperCase() === "PLATO FUERTE")
                         : platillosDeEseMenu[0]
@@ -1556,7 +1579,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                           .maybeSingle()
                         let precioPaquete = Number(paqRow?.precioporpersona ?? 0) || 0
                         if (precioPaquete === 0) {
-                          const res = await obtenerPrecioPaquetePorPlatillo(Number(paqueteid), Number(platilloClave.id))
+                          const res = await obtenerPrecioPaquetePorPlatillo(Number(paqueteid), Number(platilloClave.id), fi)
                           precioPaquete = res.precio || 0
                         }
                         const nombreMenu = menuPrincipal?.descripcion || menuPrincipal?.nombre || menuPrincipal?.elemento || paqRow?.nombre || "Paquete"
@@ -1693,6 +1716,37 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
     }
   }, [salones, pendingSalonId])
 
+  // Safety net: si hay salón seleccionado pero la lista de montajes quedó vacía
+  // (p. ej. tras cambiar horas en el calendario sin cambiar salón), recargar montajes.
+  // Pasamos esModoEdicion=true para no resetear adultos/ninos/numeroInvitados.
+  useEffect(() => {
+    if (formData.salon && montajes.length === 0) {
+      loadMontajes(formData.salon, true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.salon, montajes.length])
+
+  // Auto-expandir en la sección de alimentos los menús que ya tienen platillos asignados,
+  // para que al cargar la cotización/edición se muestren sus platillos sin clic adicional.
+  // Se hace una sola vez por alimento (ref); si el usuario colapsa manualmente, no reabre.
+  useEffect(() => {
+    if (platillosItems.length === 0) return
+    const nuevosIds: number[] = []
+    for (const p of platillosItems) {
+      const id = Number((p as any).menuid)
+      if (!Number.isFinite(id) || id <= 0) continue
+      if (autoExpandedAlimentosRef.current.has(id)) continue
+      autoExpandedAlimentosRef.current.add(id)
+      nuevosIds.push(id)
+    }
+    if (nuevosIds.length === 0) return
+    setExpandedAlimentos(prev => {
+      const next = new Set(prev)
+      for (const id of nuevosIds) next.add(id)
+      return next
+    })
+  }, [platillosItems])
+
   useEffect(() => {
     if (pendingMontajeId && montajes.length > 0) {
       const montajeExists = montajes.find((m) => m.value === pendingMontajeId)
@@ -1756,12 +1810,46 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
     setPreviewPaqueteId(paqueteid)
     setPreviewPaqueteInfo(null)
     setElementosPreviewPaquete([])
+    setPreviewPaquetePdf("")
+    setPaqueteModalTab("elementos")
+    setOpcionalMenusInfo([])
+    setOpcionalMenuSeleccionado(null)
     if (paqueteid) {
       const paquete = paquetes.find((p) => p.paqueteid?.toString() === paqueteid || p.id?.toString() === paqueteid)
       setPreviewPaqueteInfo(paquete || null)
       setLoadingPreviewPaquete(true)
+      const supa = (await import("@/lib/supabase/client")).createClient()
+      // Fetch del documentopdf del paquete (columna documentopdf en tabla paquetes)
+      try {
+        const { data: paqRow } = await supa.from("paquetes").select("documentopdf").eq("id", Number(paqueteid)).maybeSingle()
+        setPreviewPaquetePdf((paqRow as any)?.documentopdf || "")
+      } catch {
+        setPreviewPaquetePdf("")
+      }
       const res = await obtenerElementosPaquete(Number(paqueteid))
-      if (res.success && res.data) setElementosPreviewPaquete(res.data)
+      if (res.success && res.data) {
+        setElementosPreviewPaquete(res.data)
+        // Detectar menús opcionales: filtrar elementos tipo "alimentos", buscar en menus
+        // los que tengan opcional=true (alternativas entre las que el usuario debe elegir una).
+        const alimentoIds = res.data
+          .filter((el: any) => normalizarSeccion(el.tipoelemento || el.tipo || "") === "alimentos")
+          .map((el: any) => Number(el.elementoid ?? el.id))
+          .filter((n: number) => Number.isFinite(n) && n > 0)
+        if (alimentoIds.length > 0) {
+          try {
+            const { data: menusData } = await supa
+              .from("menus")
+              .select("id, nombre, descripcion, opcional")
+              .in("id", alimentoIds)
+            const opcionales = (menusData || [])
+              .filter((m: any) => m.opcional === true)
+              .map((m: any) => ({ id: Number(m.id), nombre: m.nombre || m.descripcion || `Menú #${m.id}` }))
+            setOpcionalMenusInfo(opcionales)
+          } catch {
+            setOpcionalMenusInfo([])
+          }
+        }
+      }
       setLoadingPreviewPaquete(false)
     }
   }
@@ -2849,7 +2937,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
         // Pre-seleccionar los platillos ya agregados a ese alimento
         const yaIds = new Set(
           platillosItems
-            .filter((p: any) => Number(p.platilloid) === platilloId)
+            .filter((p: any) => Number(p.menuid) === platilloId)
             .map((p: any) => Number(p.elementoid))
         )
         setSelectedElementoIds(yaIds)
@@ -2943,7 +3031,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
     if (!menuPrincipal) {
       for (const alim of alimentosEnPaquete) {
         const alimId = Number(alim.elementoid ?? alim.id)
-        if (plats.some((p: any) => Number(p.platilloid) === alimId)) { menuPrincipal = alim; break }
+        if (plats.some((p: any) => Number(p.menuid) === alimId)) { menuPrincipal = alim; break }
       }
     }
     if (!menuPrincipal) {
@@ -2952,7 +3040,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
       return
     }
     const menuPrincipalId = Number(menuPrincipal.elementoid ?? menuPrincipal.id)
-    const platillosDeMenu = plats.filter((p: any) => Number(p.platilloid) === menuPrincipalId)
+    const platillosDeMenu = plats.filter((p: any) => Number(p.menuid) === menuPrincipalId)
     // Determinar el platillo clave para calcular precio:
     //  - Completo: requiere uno de "Plato Fuerte"
     //  - Individual (u otros): cualquier platillo (sección "Platillos")
@@ -2967,13 +3055,35 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
       return
     }
     const platilloId = Number(platilloClave.elementoid ?? platilloClave.id)
-    const resultado = await obtenerPrecioPaquetePorPlatillo(paqueteId, platilloId)
+    const resultado = await obtenerPrecioPaquetePorPlatillo(paqueteId, platilloId, formData.fechaInicial)
     const precio = resultado.precio || 0
-    // Si el precio salió en 0, mostrar info de debug en consola del navegador (F12 → Console)
+    const dbg = (resultado as any).debug || {}
+    // Log siempre (no solo cuando precio=0) para diagnosticar filtros year/esfinsemana.
+    console.log("[Precio Paquete] precio=", precio, "debug=", dbg)
+
+    // Diagnóstico visible: si precio=0, armamos un sufijo con los filtros aplicados y lo
+    // que encontramos en paqueteprecios para que el usuario vea el estado sin abrir DevTools.
+    let diagSuffix = ""
     if (precio === 0) {
-      console.log("[Precio Paquete = 0] Debug:", (resultado as any).debug)
+      const f = dbg.filtros_fecha || {}
+      const disponibles = Array.isArray(dbg.paqueteprecios_rows_disponibles) ? dbg.paqueteprecios_rows_disponibles.length : -1
+      const err = dbg.paqueteprecios_error || dbg.paqueteprecios_diag_error
+      if (err) {
+        diagSuffix = ` [err: ${String(err).slice(0, 60)}]`
+      } else if (!dbg.platillo_platillobaseid) {
+        diagSuffix = ` [platillo sin platillobaseid]`
+      } else if (disponibles === 0) {
+        diagSuffix = ` [sin filas paqueteprecios p/ paqueteid+platobaseid]`
+      } else if (disponibles > 0) {
+        const filas = dbg.paqueteprecios_rows_disponibles as any[]
+        const resumen = filas.map((r: any) => `(year=${r.year}, esfin=${r.esfinsemana})`).join(" | ")
+        diagSuffix = ` [busco year=${f.year}, esfinsemana=${f.esFinSemana} | disponibles: ${resumen}]`
+      } else {
+        diagSuffix = ` [no hay fila p/ year=${f.year}, esfinsemana=${f.esFinSemana}]`
+      }
     }
-    const nombreMenu = menuPrincipal.descripcion || menuPrincipal.nombre || menuPrincipal.elemento || "Paquete"
+    const nombreMenuBase = menuPrincipal.descripcion || menuPrincipal.nombre || menuPrincipal.elemento || "Paquete"
+    const nombreMenu = nombreMenuBase + diagSuffix
     const dias = calcularDiasEvento(formData.fechaInicial, formData.fechaFinal)
     const numInvitados = Number(formData.numeroInvitados) || 0
     setPresupuestoItems(prev => {
@@ -2987,7 +3097,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
     const hotelId = Number(formData.hotel)
     try {
       const existentes = platillosItems.filter((p: any) =>
-        alimentoParentId == null || Number(p.platilloid) === alimentoParentId
+        alimentoParentId == null || Number(p.menuid) === alimentoParentId
       )
       const existentesIds = new Set(existentes.map((p: any) => Number(p.elementoid)))
       const selSet = new Set(selectedIds)
@@ -3199,10 +3309,36 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
       platilloId = alimentoEl ? Number(alimentoEl.elementoid ?? alimentoEl.id) : -1
     }
     setSelectedAlimentoParentId(platilloId > 0 ? platilloId : null)
+
+    // Pre-fetch del PDF y nombre del menú padre. Todos los platillos del modal (entradas/plato
+    // fuerte/postres) comparten el mismo menú, así que el preview usa siempre el documentopdf
+    // del menú (tabla menus) en lugar del documentopdf de cada platillo individual.
+    if (platilloId > 0) {
+      try {
+        const supa = (await import("@/lib/supabase/client")).createClient()
+        const { data: menuRow } = await supa.from("menus").select("documentopdf, nombre, descripcion").eq("id", platilloId).maybeSingle()
+        setSelectedAlimentoParentPdf((menuRow as any)?.documentopdf || "")
+        const menuNombre = (menuRow as any)?.nombre || (menuRow as any)?.descripcion || ""
+        // Fallback al nombre que ya tenemos en elementosPaquete si menus no trajo
+        if (menuNombre) {
+          setSelectedAlimentoParentNombre(menuNombre)
+        } else {
+          const el = elementosPaquete.find((e: any) => Number(e.elementoid ?? e.id) === platilloId)
+          setSelectedAlimentoParentNombre(el?.descripcion || el?.nombre || el?.elemento || "")
+        }
+      } catch {
+        setSelectedAlimentoParentPdf("")
+        setSelectedAlimentoParentNombre("")
+      }
+    } else {
+      setSelectedAlimentoParentPdf("")
+      setSelectedAlimentoParentNombre("")
+    }
+
     // Pre-seleccionar según platillosItems ya agregados a ESE alimento padre
     const selInit: Record<PlatilloTipo, number | null> = { "ENTRADAS": null, "PLATO FUERTE": null, "POSTRES": null }
     for (const t of PLATILLOS_TIPOS) {
-      const existente = platillosItems.find((p: any) => (p.tipo || "").toUpperCase() === t && Number(p.platilloid) === platilloId)
+      const existente = platillosItems.find((p: any) => (p.tipo || "").toUpperCase() === t && Number(p.menuid) === platilloId)
       if (existente) selInit[t] = Number(existente.elementoid ?? existente.id)
     }
     setPlatillosSeleccion(selInit)
@@ -3242,7 +3378,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
         // Buscar platillo existente del mismo alimento padre (multi-menú)
         const existente = platillosItems.find((p: any) =>
           (p.tipo || "").toUpperCase() === tipo &&
-          (parentId == null || Number(p.platilloid) === parentId)
+          (parentId == null || Number(p.menuid) === parentId)
         )
         const target = sel[tipo]
         const existenteId = existente ? Number(existente.elementoid ?? existente.id) : null
@@ -3282,7 +3418,11 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
     setAssigningPaquete(true)
     try {
       await limpiarElementosCotizacion(cotizacionId)
-      const result = await asignarPaqueteACotizacion(cotizacionId, Number(previewPaqueteId), Number(formData.hotel))
+      // Si hay menús opcionales, excluir del paquete los NO seleccionados (solo se copia el elegido).
+      const excludeIds = opcionalMenusInfo
+        .filter((m) => m.id !== opcionalMenuSeleccionado)
+        .map((m) => m.id)
+      const result = await asignarPaqueteACotizacion(cotizacionId, Number(previewPaqueteId), Number(formData.hotel), excludeIds)
       if (result.success) {
         setSelectedPaqueteId(previewPaqueteId)
         setSelectedPaqueteInfo(previewPaqueteInfo)
@@ -3304,20 +3444,25 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
         setPreviewPaqueteId("")
         setPreviewPaqueteInfo(null)
         setElementosPreviewPaquete([])
-        // Encolar menús del paquete y preguntar al usuario si quiere cargar sus platillos
+        // Encolar menús del paquete y preguntar al usuario si quiere cargar sus platillos.
+        // Solo considerar elementos que sean realmente menús (menus.categoria = 'menu');
+        // los demás registros de la tabla menus (ej. bebidas, complementos) no llevan platillos.
         if (alimentosEls.length > 0) {
           const ids = alimentosEls.map((el: any) => Number(el.elementoid ?? el.id)).filter((n: number) => Number.isFinite(n))
           if (ids.length > 0) {
             try {
               const supa = (await import("@/lib/supabase/client")).createClient()
-              const { data: menusData } = await supa.from("menus").select("id, tipomenu").in("id", ids)
-              const tipoMap = new Map<number, string>((menusData || []).map((m: any) => [Number(m.id), String(m.tipomenu || "")]))
+              const { data: menusData } = await supa.from("menus").select("id, tipomenu, categoria").in("id", ids)
+              const infoMap = new Map<number, { tipomenu: string; categoria: string }>(
+                (menusData || []).map((m: any) => [Number(m.id), { tipomenu: String(m.tipomenu || ""), categoria: String(m.categoria || "") }])
+              )
               const queue = alimentosEls
                 .map((el: any) => {
                   const id = Number(el.elementoid ?? el.id)
-                  return { id, tipomenu: tipoMap.get(id) || "" }
+                  const info = infoMap.get(id)
+                  return { id, tipomenu: info?.tipomenu || "", categoria: info?.categoria || "" }
                 })
-                .filter((q: any) => Number.isFinite(q.id))
+                .filter((q: any) => Number.isFinite(q.id) && q.categoria.trim().toLowerCase() === "menu")
               const tipoMenuUpdate: Record<number, string> = {}
               for (const q of queue) if (q.tipomenu) tipoMenuUpdate[q.id] = q.tipomenu
               if (Object.keys(tipoMenuUpdate).length > 0) setAlimentosTipoMenu(prev => ({ ...prev, ...tipoMenuUpdate }))
@@ -4142,6 +4287,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
               key={`resv-${activeReservacionIdx}-${reservacionTabs[activeReservacionIdx]?.id ?? "new"}`}
               hotelId={formData.hotel}
               salones={salones}
+              isReservacionInterna={isReservacionInterna}
               onSelectSlot={async (fecha, salonId, horaPreMontaje, horaInicio, horaFin, horaPostMontaje, horasExtras, fechaFin2, overlappingCotizacion) => {
                 setOverlapWarning(overlappingCotizacion || null)
                 const prevSalon = formData.salon
@@ -4288,13 +4434,47 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                   <div className="space-y-1">
                     <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Fecha Inicio <span className="text-red-500">*</span></Label>
                     <Input id="fechaInicial" type="date" value={formData.fechaInicial}
-                      onChange={(e) => { setFormData(prev => ({ ...prev, fechaInicial: e.target.value })); if (e.target.value) setCalendarRange((prev) => ({ from: new Date(e.target.value + "T00:00:00"), to: prev?.to })) }}
+                      onChange={(e) => {
+                        const newInicial = e.target.value
+                        setFormData(prev => {
+                          // Si la nueva fecha inicial supera la fecha final, igualarlas.
+                          const next: typeof prev = { ...prev, fechaInicial: newInicial }
+                          if (newInicial && prev.fechaFinal && newInicial > prev.fechaFinal) {
+                            next.fechaFinal = newInicial
+                          }
+                          return next
+                        })
+                        if (newInicial) {
+                          const newFrom = new Date(newInicial + "T00:00:00")
+                          setCalendarRange((prev) => {
+                            const keepTo = prev?.to && prev.to >= newFrom ? prev.to : newFrom
+                            return { from: newFrom, to: keepTo }
+                          })
+                        }
+                      }}
                       className="border-blue-200 focus:ring-blue-500 h-8 text-sm" required />
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">Fecha Fin <span className="text-red-500">*</span></Label>
                     <Input id="fechaFinal" type="date" value={formData.fechaFinal}
-                      onChange={(e) => { setFormData(prev => ({ ...prev, fechaFinal: e.target.value })); if (e.target.value) setCalendarRange((prev) => ({ from: prev?.from, to: new Date(e.target.value + "T00:00:00") })) }}
+                      onChange={(e) => {
+                        const newFinal = e.target.value
+                        setFormData(prev => {
+                          // Si la nueva fecha final es menor que la inicial, igualarlas.
+                          const next: typeof prev = { ...prev, fechaFinal: newFinal }
+                          if (newFinal && prev.fechaInicial && newFinal < prev.fechaInicial) {
+                            next.fechaInicial = newFinal
+                          }
+                          return next
+                        })
+                        if (newFinal) {
+                          const newTo = new Date(newFinal + "T00:00:00")
+                          setCalendarRange((prev) => {
+                            const keepFrom = prev?.from && prev.from <= newTo ? prev.from : newTo
+                            return { from: keepFrom, to: newTo }
+                          })
+                        }
+                      }}
                       className="border-blue-200 focus:ring-blue-500 h-8 text-sm" required />
                   </div>
                 </div>
@@ -4757,7 +4937,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                               // "Es menú" si tiene tipomenu marcado O si tiene platillos en la tabla platillos
                               const hasMenu = !!tipoMenu || alimentosConPlatillos[alimId] === true
                               const isExpanded = hasMenu && expandedAlimentos.has(alimId)
-                              const misPlatillos = platillosItems.filter((p: any) => Number(p.platilloid) === alimId)
+                              const misPlatillos = platillosItems.filter((p: any) => Number(p.menuid) === alimId)
                               const sinPlatillos = hasMenu && misPlatillos.length === 0
                               const toggleExpand = () => {
                                 if (!hasMenu) return
@@ -6134,7 +6314,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
               <h2 className="text-lg font-semibold text-gray-900">Seleccionar Paquete</h2>
               <button
                 type="button"
-                onClick={() => { setShowPaqueteModal(false); setPreviewPaqueteId(""); setPreviewPaqueteInfo(null); setElementosPreviewPaquete([]) }}
+                onClick={() => { setShowPaqueteModal(false); setPreviewPaqueteId(""); setPreviewPaqueteInfo(null); setElementosPreviewPaquete([]); setPreviewPaquetePdf(""); setOpcionalMenusInfo([]); setOpcionalMenuSeleccionado(null) }}
                 className="text-gray-400 hover:text-gray-600"
               >
                 <X className="w-5 h-5" />
@@ -6184,7 +6364,80 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                   </div>
                 )}
 
-                {/* Elementos agrupados */}
+                {/* Menús opcionales: tarjetas seleccionables. El usuario DEBE elegir uno antes de confirmar. */}
+                {opcionalMenusInfo.length > 0 && (
+                  <div className="px-4 py-3 border-b border-[#1a3d2e]/10 bg-amber-50/50">
+                    <div className="flex items-center gap-2 mb-2">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4 text-amber-700">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                        <line x1="12" y1="9" x2="12" y2="13"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                      </svg>
+                      <p className="text-xs font-bold text-amber-900 uppercase tracking-wide">
+                        Elige una opción para continuar <span className="text-amber-700/80 font-normal normal-case">· requerido</span>
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {opcionalMenusInfo.map((m) => {
+                        const isSelected = opcionalMenuSeleccionado === m.id
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => setOpcionalMenuSeleccionado(m.id)}
+                            className={`px-3 py-2 rounded-lg border-2 text-xs font-semibold transition-all ${
+                              isSelected
+                                ? "border-[#1a3d2e] bg-[#1a3d2e] text-white shadow-sm"
+                                : "border-amber-300 bg-white text-amber-900 hover:border-amber-500"
+                            }`}
+                          >
+                            {isSelected && <span className="mr-1">✓</span>}
+                            {m.nombre}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Tabs: Elementos / PDF */}
+                <div className="flex items-center gap-1 px-2 pt-2 bg-[#1a3d2e]/5 border-b border-[#1a3d2e]/10">
+                  <button
+                    type="button"
+                    onClick={() => setPaqueteModalTab("elementos")}
+                    className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-widest rounded-t transition-colors ${
+                      paqueteModalTab === "elementos"
+                        ? "bg-white text-[#1a3d2e] border border-b-0 border-[#1a3d2e]/15"
+                        : "text-[#1a3d2e]/60 hover:text-[#1a3d2e]"
+                    }`}
+                  >
+                    Elementos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaqueteModalTab("pdf")}
+                    disabled={!previewPaquetePdf}
+                    className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-widest rounded-t transition-colors ${
+                      paqueteModalTab === "pdf"
+                        ? "bg-white text-[#1a3d2e] border border-b-0 border-[#1a3d2e]/15"
+                        : "text-[#1a3d2e]/60 hover:text-[#1a3d2e] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-[#1a3d2e]/60"
+                    }`}
+                    title={previewPaquetePdf ? "Ver PDF del paquete" : "Este paquete no tiene PDF"}
+                  >
+                    PDF
+                  </button>
+                </div>
+
+                {/* Contenido del tab activo */}
+                {paqueteModalTab === "pdf" && previewPaquetePdf ? (
+                  <div className="bg-white">
+                    <iframe
+                      src={`${previewPaquetePdf}#navpanes=0`}
+                      className="w-full h-[28rem] border-0"
+                      title="Vista previa PDF del paquete"
+                    />
+                  </div>
+                ) : (
                 <div className="p-4 max-h-72 overflow-y-auto">
                   {loadingPreviewPaquete ? (
                     <p className="text-sm text-gray-500 text-center py-4">Cargando elementos...</p>
@@ -6221,16 +6474,17 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                     )
                   })()}
                 </div>
+                )}
               </div>
             )}
 
             <div className="flex justify-end gap-3 pt-2">
-              <Button type="button" variant="outline" onClick={() => { setShowPaqueteModal(false); setPreviewPaqueteId(""); setPreviewPaqueteInfo(null); setElementosPreviewPaquete([]) }}>
+              <Button type="button" variant="outline" onClick={() => { setShowPaqueteModal(false); setPreviewPaqueteId(""); setPreviewPaqueteInfo(null); setElementosPreviewPaquete([]); setPreviewPaquetePdf(""); setOpcionalMenusInfo([]); setOpcionalMenuSeleccionado(null) }}>
                 Cancelar
               </Button>
               <Button
                 type="button"
-                disabled={!previewPaqueteId || assigningPaquete || loadingPreviewPaquete}
+                disabled={!previewPaqueteId || assigningPaquete || loadingPreviewPaquete || (opcionalMenusInfo.length > 0 && opcionalMenuSeleccionado === null)}
                 onClick={handleConfirmPaquete}
                 className="bg-[#1a3d2e] hover:bg-[#1a3d2e]/90 text-white"
               >
@@ -6438,7 +6692,12 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-[#1a3d2e] to-[#2a5a44] text-white">
               <div>
-                <h2 className="text-lg font-bold">Seleccionar Platillos del Menú</h2>
+                <h2 className="text-lg font-bold">
+                  Seleccionar Platillos del Menú
+                  {selectedAlimentoParentNombre && (
+                    <span className="ml-2 text-amber-300 font-extrabold">— {selectedAlimentoParentNombre}</span>
+                  )}
+                </h2>
                 <p className="text-xs text-white/80 mt-0.5">Elige una opción por cada sección (entrada, plato fuerte, postre)</p>
               </div>
               <div className="flex items-center gap-3">
@@ -6533,7 +6792,8 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                           onClick={() => {
                             setPlatillosSeleccion(prev => ({ ...prev, [platillosActiveTipo]: isSelected ? null : id }))
                             setPlatillosPreviewId(id)
-                            setPlatillosPreviewPdf(el?.documentopdf || "")
+                            // PDF viene del menú padre (menus.documentopdf), no del platillo.
+                            setPlatillosPreviewPdf(selectedAlimentoParentPdf || "")
                           }}
                           onDoubleClick={async () => {
                             const t = platillosActiveTipo
@@ -6911,7 +7171,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                       // Marca como ya agregado si este platillo ya vive en platillosItems bajo el alimento activo
                       const yaAgregado = isPlatilloContext && platillosItems.some((p: any) =>
                         Number(p.elementoid) === id &&
-                        (selectedAlimentoParentId == null || Number(p.platilloid) === selectedAlimentoParentId)
+                        (selectedAlimentoParentId == null || Number(p.menuid) === selectedAlimentoParentId)
                       )
                       const handleClick = () => {
                         // Consumo con precios: clic en el card expande/colapsa en lugar de seleccionar.

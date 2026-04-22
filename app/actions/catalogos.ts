@@ -534,10 +534,16 @@ export async function asignarPaqueteAReservacion(reservacionId: number, paqueteI
 
 // Función: obtenerPrecioPaquetePorPlatillo: determina el precio del paquete.
 // 1) Si paquetes.precioporpersona > 0, lo usa.
-// 2) Si no, busca platillobaseid del platillo seleccionado y consulta paqueteprecios.
-// Además retorna info de debug para mostrar en el cliente si falla.
-export async function obtenerPrecioPaquetePorPlatillo(paqueteId: number, platilloId: number) {
-  const debug: any = { paqueteId, platilloId }
+// 2) Si no, busca platillobaseid del platillo seleccionado y consulta paqueteprecios
+//    filtrando por:
+//      - paqueteid
+//      - platobaseid (platillo clave: Plato Fuerte en Completos, o primero en Individuales)
+//      - year (derivado del año de fechaInicio del evento)
+//      - esfinsemana (true si el día de fechaInicio es Viernes o Sábado, false si es Domingo–Jueves)
+// Los filtros year/esfinsemana solo se aplican si se recibe fechaInicio (retro-compatible con callers antiguos).
+// Retorna info de debug para mostrar en el cliente si falla.
+export async function obtenerPrecioPaquetePorPlatillo(paqueteId: number, platilloId: number, fechaInicio?: string) {
+  const debug: any = { paqueteId, platilloId, fechaInicio }
   try {
     // Paso 1: precio directo del paquete
     const { data: paq, error: errPaq } = await supabase
@@ -561,15 +567,48 @@ export async function obtenerPrecioPaquetePorPlatillo(paqueteId: number, platill
     const platilloBaseId = platillo?.platillobaseid
     if (!platilloBaseId) return { success: true, precio: 0, debug }
 
-    // Paso 3: buscar en paqueteprecios por paqueteid + platobaseid (columna se llama "platobaseid" en esta tabla)
-    const { data: ppRows, error: errPp } = await supabase
+    // Paso 3: derivar year + esfinsemana desde fechaInicio (si viene).
+    // Día de semana: 0=Dom, 1=Lun, 2=Mar, 3=Mié, 4=Jue, 5=Vie, 6=Sáb.
+    // Fin de semana = Viernes (5) o Sábado (6); entre semana = Domingo (0) a Jueves (4).
+    let year: number | null = null
+    let esFinSemana: boolean | null = null
+    if (fechaInicio) {
+      const fechaStr = String(fechaInicio).slice(0, 10)
+      const d = new Date(fechaStr + "T12:00:00")
+      if (!isNaN(d.getTime())) {
+        year = d.getFullYear()
+        const dow = d.getDay()
+        esFinSemana = dow === 5 || dow === 6
+      }
+    }
+    debug.filtros_fecha = { year, esFinSemana }
+
+    // Paso 4: consultar paqueteprecios con todos los filtros aplicables
+    let query = supabase
       .from("paqueteprecios")
-      .select("precioporpersona")
+      .select("precioporpersona, year, esfinsemana")
       .eq("paqueteid", paqueteId)
       .eq("platobaseid", platilloBaseId)
-      .limit(1)
-    debug.paqueteprecios_rows = ppRows
+    if (year != null) query = query.eq("year", year)
+    if (esFinSemana != null) query = query.eq("esfinsemana", esFinSemana)
+
+    const { data: ppRows, error: errPp } = await query.limit(1)
+    debug.paqueteprecios_rows_filtered = ppRows
     if (errPp) debug.paqueteprecios_error = errPp.message
+
+    // Si los filtros no devolvieron fila, diagnosticar: traer todas las filas de paqueteprecios
+    // para ese paqueteid + platobaseid (sin filtros de fecha) para ver qué combinaciones existen.
+    if ((!ppRows || ppRows.length === 0) && (year != null || esFinSemana != null)) {
+      const { data: allRows, error: errAll } = await supabase
+        .from("paqueteprecios")
+        .select("precioporpersona, year, esfinsemana")
+        .eq("paqueteid", paqueteId)
+        .eq("platobaseid", platilloBaseId)
+        .limit(10)
+      debug.paqueteprecios_rows_disponibles = allRows
+      if (errAll) debug.paqueteprecios_diag_error = errAll.message
+    }
+
     const pp = (ppRows && ppRows.length > 0) ? ppRows[0] : null
     return { success: true, precio: Number(pp?.precioporpersona ?? 0), debug }
   } catch (error: any) {
@@ -621,8 +660,10 @@ export async function obtenerElementosPaqueteOriginal(paqueteid: number) {
   }
 }
 
-// Función: asignarPaqueteACotizacion: copia elementos de elementosxpaquete a elementosxcotizacion
-export async function asignarPaqueteACotizacion(cotizacionid: number, paqueteid: number, hotelid: number) {
+// Función: asignarPaqueteACotizacion: copia elementos de elementosxpaquete a elementosxcotizacion.
+// `excludeElementoIds` permite omitir ciertos elementoids del paquete (ej. menús opcionales
+// alternativos que el usuario NO eligió — solo se copia el que seleccionó).
+export async function asignarPaqueteACotizacion(cotizacionid: number, paqueteid: number, hotelid: number, excludeElementoIds?: number[]) {
   try {
     // Obtener todos los elementos del paquete
     const { data: elementosPaquete, error: errorGet } = await supabase
@@ -639,16 +680,20 @@ export async function asignarPaqueteACotizacion(cotizacionid: number, paqueteid:
       return { success: false, error: "No se encontraron elementos para este paquete" }
     }
 
-    // Transformar los elementos para la tabla elementosxcotizacion
-    // Solo se copian las columnas que existen en elementosxcotizacion
-    const elementosACopiar = elementosPaquete.map((el: any) => {
-      const row: any = { reservacionid: cotizacionid, hotelid }
-      if (el.elementoid !== undefined) row.elementoid = el.elementoid
-      if (el.tipoelemento !== undefined) row.tipoelemento = el.tipoelemento
-      if (el.destacado !== undefined) row.destacado = el.destacado
-      if (el.orden !== undefined) row.orden = el.orden
-      return row
-    })
+    const excludeSet = new Set((excludeElementoIds || []).map((n) => Number(n)))
+
+    // Transformar los elementos para la tabla elementosxcotizacion (saltando los excluidos).
+    // Solo se copian las columnas que existen en elementosxcotizacion.
+    const elementosACopiar = elementosPaquete
+      .filter((el: any) => !excludeSet.has(Number(el.elementoid)))
+      .map((el: any) => {
+        const row: any = { reservacionid: cotizacionid, hotelid }
+        if (el.elementoid !== undefined) row.elementoid = el.elementoid
+        if (el.tipoelemento !== undefined) row.tipoelemento = el.tipoelemento
+        if (el.destacado !== undefined) row.destacado = el.destacado
+        if (el.orden !== undefined) row.orden = el.orden
+        return row
+      })
 
     // Insertar en elementosxcotizacion
     const { data, error: errorInsert } = await supabase
@@ -1002,7 +1047,7 @@ export async function obtenerPlatillosCotizacion(cotizacionid: number) {
         documentopdf: item.documentopdf || null,
         costo: item.costo ?? 0,
         tipo: item.tipo || null,
-        platilloid: item.platilloid ?? null,
+        menuid: item.menuid ?? null,
       }
     })
 
@@ -1014,14 +1059,14 @@ export async function obtenerPlatillosCotizacion(cotizacionid: number) {
 }
 
 // Función: buscarPlatillosItems: obtiene todos los registros de platillos para el dropdown de Agregar
-export async function buscarPlatillosItems(platilloid = -1, hotelid = -1, tipo: string | null = null) {
+export async function buscarPlatillosItems(menuid = -1, hotelid = -1, tipo: string | null = null) {
   try {
     let query = supabase
       .from("platillos")
       .select("*")
 
-    if (platilloid !== -1) {
-      query = query.eq("platilloid", platilloid)
+    if (menuid !== -1) {
+      query = query.eq("menuid", menuid)
     }
     if (hotelid !== -1) {
       query = query.eq("hotelid", hotelid)

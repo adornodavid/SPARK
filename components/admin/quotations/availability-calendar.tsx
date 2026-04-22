@@ -41,6 +41,8 @@ interface AvailabilityCalendarProps {
    *  vw_oeventos.id es el eventoid (compartido entre reservaciones del mismo evento), así que matcheamos
    *  por eventoid + salonid + fechainicio + horainicio del último guardado. */
   excludeMatch?: { eventoid?: number; salonid?: string | number; fechainicio?: string; horainicio?: string }
+  /** Reservación interna: sin celdas pre/post montaje y mínimo 1 hora en vez de 4. */
+  isReservacionInterna?: boolean
 }
 
 interface SelectionState {
@@ -98,19 +100,19 @@ function idxFromEndHour(v: string): number {
 }
 function getEventBarColor(ev: CalendarEvent) { if (ev.tipo === "draft") return "bg-sky-300"; if (ev.tipo === "reservacion") { const e = ev.estatus?.toLowerCase() || ""; if (e.includes("cancel")) return "bg-gray-400"; return "bg-purple-900" } return "bg-amber-400" }
 
-/** Total máximo de evento = 8 (core 4 + 4 de extensiones).
+/** Total máximo de evento = MAX_EVENT_HOURS (core + extensiones).
  *  Prioridad al lado más extendido: ese lado absorbe primero sus slots de evento.
  *  El lado menor recibe lo que queda. Extras siempre quedan de su lado. */
-function calcSideExtras(leftExt: number, rightExt: number, totalExtras: number) {
+function calcSideExtras(leftExt: number, rightExt: number, totalExtras: number, remainingCap: number = REMAINING_CAP) {
   if (totalExtras <= 0) return { leftExtras: 0, rightExtras: 0 }
-  // El lado más grande absorbe primero hasta REMAINING_CAP
+  // El lado más grande absorbe primero hasta remainingCap
   let la: number, ra: number
   if (leftExt >= rightExt) {
-    la = Math.min(leftExt, REMAINING_CAP)
-    ra = Math.min(rightExt, REMAINING_CAP - la)
+    la = Math.min(leftExt, remainingCap)
+    ra = Math.min(rightExt, remainingCap - la)
   } else {
-    ra = Math.min(rightExt, REMAINING_CAP)
-    la = Math.min(leftExt, REMAINING_CAP - ra)
+    ra = Math.min(rightExt, remainingCap)
+    la = Math.min(leftExt, remainingCap - ra)
   }
   return { leftExtras: leftExt - la, rightExtras: rightExt - ra }
 }
@@ -123,7 +125,18 @@ export function AvailabilityCalendar({
   selectedFechaInicio, selectedFechaFin, selectedSalonId,
   selectedHoraPreMontaje, selectedHoraInicio, selectedHoraFin, selectedHoraPostMontaje,
   initialViewMode, initialDate, draftReservaciones, excludeMatch,
+  isReservacionInterna = false,
 }: AvailabilityCalendarProps) {
+  // Valores efectivos según modo. En reservación interna no hay pre/post-montaje
+  // y el mínimo reservable es 1 hora (en vez de 4).
+  const PRE_DEFAULT = isReservacionInterna ? 0 : 1
+  const POST_DEFAULT = isReservacionInterna ? 0 : 1
+  const BLOCK_SIZE_EFF = isReservacionInterna ? 1 : BLOCK_SIZE
+  const CORE_EVENTS_EFF = isReservacionInterna ? 1 : CORE_EVENTS
+  const REMAINING_CAP_EFF = MAX_EVENT_HOURS - CORE_EVENTS_EFF
+  const MIN_EVENT_INNER_EFF = CORE_EVENTS_EFF
+  const MAX_PRE_POST = isReservacionInterna ? 0 : 3
+
   const [viewMode, setViewMode] = useState<ViewMode>(initialViewMode ?? "week")
   const [previousView, setPreviousView] = useState<ViewMode | null>(null)
   const [currentDate, setCurrentDate] = useState(() => {
@@ -144,10 +157,10 @@ export function AvailabilityCalendar({
     const evtStart = getHourIdx(selectedHoraInicio)
     const evtEnd = idxFromEndHour(selectedHoraFin)
     if (fullStart < 0 || fullEnd < 0 || evtStart < 0 || evtEnd < 0) return null
-    const preHours = Math.max(1, evtStart - fullStart)
-    const postHours = Math.max(1, fullEnd - evtEnd)
+    const preHours = Math.max(PRE_DEFAULT, evtStart - fullStart)
+    const postHours = Math.max(POST_DEFAULT, fullEnd - evtEnd)
     const coreStartIdx = fullStart
-    const extrasAfter = Math.max(0, (fullEnd - fullStart + 1) - BLOCK_SIZE)
+    const extrasAfter = Math.max(0, (fullEnd - fullStart + 1) - BLOCK_SIZE_EFF)
     return {
       salonId: selectedSalonId,
       dateStr: selectedFechaInicio.slice(0, 10),
@@ -266,11 +279,11 @@ export function AvailabilityCalendar({
     const evtStart = getHourIdx(selectedHoraInicio)
     const evtEnd = idxFromEndHour(selectedHoraFin)
     if (fullStart < 0 || fullEnd < 0 || evtStart < 0 || evtEnd < 0) return
-    const preHours = Math.max(1, evtStart - fullStart)
-    const postHours = Math.max(1, fullEnd - evtEnd)
+    const preHours = Math.max(PRE_DEFAULT, evtStart - fullStart)
+    const postHours = Math.max(POST_DEFAULT, fullEnd - evtEnd)
     const coreStartIdx = fullStart
-    const extrasAfter = Math.max(0, (fullEnd - fullStart + 1) - BLOCK_SIZE)
-    setSelection({
+    const extrasAfter = Math.max(0, (fullEnd - fullStart + 1) - BLOCK_SIZE_EFF)
+    const rebuilt: SelectionState = {
       salonId: selectedSalonId,
       dateStr: selectedFechaInicio.slice(0, 10),
       coreStartIdx,
@@ -278,8 +291,25 @@ export function AvailabilityCalendar({
       extrasAfter,
       preHours,
       postHours,
-    })
+    }
+    setSelection(rebuilt)
+    // Re-evaluar alerta de empalme inmediatamente con el nuevo dateStr.
+    // Útil cuando el usuario cambia la fecha inicial en el input y el nuevo día cae
+    // dentro del mismo rango cargado (los eventos no se recargan).
+    emitSelection(rebuilt)
   }, [selection, selectedSalonId, selectedFechaInicio, selectedHoraInicio, selectedHoraFin, selectedHoraPreMontaje, selectedHoraPostMontaje])
+
+  // Re-ejecutar emitSelection cuando cambien los eventos cargados (p. ej. al cambiar
+  // a una fecha fuera del rango previamente cargado). Así la alerta de empalme
+  // considera la lista actualizada sin necesidad de otro clic del usuario.
+  // Dep = `events` (state interno estable) — no `displayEvents` porque se rederiva
+  // en cada render vía props del parent (draftReservaciones/excludeMatch son
+  // arrays/objetos nuevos cada render) y dispararía un loop al emitir→setFormData→render.
+  useEffect(() => {
+    if (!selection) return
+    emitSelection(selection)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events])
 
   // Al cambiar la fecha de la reservación (tab switch), sincronizar currentDate y mostrar vista día.
   // Solo auto-conmuta a día cuando además hay horas (reservación ya guardada); si solo viene fecha
@@ -326,12 +356,12 @@ export function AvailabilityCalendar({
     let newEvtEndIdx = idxFromEndHour(selectedHoraFin)
     if (newEvtStartIdx < 0 || newEvtEndIdx < 0) return
 
-    const preH = selection.preHours ?? 1
-    const postH = selection.postHours ?? 1
+    const preH = selection.preHours ?? PRE_DEFAULT
+    const postH = selection.postHours ?? POST_DEFAULT
 
-    // Si el rango de evento es menor a 4 horas, extender el fin para mantener mínimo 4
-    if (newEvtEndIdx - newEvtStartIdx + 1 < CORE_EVENTS) {
-      newEvtEndIdx = newEvtStartIdx + CORE_EVENTS - 1
+    // Si el rango de evento es menor al mínimo, extender el fin para mantenerlo
+    if (newEvtEndIdx - newEvtStartIdx + 1 < CORE_EVENTS_EFF) {
+      newEvtEndIdx = newEvtStartIdx + CORE_EVENTS_EFF - 1
     }
 
     // Rango completo = PRE + evento + POST
@@ -340,7 +370,7 @@ export function AvailabilityCalendar({
     if (newFullStart < 0 || newFullEnd >= HOURS.length) return
 
     // Comparar con rango actual de evento
-    const coreEnd = Math.min(selection.coreStartIdx + BLOCK_SIZE - 1, HOURS.length - 1)
+    const coreEnd = Math.min(selection.coreStartIdx + BLOCK_SIZE_EFF - 1, HOURS.length - 1)
     const curFullStart = selection.coreStartIdx - selection.extrasBefore
     const curFullEnd = coreEnd + selection.extrasAfter
     const curEvtStart = curFullStart + preH
@@ -350,8 +380,8 @@ export function AvailabilityCalendar({
     // Recalcular: extrasBefore/After son respecto al core dentro del rango completo
     // fullStart = coreStartIdx - extrasBefore, fullEnd = coreEnd + extrasAfter
     // Necesitamos: newFullStart = newCore - newBefore, newFullEnd = newCoreEnd + newAfter
-    const newCore = Math.max(newFullStart, Math.min(selection.coreStartIdx, newFullEnd - BLOCK_SIZE + 1))
-    const newCoreEnd = Math.min(newCore + BLOCK_SIZE - 1, HOURS.length - 1)
+    const newCore = Math.max(newFullStart, Math.min(selection.coreStartIdx, newFullEnd - BLOCK_SIZE_EFF + 1))
+    const newCoreEnd = Math.min(newCore + BLOCK_SIZE_EFF - 1, HOURS.length - 1)
     const newBefore = newCore - newFullStart
     const newAfter = newFullEnd - newCoreEnd
 
@@ -367,7 +397,25 @@ export function AvailabilityCalendar({
 
   function goToDayView(date: Date, from: ViewMode) { setPreviousView(from); setCurrentDate(date); setViewMode("day") }
   function goBack() { if (previousView) { setViewMode(previousView); setPreviousView(null) } }
-  function navigate(dir: -1 | 1) { setCurrentDate((p) => { const d = new Date(p); if (viewMode === "day") d.setDate(d.getDate() + dir); else if (viewMode === "week") d.setDate(d.getDate() + dir * 7); else d.setFullYear(d.getFullYear() + dir); return d }) }
+  function navigate(dir: -1 | 1) {
+    const d = new Date(currentDate)
+    if (viewMode === "day") d.setDate(d.getDate() + dir)
+    else if (viewMode === "week") d.setDate(d.getDate() + dir * 7)
+    else d.setFullYear(d.getFullYear() + dir)
+    setCurrentDate(d)
+    // En vista día, propagar la nueva fecha al parent para que fechaInicial/Final reflejen
+    // el día que se está consultando. Sin esto, al hacer clic en una hora después de
+    // navegar, la reconstruction effect regresa la selección al día previo (porque
+    // selectedFechaInicio del parent no se actualizó).
+    if (viewMode === "day") {
+      const newDateStr = toDateStr(d)
+      // Marcar que esta fecha viene de nuestra emisión para que el sync effect no
+      // auto-conmute (ya estamos en día) ni reemita currentDate.
+      weekClickEmittedFechaRef.current = newDateStr
+      const currentSalon = selection?.salonId || selectedSalonId || ""
+      onSelectSlot(newDateStr, currentSalon, undefined, undefined, undefined, undefined, undefined, newDateStr)
+    }
+  }
 
   function getEventsForCell(sId: string, ds: string) { return displayEvents.filter((e) => e.salonid === Number(sId) && e.fechainicio <= ds && e.fechafin >= ds) }
   function getEventsForHourCell(sId: string, ds: string, hr: number) {
@@ -376,10 +424,10 @@ export function AvailabilityCalendar({
   function cellHasRes(sId: string, ds: string) { return displayEvents.some((e) => (e.tipo === "reservacion" || e.tipo === "draft") && e.salonid === Number(sId) && e.fechainicio <= ds && e.fechafin >= ds) }
   function hourHasRes(sId: string, ds: string, hr: number) { return getEventsForHourCell(sId, ds, hr).some((e) => e.tipo === "reservacion" || e.tipo === "draft") }
   function isCellSel(sId: string, ds: string) { if (!selectedSalonId || !selectedFechaInicio || sId !== selectedSalonId) return false; return selectedFechaFin ? (ds >= selectedFechaInicio && ds <= selectedFechaFin) : ds === selectedFechaInicio }
-  function blockHasRes(sId: string, ds: string, start: number) { for (let i = start; i < start + BLOCK_SIZE && i < HOURS.length; i++) if (hourHasRes(sId, ds, HOURS[i].hour24)) return true; return false }
+  function blockHasRes(sId: string, ds: string, start: number) { for (let i = start; i < start + BLOCK_SIZE_EFF && i < HOURS.length; i++) if (hourHasRes(sId, ds, HOURS[i].hour24)) return true; return false }
 
   function emitSelection(sel: SelectionState) {
-    const coreEnd = Math.min(sel.coreStartIdx + BLOCK_SIZE - 1, HOURS.length - 1)
+    const coreEnd = Math.min(sel.coreStartIdx + BLOCK_SIZE_EFF - 1, HOURS.length - 1)
     const fullStart = Math.max(sel.coreStartIdx - sel.extrasBefore, 0)
     const fullEnd = Math.min(coreEnd + sel.extrasAfter, HOURS.length - 1)
 
@@ -407,15 +455,16 @@ export function AvailabilityCalendar({
       : undefined
     setOverlapAlert(overlapMsg || null)
 
-    // Extras: prioridad al lado más extendido
-    const rawInner = fullEnd - fullStart - 1
+    // Pre/Post montaje en los extremos, horaInicio/Fin = primera/última celda de evento
+    const preH = sel.preHours ?? PRE_DEFAULT
+    const postH = sel.postHours ?? POST_DEFAULT
+
+    // Extras: prioridad al lado más extendido. rawInner = celdas de evento dentro del rango (excluye pre/post).
+    const rawInner = (fullEnd - fullStart + 1) - preH - postH
     const rawTotalExtras = Math.max(0, rawInner - MAX_EVENT_HOURS)
-    const { leftExtras, rightExtras } = calcSideExtras(Math.max(0, sel.extrasBefore), Math.max(0, sel.extrasAfter), rawTotalExtras)
+    const { leftExtras, rightExtras } = calcSideExtras(Math.max(0, sel.extrasBefore), Math.max(0, sel.extrasAfter), rawTotalExtras, REMAINING_CAP_EFF)
     const extraHours = leftExtras + rightExtras
 
-    // Pre/Post montaje en los extremos, horaInicio/Fin = primera/última celda de evento
-    const preH = sel.preHours ?? 1
-    const postH = sel.postHours ?? 1
     const evtStartIdx = fullStart + preH
     const evtEndIdx = fullEnd - postH
 
@@ -435,7 +484,7 @@ export function AvailabilityCalendar({
   }
 
   function handleHourClick(sId: string, ds: string, idx: number) {
-    const sel: SelectionState = { salonId: sId, dateStr: ds, coreStartIdx: idx, extrasBefore: 0, extrasAfter: 0, preHours: 1, postHours: 1 }
+    const sel: SelectionState = { salonId: sId, dateStr: ds, coreStartIdx: idx, extrasBefore: 0, extrasAfter: 0, preHours: PRE_DEFAULT, postHours: POST_DEFAULT }
     setSelection(sel); emitSelection(sel)
   }
 
@@ -450,8 +499,8 @@ export function AvailabilityCalendar({
     if (!dragging || !selection || !dragStartRef.current) return
     const { startMouseIdx, extrasBefore: origBefore, extrasAfter: origAfter } = dragStartRef.current
     const delta = hoverIdx - startMouseIdx
-    const coreEnd = Math.min(selection.coreStartIdx + BLOCK_SIZE - 1, HOURS.length - 1)
-    const MIN_TOTAL = BLOCK_SIZE // PRE + 4 eventos + POST mínimo
+    const coreEnd = Math.min(selection.coreStartIdx + BLOCK_SIZE_EFF - 1, HOURS.length - 1)
+    const MIN_TOTAL = BLOCK_SIZE_EFF // tamaño mínimo del rango completo (pre + evento + post)
 
     if (dragging === "pre") {
       // Arrastrar ▶ de PRE hacia la derecha = más pre, hacia izquierda = menos pre
@@ -459,7 +508,7 @@ export function AvailabilityCalendar({
       const fs = selection.coreStartIdx - selection.extrasBefore
       const fe = coreEnd + selection.extrasAfter
       const totalCells = fe - fs + 1
-      if (totalCells - newPre - selection.postHours < MIN_EVENT_INNER) return
+      if (totalCells - newPre - selection.postHours < MIN_EVENT_INNER_EFF) return
       const newSel = { ...selection, preHours: newPre }
       setSelection(newSel); emitSelection(newSel)
     } else if (dragging === "post") {
@@ -467,12 +516,12 @@ export function AvailabilityCalendar({
       const fs = selection.coreStartIdx - selection.extrasBefore
       const fe = coreEnd + selection.extrasAfter
       const totalCells = fe - fs + 1
-      if (totalCells - selection.preHours - newPost < MIN_EVENT_INNER) return
+      if (totalCells - selection.preHours - newPost < MIN_EVENT_INNER_EFF) return
       const newSel = { ...selection, postHours: newPost }
       setSelection(newSel); emitSelection(newSel)
     } else if (dragging === "left") {
       const newBefore = origBefore - delta
-      const minBefore = MIN_TOTAL - BLOCK_SIZE - selection.extrasAfter
+      const minBefore = MIN_TOTAL - BLOCK_SIZE_EFF - selection.extrasAfter
       const clampedBefore = Math.max(minBefore, newBefore)
       const newStartIdx = selection.coreStartIdx - clampedBefore
       if (newStartIdx < 0 || newStartIdx >= HOURS.length) return
@@ -485,7 +534,7 @@ export function AvailabilityCalendar({
       setSelection(newSel); emitSelection(newSel)
     } else {
       const newAfter = origAfter + delta
-      const minAfter = MIN_TOTAL - BLOCK_SIZE - selection.extrasBefore
+      const minAfter = MIN_TOTAL - BLOCK_SIZE_EFF - selection.extrasBefore
       const clampedAfter = Math.max(minAfter, newAfter)
       const newEndIdx = coreEnd + clampedAfter
       if (newEndIdx < 0 || newEndIdx >= HOURS.length) return
@@ -501,32 +550,29 @@ export function AvailabilityCalendar({
 
   function endDrag() { setDragging(null); dragStartRef.current = null }
 
-  // Ajustar pre/post montaje dentro del rango (máx 3 hrs c/u, no cubrir las 4 hrs fijas de evento)
-  const MAX_PRE_POST = 3
-  const MIN_EVENT_INNER = CORE_EVENTS // 4 horas de evento siempre protegidas
-
+  // Ajustar pre/post montaje dentro del rango (máx 3 hrs c/u, no cubrir las horas fijas de evento)
   function adjustPre(delta: number) {
     if (!selection) return
-    const newPre = Math.max(1, Math.min(MAX_PRE_POST, (selection.preHours ?? 1) + delta))
-    const ce = Math.min(selection.coreStartIdx + BLOCK_SIZE - 1, HOURS.length - 1)
+    const newPre = Math.max(1, Math.min(MAX_PRE_POST, (selection.preHours ?? PRE_DEFAULT) + delta))
+    const ce = Math.min(selection.coreStartIdx + BLOCK_SIZE_EFF - 1, HOURS.length - 1)
     const fs = selection.coreStartIdx - selection.extrasBefore
     const fe = ce + selection.extrasAfter
     const totalCells = fe - fs + 1
-    const postH = selection.postHours ?? 1
-    if (totalCells - newPre - postH < MIN_EVENT_INNER) return
+    const postH = selection.postHours ?? POST_DEFAULT
+    if (totalCells - newPre - postH < MIN_EVENT_INNER_EFF) return
     const newSel = { ...selection, preHours: newPre }
     setSelection(newSel); emitSelection(newSel)
   }
 
   function adjustPost(delta: number) {
     if (!selection) return
-    const newPost = Math.max(1, Math.min(MAX_PRE_POST, (selection.postHours ?? 1) + delta))
-    const ce = Math.min(selection.coreStartIdx + BLOCK_SIZE - 1, HOURS.length - 1)
+    const newPost = Math.max(1, Math.min(MAX_PRE_POST, (selection.postHours ?? POST_DEFAULT) + delta))
+    const ce = Math.min(selection.coreStartIdx + BLOCK_SIZE_EFF - 1, HOURS.length - 1)
     const fs = selection.coreStartIdx - selection.extrasBefore
     const fe = ce + selection.extrasAfter
     const totalCells = fe - fs + 1
-    const preH = selection.preHours ?? 1
-    if (totalCells - preH - newPost < MIN_EVENT_INNER) return
+    const preH = selection.preHours ?? PRE_DEFAULT
+    if (totalCells - preH - newPost < MIN_EVENT_INNER_EFF) return
     const newSel = { ...selection, postHours: newPost }
     setSelection(newSel); emitSelection(newSel)
   }
@@ -604,12 +650,11 @@ export function AvailabilityCalendar({
           <h3 className="text-sm font-bold text-blue-900">{title}</h3>
           {loading && <div className="w-3.5 h-3.5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />}
           {viewMode === "day" && selection && (() => {
-            const ce = Math.min(selection.coreStartIdx + BLOCK_SIZE - 1, HOURS.length - 1)
+            const ce = Math.min(selection.coreStartIdx + BLOCK_SIZE_EFF - 1, HOURS.length - 1)
             const fs = selection.coreStartIdx - selection.extrasBefore
             const fe = ce + selection.extrasAfter
-            const preH = selection.preHours ?? 1, postH = selection.postHours ?? 1
-            const totalInner = fe - fs + 1 - preH - postH
-            const rawInner = fe - fs - 1
+            const preH = selection.preHours ?? PRE_DEFAULT, postH = selection.postHours ?? POST_DEFAULT
+            const rawInner = (fe - fs + 1) - preH - postH
             const extraHrs = Math.max(0, rawInner - MAX_EVENT_HOURS)
             const eventHrs = Math.min(MAX_EVENT_HOURS, Math.max(0, rawInner))
             return (
@@ -619,7 +664,7 @@ export function AvailabilityCalendar({
                     {preH} hrs pre
                   </span>
                 )}
-                {eventHrs > CORE_EVENTS && (
+                {eventHrs > CORE_EVENTS_EFF && (
                   <span className="text-[10px] font-bold text-blue-700 bg-blue-100 border border-blue-300 px-2 py-0.5 rounded-full ml-1">
                     {eventHrs} hrs evento
                   </span>
@@ -645,7 +690,7 @@ export function AvailabilityCalendar({
           )}
         </div>
         <div className="flex items-center gap-1.5">
-          {viewMode === "day" && !selection && <span className="text-[10px] text-gray-400 mr-2">Clic en una hora para bloque de 8 hrs</span>}
+          {viewMode === "day" && !selection && <span className="text-[10px] text-gray-400 mr-2">{isReservacionInterna ? "Clic en una hora para reservar" : "Clic en una hora para bloque de 8 hrs"}</span>}
           {viewMode === "day" && selection && <span className="text-[10px] text-gray-400 mr-2">Arrastra ◀ ▶ para extender el rango</span>}
           <div className="flex bg-white rounded-lg border border-blue-200 p-0.5 mr-2">
             {(["day", "week", "month"] as const).map((m) => (
@@ -663,7 +708,7 @@ export function AvailabilityCalendar({
 
       {/* Body */}
       <div className="overflow-y-auto overflow-x-hidden max-h-[420px]">
-        {viewMode === "day" && <DayView date={currentDate} salones={salones} getEventsForHourCell={getEventsForHourCell} hourHasRes={hourHasRes} onHourClick={handleHourClick} hoverBlock={hoverBlock} setHoverBlock={setHoverBlock} selection={selection} dragging={dragging} startDrag={startDrag} onDragMove={onDragMove} onClearSelection={() => { setSelection(null); setOverlapAlert(null); lastEmittedRef.current = null; onSelectSlot("", "", "", "", "", "", 0) }} onAdjustPre={adjustPre} onAdjustPost={adjustPost} onEventClick={setEventDetail} />}
+        {viewMode === "day" && <DayView date={currentDate} salones={salones} getEventsForHourCell={getEventsForHourCell} hourHasRes={hourHasRes} onHourClick={handleHourClick} hoverBlock={hoverBlock} setHoverBlock={setHoverBlock} selection={selection} dragging={dragging} startDrag={startDrag} onDragMove={onDragMove} onClearSelection={() => { setSelection(null); setOverlapAlert(null); lastEmittedRef.current = null; onSelectSlot("", "", "", "", "", "", 0) }} onAdjustPre={adjustPre} onAdjustPost={adjustPost} onEventClick={setEventDetail} isReservacionInterna={isReservacionInterna} />}
         {viewMode === "week" && <WeekView days={weekDays} salones={salones} getEventsForCell={getEventsForCell}
           onDayClick={handleDayClick}
           onRangeClick={handleDayRangeClick}
@@ -697,7 +742,7 @@ export function AvailabilityCalendar({
         <span className="text-[10px] text-gray-500 uppercase font-semibold tracking-wide">Leyenda:</span>
         <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-purple-900" /><span className="text-[10px] text-gray-600">Reservación</span></div>
         <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-amber-400" /><span className="text-[10px] text-gray-600">Cotización</span></div>
-        <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded bg-purple-300 border border-purple-400" /><span className="text-[10px] text-gray-600">Montaje</span></div>
+        {!isReservacionInterna && <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded bg-purple-300 border border-purple-400" /><span className="text-[10px] text-gray-600">Montaje</span></div>}
         <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded bg-blue-200 border border-blue-400" /><span className="text-[10px] text-gray-600">Evento</span></div>
         <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded bg-teal-300 border border-teal-500" /><span className="text-[10px] text-gray-600">Hora extra</span></div>
       </div>
@@ -711,7 +756,7 @@ export function AvailabilityCalendar({
 /* ==================================================
   Day View — with drag handles at range edges
 ================================================== */
-function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick, hoverBlock, setHoverBlock, selection, dragging, startDrag, onDragMove, onClearSelection, onAdjustPre, onAdjustPost, onEventClick }: {
+function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick, hoverBlock, setHoverBlock, selection, dragging, startDrag, onDragMove, onClearSelection, onAdjustPre, onAdjustPost, onEventClick, isReservacionInterna }: {
   date: Date; salones: ddlItem[]
   getEventsForHourCell: (s: string, d: string, h: number) => CalendarEvent[]
   hourHasRes: (s: string, d: string, h: number) => boolean
@@ -726,28 +771,35 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
   onAdjustPre: (delta: number) => void
   onAdjustPost: (delta: number) => void
   onEventClick: (ev: CalendarEvent) => void
+  isReservacionInterna: boolean
 }) {
+  const BLOCK_SIZE_EFF = isReservacionInterna ? 1 : BLOCK_SIZE
+  const CORE_EVENTS_EFF = isReservacionInterna ? 1 : CORE_EVENTS
+  const REMAINING_CAP_EFF = MAX_EVENT_HOURS - CORE_EVENTS_EFF
+  const PRE_DEFAULT = isReservacionInterna ? 0 : 1
+  const POST_DEFAULT = isReservacionInterna ? 0 : 1
+
   const dateStr = toDateStr(date)
   const isPastDay = date < new Date(new Date().setHours(0, 0, 0, 0))
 
   // Compute full range
   const selFullStart = selection && selection.dateStr === dateStr ? selection.coreStartIdx - selection.extrasBefore : -1
-  const selFullEnd = selection && selection.dateStr === dateStr ? Math.min(selection.coreStartIdx + BLOCK_SIZE - 1, HOURS.length - 1) + (selection?.extrasAfter ?? 0) : -1
+  const selFullEnd = selection && selection.dateStr === dateStr ? Math.min(selection.coreStartIdx + BLOCK_SIZE_EFF - 1, HOURS.length - 1) + (selection?.extrasAfter ?? 0) : -1
 
   function getCellType(sId: string, hIdx: number): "extra-pre" | "extra-post" | "extra" | "pre" | "event" | "post" | "hover-pre" | "hover-event" | "hover-post" | null {
     if (selection && selection.salonId === sId && selection.dateStr === dateStr) {
-      const cs = selection.coreStartIdx, ce = Math.min(cs + BLOCK_SIZE - 1, HOURS.length - 1)
+      const cs = selection.coreStartIdx, ce = Math.min(cs + BLOCK_SIZE_EFF - 1, HOURS.length - 1)
       const fs = cs - selection.extrasBefore, fe = ce + selection.extrasAfter
       if (hIdx < fs || hIdx > fe) return null
 
-      const preH = selection.preHours ?? 1, postH = selection.postHours ?? 1
+      const preH = selection.preHours ?? PRE_DEFAULT, postH = selection.postHours ?? POST_DEFAULT
 
       // Calcular extras con prioridad al lado más extendido
       const leftExt = Math.max(0, selection.extrasBefore)
       const rightExt = Math.max(0, selection.extrasAfter)
-      const rawInner = fe - fs - 1 // celdas internas con pre=1, post=1
+      const rawInner = (fe - fs + 1) - preH - postH // celdas de evento dentro del rango
       const rawTotalExtras = Math.max(0, rawInner - MAX_EVENT_HOURS)
-      const { leftExtras: rawLE, rightExtras: rawRE } = calcSideExtras(leftExt, rightExt, rawTotalExtras)
+      const { leftExtras: rawLE, rightExtras: rawRE } = calcSideExtras(leftExt, rightExt, rawTotalExtras, REMAINING_CAP_EFF)
 
       // Posiciones absolutas de extras: izq pegadas a fs+1, der pegadas a fe-1
       const isExtraPos = (idx: number) => {
@@ -769,17 +821,22 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
       const totalInner = innerEnd - innerStart + 1
       if (totalInner <= MAX_EVENT_HOURS) return "event"
 
-      // Extras en zona interna
+      // Extras en zona interna. Posiciones: izq ocupa [preH, preH+rawLE-1]; der ocupa [postH, postH+rawRE-1].
+      // Cuando preH=0/postH=0 (reservación interna) las extras pueden caer en fs/fe directamente.
       const posFromLeft = hIdx - fs
       const posFromRight = fe - hIdx
-      if (rawLE > 0 && posFromLeft >= 1 && posFromLeft <= rawLE) return "extra"
-      if (rawRE > 0 && posFromRight >= 1 && posFromRight <= rawRE) return "extra"
+      if (rawLE > 0 && posFromLeft >= preH && posFromLeft < preH + rawLE) return "extra"
+      if (rawRE > 0 && posFromRight >= postH && posFromRight < postH + rawRE) return "extra"
       return "event"
     }
     if (hoverBlock && hoverBlock.salonId === sId) {
-      const hs = hoverBlock.startIdx, he = Math.min(hs + BLOCK_SIZE - 1, HOURS.length - 1)
-      if (hIdx === hs) return "hover-pre"; if (hIdx === he) return "hover-post"
-      if (hIdx > hs && hIdx < he) return "hover-event"
+      const hs = hoverBlock.startIdx, he = Math.min(hs + BLOCK_SIZE_EFF - 1, HOURS.length - 1)
+      if (isReservacionInterna) {
+        if (hIdx === hs) return "hover-event"
+      } else {
+        if (hIdx === hs) return "hover-pre"; if (hIdx === he) return "hover-post"
+        if (hIdx > hs && hIdx < he) return "hover-event"
+      }
     }
     return null
   }
@@ -796,10 +853,10 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
     return "middle"
   }
 
-  // Check if 8-block from startIdx fits
+  // Check if block from startIdx fits
   function canSelectBlock(sId: string, startIdx: number): boolean {
     if (isPastDay) return false
-    if (startIdx + BLOCK_SIZE - 1 >= HOURS.length) return false
+    if (startIdx + BLOCK_SIZE_EFF - 1 >= HOURS.length) return false
     // Only block if the clicked hour itself has a reservacion
     if (hourHasRes(sId, dateStr, HOURS[startIdx].hour24)) return false
     return true
@@ -853,7 +910,7 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
                   }`}
                   onClick={() => {
                     // Allow clicking anywhere that's not past and not a reservacion hour
-                    if (!isPastDay && !hasRes && (hIdx + BLOCK_SIZE - 1 < HOURS.length)) {
+                    if (!isPastDay && !hasRes && (hIdx + BLOCK_SIZE_EFF - 1 < HOURS.length)) {
                       onHourClick(salon.value, dateStr, hIdx)
                     }
                   }}
@@ -864,7 +921,7 @@ function DayView({ date, salones, getEventsForHourCell, hourHasRes, onHourClick,
                   }}
                   onMouseEnter={() => {
                     if (dragging) { onDragMove(hIdx) }
-                    else if (!isPastDay && !hasRes && !ct && (hIdx + BLOCK_SIZE - 1 < HOURS.length)) { setHoverBlock({ salonId: salon.value, startIdx: hIdx }) }
+                    else if (!isPastDay && !hasRes && !ct && (hIdx + BLOCK_SIZE_EFF - 1 < HOURS.length)) { setHoverBlock({ salonId: salon.value, startIdx: hIdx }) }
                   }}
                   onMouseLeave={() => { if (!dragging) setHoverBlock(null) }}
                   title={
