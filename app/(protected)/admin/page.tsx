@@ -31,6 +31,12 @@ const modules = [
     icon: CloudDownload,
     href: "/admin/extraccion-pipedrive",
   },
+  {
+    title: "Extracción MeetingHub",
+    description: "Carga masiva de datos desde MeetingHub vía Excel",
+    icon: CloudDownload,
+    href: "/admin/extraccion-meetinghub",
+  },
 ]
 
 export default function AdminPage() {

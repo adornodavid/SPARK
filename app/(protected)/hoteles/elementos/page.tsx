@@ -33,10 +33,16 @@ import {
   actualizarServicio,
   actualizarCortesia,
   actualizarBeneficio,
+  listarMenuBebidaPorHotel,
+  validarNombreMenuBebida,
+  crearMenuBebida,
+  actualizarMenuBebida,
+  eliminarPdfMenuBebida,
   type MobiliarioRow,
   type ServicioRow,
   type CortesiaRow,
   type BeneficioRow,
+  type MenuBebidaRow,
 } from "@/app/actions/elementos"
 import type { ddlItem } from "@/types/common"
 
@@ -56,6 +62,8 @@ export default function ElementosPage() {
   const [fetchingCortesias, setFetchingCortesias] = useState(false)
   const [beneficios, setBeneficios] = useState<BeneficioRow[]>([])
   const [fetchingBeneficios, setFetchingBeneficios] = useState(false)
+  const [bebidas, setBebidas] = useState<MenuBebidaRow[]>([])
+  const [fetchingBebidas, setFetchingBebidas] = useState(false)
   const [togglingId, setTogglingId] = useState<number | null>(null)
   const [eliminandoId, setEliminandoId] = useState<number | null>(null)
   const [search, setSearch] = useState<string>("")
@@ -106,6 +114,18 @@ export default function ElementosPage() {
   const [benFormActivo, setBenFormActivo] = useState<string>("true")
   const [benValidandoNombre, setBenValidandoNombre] = useState(false)
   const [benNombreValidacion, setBenNombreValidacion] = useState<{ disponible: boolean; mensaje: string } | null>(null)
+
+  // Estado independiente del formulario de Bebidas
+  const [bebFormNombre, setBebFormNombre] = useState("")
+  const [bebFormDescripcion, setBebFormDescripcion] = useState("")
+  const [bebFormCosto, setBebFormCosto] = useState("")
+  const [bebFormActivo, setBebFormActivo] = useState<string>("true")
+  const [bebFormTipoMenu, setBebFormTipoMenu] = useState<string>("Individual")
+  const [bebFormPdfFile, setBebFormPdfFile] = useState<File | null>(null)
+  const [bebFormPdfUrlExistente, setBebFormPdfUrlExistente] = useState<string | null>(null)
+  const [bebValidandoNombre, setBebValidandoNombre] = useState(false)
+  const [bebNombreValidacion, setBebNombreValidacion] = useState<{ disponible: boolean; mensaje: string } | null>(null)
+  const [bebEliminandoPdf, setBebEliminandoPdf] = useState(false)
 
   useEffect(() => {
     async function boot() {
@@ -158,6 +178,13 @@ export default function ElementosPage() {
           else setBeneficios([])
           setFetchingBeneficios(false)
         })
+      } else if (tab === "bebidas") {
+        setFetchingBebidas(true)
+        listarMenuBebidaPorHotel(hid, search).then((r) => {
+          if (r.success) setBebidas(r.data)
+          else setBebidas([])
+          setFetchingBebidas(false)
+        })
       }
     }, 300)
     return () => clearTimeout(t)
@@ -188,6 +215,15 @@ export default function ElementosPage() {
     setBenFormCosto("")
     setBenFormActivo("true")
     setBenNombreValidacion(null)
+    // Reset Bebidas
+    setBebFormNombre("")
+    setBebFormDescripcion("")
+    setBebFormCosto("")
+    setBebFormActivo("true")
+    setBebFormTipoMenu("Individual")
+    setBebFormPdfFile(null)
+    setBebFormPdfUrlExistente(null)
+    setBebNombreValidacion(null)
   }
 
   function abrirModalAgregar() {
@@ -204,7 +240,16 @@ export default function ElementosPage() {
 
   async function abrirModalEditar(
     tipo: string,
-    row: { id: number; nombre: string | null; descripcion: string | null; costo: number | null; activo: boolean | null; hotelid: number | null },
+    row: {
+      id: number
+      nombre: string | null
+      descripcion: string | null
+      costo: number | null
+      activo: boolean | null
+      hotelid: number | null
+      tipomenu?: string | null
+      documentopdf?: string | null
+    },
   ) {
     setModalMode("edit")
     setEditingId(row.id)
@@ -238,6 +283,14 @@ export default function ElementosPage() {
       setBenFormDescripcion(descripcion)
       setBenFormCosto(costo)
       setBenFormActivo(activo)
+    } else if (tipo === "bebidas") {
+      setBebFormNombre(nombre)
+      setBebFormDescripcion(descripcion)
+      setBebFormCosto(costo)
+      setBebFormActivo(activo)
+      setBebFormTipoMenu(row.tipomenu ?? "Individual")
+      setBebFormPdfFile(null)
+      setBebFormPdfUrlExistente(row.documentopdf ?? null)
     }
     setAgregarOpen(true)
 
@@ -263,6 +316,11 @@ export default function ElementosPage() {
         const r = await validarNombreBeneficio(nombre, row.hotelid, row.id)
         setBenNombreValidacion(r)
         setBenValidandoNombre(false)
+      } else if (tipo === "bebidas") {
+        setBebValidandoNombre(true)
+        const r = await validarNombreMenuBebida(nombre, row.hotelid, row.id)
+        setBebNombreValidacion(r)
+        setBebValidandoNombre(false)
       }
     }
   }
@@ -297,6 +355,17 @@ export default function ElementosPage() {
     setBenFormCosto("")
     setBenFormActivo("true")
     setBenNombreValidacion(null)
+  }
+
+  function limpiarFormularioBebidas() {
+    setBebFormNombre("")
+    setBebFormDescripcion("")
+    setBebFormCosto("")
+    setBebFormActivo("true")
+    setBebFormTipoMenu("Individual")
+    setBebFormPdfFile(null)
+    setBebFormPdfUrlExistente(null)
+    setBebNombreValidacion(null)
   }
 
   async function onValidarNombreMobiliario() {
@@ -365,6 +434,37 @@ export default function ElementosPage() {
     const r = await validarNombreBeneficio(benFormNombre, Number(formHotel), excluir)
     setBenNombreValidacion(r)
     setBenValidandoNombre(false)
+  }
+
+  async function onValidarNombreBebidas() {
+    setFormFeedback(null)
+    if (!bebFormNombre.trim()) {
+      setBebNombreValidacion({ disponible: false, mensaje: "El nombre está vacío." })
+      return
+    }
+    if (!formHotel) {
+      setBebNombreValidacion({ disponible: false, mensaje: "Selecciona un hotel primero." })
+      return
+    }
+    setBebValidandoNombre(true)
+    const excluir = modalMode === "edit" ? editingId : null
+    const r = await validarNombreMenuBebida(bebFormNombre, Number(formHotel), excluir)
+    setBebNombreValidacion(r)
+    setBebValidandoNombre(false)
+  }
+
+  async function onEliminarPdfBebida() {
+    if (!editingId) return
+    if (!confirm("¿Deseas eliminar el PDF asociado a este registro?")) return
+    setBebEliminandoPdf(true)
+    const r = await eliminarPdfMenuBebida(editingId)
+    setBebEliminandoPdf(false)
+    if (!r.success) {
+      alert(r.error || "Error al eliminar PDF")
+      return
+    }
+    setBebFormPdfUrlExistente(null)
+    setBebidas((prev) => prev.map((x) => (x.id === editingId ? { ...x, documentopdf: null } : x)))
   }
 
   async function onGuardarAgregar() {
@@ -568,6 +668,57 @@ export default function ElementosPage() {
             if (listado.success) setBeneficios(listado.data)
           }
         }
+      } else if (formTipo === "bebidas") {
+        if (!bebFormNombre.trim()) {
+          setFormFeedback({ tipo: "error", msg: "El nombre es obligatorio." })
+          return
+        }
+        if (!bebNombreValidacion?.disponible) {
+          setFormFeedback({ tipo: "error", msg: "Debes validar el nombre antes de guardar." })
+          return
+        }
+        const costoNum = bebFormCosto.trim() === "" ? null : Number(bebFormCosto)
+        if (costoNum !== null && !Number.isFinite(costoNum)) {
+          setFormFeedback({ tipo: "error", msg: "Costo inválido." })
+          return
+        }
+        const fd = new FormData()
+        fd.set("hotelid", formHotel)
+        fd.set("nombre", bebFormNombre)
+        fd.set("descripcion", bebFormDescripcion)
+        fd.set("costo", costoNum != null ? String(costoNum) : "")
+        fd.set("activo", bebFormActivo)
+        fd.set("tipomenu", bebFormTipoMenu)
+        if (bebFormPdfFile) fd.set("pdfFile", bebFormPdfFile)
+
+        if (modalMode === "edit" && editingId != null) {
+          fd.set("id", String(editingId))
+          const r = await actualizarMenuBebida(fd)
+          if (!r.success) {
+            setFormFeedback({ tipo: "error", msg: r.error || "Error al actualizar." })
+            return
+          }
+          setFormFeedback({ tipo: "ok", msg: `Registro actualizado correctamente.` })
+          if (tab === "bebidas") {
+            const hid = hotel === "-1" ? null : Number(hotel)
+            const listado = await listarMenuBebidaPorHotel(hid, search)
+            if (listado.success) setBebidas(listado.data)
+          }
+          setAgregarOpen(false)
+        } else {
+          const r = await crearMenuBebida(fd)
+          if (!r.success) {
+            setFormFeedback({ tipo: "error", msg: r.error || "Error al guardar." })
+            return
+          }
+          setFormFeedback({ tipo: "ok", msg: `Registro guardado correctamente (id ${r.id}).` })
+          limpiarFormularioBebidas()
+          if (tab === "bebidas") {
+            const hid = hotel === "-1" ? null : Number(hotel)
+            const listado = await listarMenuBebidaPorHotel(hid, search)
+            if (listado.success) setBebidas(listado.data)
+          }
+        }
       } else {
         setFormFeedback({ tipo: "error", msg: `Tipo "${formTipo}" aún no implementado.` })
       }
@@ -593,6 +744,8 @@ export default function ElementosPage() {
       setCortesias((prev) => prev.filter((x) => x.id !== id))
     } else if (tipo === "beneficios") {
       setBeneficios((prev) => prev.filter((x) => x.id !== id))
+    } else if (tipo === "bebidas") {
+      setBebidas((prev) => prev.filter((x) => x.id !== id))
     }
   }
 
@@ -614,6 +767,8 @@ export default function ElementosPage() {
       setCortesias((prev) => prev.map((x) => (x.id === id ? { ...x, activo: r.activo ?? !activoActual } : x)))
     } else if (tipo === "beneficios") {
       setBeneficios((prev) => prev.map((x) => (x.id === id ? { ...x, activo: r.activo ?? !activoActual } : x)))
+    } else if (tipo === "bebidas") {
+      setBebidas((prev) => prev.map((x) => (x.id === id ? { ...x, activo: r.activo ?? !activoActual } : x)))
     }
   }
 
@@ -693,7 +848,90 @@ export default function ElementosPage() {
               </TabsContent>
 
               <TabsContent value="bebidas" className="mt-4">
-                <p className="text-sm text-muted-foreground">Pendiente.</p>
+                <div className="rounded-lg border bg-background">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Hotel</TableHead>
+                        <TableHead className="w-20">ID</TableHead>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead className="w-28 text-right">Costo</TableHead>
+                        <TableHead className="w-24">Activo</TableHead>
+                        <TableHead className="w-40 text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {fetchingBebidas ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                            <Loader2 className="inline h-4 w-4 animate-spin mr-2" />
+                            Cargando…
+                          </TableCell>
+                        </TableRow>
+                      ) : bebidas.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                            Sin resultados
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        bebidas.map((b) => (
+                          <TableRow key={b.id}>
+                            <TableCell>{b.hotelnombre || "—"}</TableCell>
+                            <TableCell className="font-mono text-xs">{b.id}</TableCell>
+                            <TableCell>{b.nombre || "—"}</TableCell>
+                            <TableCell className="text-right">
+                              {b.costo != null
+                                ? b.costo.toLocaleString("es-MX", { style: "currency", currency: "MXN" })
+                                : "—"}
+                            </TableCell>
+                            <TableCell>{b.activo ? "Sí" : "No"}</TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-1">
+                                <Button asChild variant="ghost" size="sm" title="Ver">
+                                  <Link href={`/hoteles/elementos/${b.id}/view?tipo=bebidas`}>
+                                    <Eye className="h-4 w-4" />
+                                  </Link>
+                                </Button>
+                                <Button variant="ghost" size="sm" title="Editar" onClick={() => abrirModalEditar("bebidas", b)}>
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  title={b.activo ? "Inactivar" : "Activar"}
+                                  disabled={togglingId === b.id}
+                                  onClick={() => onToggleActivo("bebidas", b.id, b.activo)}
+                                >
+                                  {togglingId === b.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : b.activo ? (
+                                    <Ban className="h-4 w-4 text-red-600" />
+                                  ) : (
+                                    <Power className="h-4 w-4 text-emerald-600" />
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  title="Eliminar"
+                                  disabled={eliminandoId === b.id}
+                                  onClick={() => onEliminar("bebidas", b.id, b.hotelid)}
+                                >
+                                  {eliminandoId === b.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-4 w-4 text-red-600" />
+                                  )}
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               </TabsContent>
 
               <TabsContent value="mobiliario" className="mt-4">
@@ -1319,6 +1557,149 @@ export default function ElementosPage() {
               </>
             )}
 
+            {formTipo === "bebidas" && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="form-beb-nombre">
+                    Nombre <span className="text-red-600">*</span>
+                  </Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="form-beb-nombre"
+                      value={bebFormNombre}
+                      onChange={(e) => {
+                        setBebFormNombre(e.target.value)
+                        setBebNombreValidacion(null)
+                      }}
+                      placeholder="Nombre del menú de bebidas"
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={onValidarNombreBebidas}
+                      disabled={bebValidandoNombre || !bebFormNombre.trim() || !formHotel}
+                    >
+                      {bebValidandoNombre && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Validar
+                    </Button>
+                  </div>
+                  {bebNombreValidacion && (
+                    <p
+                      className={`text-xs ${
+                        bebNombreValidacion.disponible ? "text-emerald-600" : "text-red-600"
+                      }`}
+                    >
+                      {bebNombreValidacion.mensaje}
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="form-beb-descripcion">Descripción</Label>
+                  <Input
+                    id="form-beb-descripcion"
+                    value={bebFormDescripcion}
+                    onChange={(e) => setBebFormDescripcion(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="form-beb-costo">Costo</Label>
+                  <Input
+                    id="form-beb-costo"
+                    value={bebFormCosto}
+                    onChange={(e) => setBebFormCosto(e.target.value)}
+                    placeholder="0.00"
+                    inputMode="decimal"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="form-beb-tipomenu">Tipo de menú</Label>
+                  <Select value={bebFormTipoMenu} onValueChange={setBebFormTipoMenu}>
+                    <SelectTrigger id="form-beb-tipomenu" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Individual">Individual</SelectItem>
+                      <SelectItem value="Completo">Completo</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="form-beb-activo">Activo</Label>
+                  <Select value={bebFormActivo} onValueChange={setBebFormActivo}>
+                    <SelectTrigger id="form-beb-activo" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="true">Activo</SelectItem>
+                      <SelectItem value="false">Inactivo</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="form-beb-pdf">Archivo PDF</Label>
+                  <Input
+                    id="form-beb-pdf"
+                    type="file"
+                    accept="application/pdf"
+                    onChange={(e) => setBebFormPdfFile(e.target.files?.[0] ?? null)}
+                  />
+                  {(bebFormPdfFile || bebFormPdfUrlExistente) && (
+                    <div className="rounded-md border bg-muted/30 p-2 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs text-muted-foreground truncate">
+                          {bebFormPdfFile
+                            ? `Archivo seleccionado: ${bebFormPdfFile.name}`
+                            : "PDF actual"}
+                        </p>
+                        {modalMode === "edit" && bebFormPdfUrlExistente && !bebFormPdfFile && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            title="Eliminar PDF"
+                            disabled={bebEliminandoPdf}
+                            onClick={onEliminarPdfBebida}
+                          >
+                            {bebEliminandoPdf ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <X className="h-4 w-4 text-red-600" />
+                            )}
+                          </Button>
+                        )}
+                        {bebFormPdfFile && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            title="Quitar selección"
+                            onClick={() => setBebFormPdfFile(null)}
+                          >
+                            <X className="h-4 w-4 text-red-600" />
+                          </Button>
+                        )}
+                      </div>
+                      <iframe
+                        src={
+                          bebFormPdfFile
+                            ? URL.createObjectURL(bebFormPdfFile)
+                            : bebFormPdfUrlExistente ?? ""
+                        }
+                        className="w-full h-64 rounded border"
+                        title="Vista previa PDF"
+                      />
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
             {formTipo === "beneficios" && (
               <>
                 <div className="space-y-2">
@@ -1406,7 +1787,8 @@ export default function ElementosPage() {
                   (formTipo === "mobiliario" && (!formNombre.trim() || !nombreValidacion?.disponible)) ||
                   (formTipo === "servicios" && (!srvFormNombre.trim() || !srvNombreValidacion?.disponible)) ||
                   (formTipo === "cortesias" && (!corFormNombre.trim() || !corNombreValidacion?.disponible)) ||
-                  (formTipo === "beneficios" && (!benFormNombre.trim() || !benNombreValidacion?.disponible))
+                  (formTipo === "beneficios" && (!benFormNombre.trim() || !benNombreValidacion?.disponible)) ||
+                  (formTipo === "bebidas" && (!bebFormNombre.trim() || !bebNombreValidacion?.disponible))
                 }
               >
                 {guardando && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
