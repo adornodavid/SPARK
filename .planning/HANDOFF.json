@@ -1,31 +1,55 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-21T22:24:13.951Z",
-  "phase": "fix-precarga-categoria-interno-reservacion-interna",
-  "phase_name": "Fix precarga categoria 'Interno' en /reservacion-interna/new + a11y SelectTrigger ids",
+  "timestamp": "2026-04-23T15:39:12.247Z",
+  "phase": "session-2026-04-22",
+  "phase_name": "cotizaciones-reservacion-interna-precio-paquete",
   "phase_dir": ".planning",
-  "plan": 1,
-  "task": 3,
-  "total_tasks": 3,
+  "plan": null,
+  "task": null,
+  "total_tasks": 14,
   "status": "paused",
-  "last_commit": "c0ad619",
+  "last_commit": "0bf01ab",
   "branch": "main",
   "completed_tasks": [
-    {"id": 1, "name": "Fix precarga categoria Interno - intento 1 (comparacion c.id.toString() === '4')", "status": "done", "commit": "0236207"},
-    {"id": 2, "name": "Refactor robusto: useEffect dedicado que reacciona a categoriasEvento, busqueda por nombre 'interno' con id=4 fallback", "status": "done", "commit": "6f7ab82"},
-    {"id": 3, "name": "Fix a11y: agregar id a SelectTrigger de categoriaEvento/tipoEvento/estatus para que Label htmlFor resuelva", "status": "done", "commit": "c0ad619"}
+    {"id": 1, "name": "Reservación interna: calendario sin pre/post, mínimo 1 hora", "status": "done", "commit": "9f319c5"},
+    {"id": 2, "name": "Auto-reload montajes cuando cambia hora en mismo salón (useEffect safety net)", "status": "done", "commit": "9f319c5"},
+    {"id": 3, "name": "Auto-ajuste fechaInicial ↔ fechaFinal cuando invierten rango", "status": "done", "commit": "9f319c5"},
+    {"id": 4, "name": "Detección de empalme al cambiar fecha desde input (re-emit en reconstruction + events load)", "status": "done", "commit": "9f319c5"},
+    {"id": 5, "name": "Fix loop infinito: dep events vs displayEvents en useEffect de re-emit", "status": "done", "commit": "9f319c5"},
+    {"id": 6, "name": "Filtro categoria='menu' en prompt de platillos del paquete", "status": "done", "commit": "9f319c5"},
+    {"id": 7, "name": "PDF preview del menú padre (no del platillo) en modal platillos", "status": "done", "commit": "9f319c5"},
+    {"id": 8, "name": "Rename column platilloid → menuid (3 archivos, replace_all)", "status": "done", "commit": "9f319c5"},
+    {"id": 9, "name": "Auto-expandir alimentos con platillos ya asignados (ref para no reabrir tras colapso manual)", "status": "done", "commit": "9f319c5"},
+    {"id": 10, "name": "Flechas calendario vista día propagan fecha al parent (evita reset por reconstruction effect)", "status": "done", "commit": "9f319c5"},
+    {"id": 11, "name": "obtenerPrecioPaquetePorPlatillo con filtros year + esfinsemana (Vie/Sáb = true)", "status": "done", "commit": "9f319c5"},
+    {"id": 12, "name": "Modal paquete: tabs Elementos/PDF + preview documentopdf (iframe h-[28rem])", "status": "done", "commit": "9f319c5"},
+    {"id": 13, "name": "Header modal platillos muestra nombre del menú padre en dorado (amber-300)", "status": "done", "commit": "9f319c5"},
+    {"id": 14, "name": "Menús opcionales: tarjetas seleccionables obligatorias + asignarPaqueteACotizacion acepta excludeElementoIds", "status": "done", "commit": "9f319c5"}
   ],
-  "remaining_tasks": [],
+  "remaining_tasks": [
+    {"id": "diag-1", "name": "Validar diagnóstico paqueteprecios en prod (Boda + plato fuerte + jueves 2026) y reportar sufijo", "status": "pending_user_verification"},
+    {"id": "cleanup-1", "name": "Quitar sufijo diagnóstico del renglón Paquete tras validar datos en paqueteprecios", "status": "pending_user_verification"},
+    {"id": "arrastre-1", "name": "Integrar horaPreMontaje/horaPostMontaje/horasExtras en actualizarCotizacion (edición)", "status": "not_started"},
+    {"id": "arrastre-2", "name": "Validaciones de solapamiento con reservaciones al extender pre/post", "status": "not_started"},
+    {"id": "arrastre-3", "name": "Sincronizar calendario de disponibilidad del dashboard con DayDetailSheet", "status": "not_started"}
+  ],
   "blockers": [],
   "human_actions_pending": [
-    {"action": "Validar en deploy que los 3 Select (Categoria, Tipo, Estatus) ya no emiten warning de accesibilidad en DevTools Console tras hard reload", "context": "Cambio mecanico (solo agregar id), pero confirma en la prod URL", "blocking": false}
+    {
+      "action": "Probar en prod: paquete Boda + plato fuerte + jueves 2026 y leer el sufijo diagnóstico del renglón 'Paquete'",
+      "context": "El sufijo muestra year/esfinsemana buscados vs. disponibles en paqueteprecios. Según el resultado: (a) sembrar datos si faltan filas, (b) ajustar tipos de columna si hay mismatch int/string/bool, (c) limpiar diagnóstico si todo OK",
+      "blocking": false
+    }
   ],
   "decisions": [
-    {"decision": "Separar la precarga del default 'Interno' a un useEffect dedicado en vez de hacerlo dentro del .then() del fetch inicial", "rationale": "El intento inicial (c.id.toString() === '4' dentro del callback del fetch) funcionaba en local pero fallaba en produccion, probablemente por un race de batching entre setCategoriasEvento y setFormData cuando Radix Select lee value antes de que SelectContent renderice el SelectItem"},
-    {"decision": "Buscar categoria default por nombre 'interno' (case-insensitive) con id=4 como fallback", "rationale": "Hace el codigo independiente del id especifico en cada DB (local vs prod) y resiliente a cambios futuros en la tabla categoriaeventos"},
-    {"decision": "Agregar id a SelectTrigger en lugar de mover htmlFor a otra parte", "rationale": "Radix SelectTrigger acepta id prop y lo aplica al boton rendereado; es la solucion estandar para asociar Label con Select sin romper comportamiento"}
+    {"decision": "Propagar fecha desde navigate() del calendario solo en vista día", "rationale": "Evita colapsar el rango en vista semana/mes; el bug de 'regresar al día viejo' solo aplicaba a vista día"},
+    {"decision": "Dep [events] en lugar de [displayEvents] en useEffect de re-emit", "rationale": "displayEvents se rederiva por nueva referencia de draftReservaciones/excludeMatch en cada render del parent, causaba infinite loop"},
+    {"decision": "Replace_all global platilloid → menuid en 3 archivos (no edits one-by-one)", "rationale": "Todas las ocurrencias referían a la misma columna renombrada (strings SQL, property access, params, comentarios); case-sensitive mantiene platilloId (camelCase) intacto"},
+    {"decision": "Tarjetas de menús opcionales en modal pre-asignación + excludeElementoIds en server action", "rationale": "Validación pre-asignación es más limpia; los no elegidos nunca entran a elementosxcotizacion. Alternativa (elegir post-asignación) requeriría delete + re-sync"},
+    {"decision": "Dejar el sufijo diagnóstico en prod temporalmente", "rationale": "Usuario necesita verlo en prod para validar qué hay en paqueteprecios ahí (el log console no le sirve); follow-up para limpiarlo tras recolectar datos"},
+    {"decision": "PDF preview del menú padre (no del platillo) en modal platillos", "rationale": "Todos los platillos del modal (entradas/plato fuerte/postres) comparten el mismo menú; un solo fetch al abrir modal alcanza"}
   ],
   "uncommitted_files": [],
-  "next_action": "Esperar siguiente solicitud. Dev server corriendo en localhost:3002 (monitor bc348369r, iniciado al resumir esta sesion). Deploy actual: commit c0ad619 en Vercel produccion.",
-  "context_notes": "Sesion corta enfocada en un unico sintoma reportado por usuario: la categoria 'Interno' no precargaba en /reservacion-interna/new en el deploy, aunque en local si lo hacia. Tres iteraciones: (1) fix de comparacion de tipos sin entender causa real, (2) debug logs temporales (revertidos) para pedir al usuario DevTools output, (3) antes de que respondiera con logs, el usuario pidio fix directo - resuelto con refactor robusto que separa la precarga a un useEffect dedicado. Sospecha de la causa raiz: batching diferente en React prod build + Radix Select sync entre value y items cuando ambos se actualizan en la misma promesa. El useEffect separado garantiza orden determinista: primero se setea categoriasEvento, luego un render posterior dispara el efecto que setea el default. Confirmado por usuario que ya funciona en ambos ambientes. Bonus: fix a11y de 3 SelectTrigger sin id que emitian warning de Label/htmlFor en DevTools. Vercel auto-deploy desde GitHub integration OK en los 4 commits. Sin commits de Omar durante esta sesion."
+  "next_action": "Esperar reporte del usuario sobre el sufijo diagnóstico en prod (paquete Boda, plato fuerte, jueves 2026). Según lo que reporte: sembrar datos en paqueteprecios, ajustar tipos de columna, o limpiar el diagnóstico. También hay 3 pendientes arrastrados de sesiones anteriores (pre/post en actualizarCotizacion, solapamiento validaciones, sync dashboard/DayDetailSheet) si pide avanzar con eso.",
+  "context_notes": "Sesión larga con 14 features entregados en commit único 9f319c5, mergeado con 5 commits de Omar (extracción-meetinghub + hoteles/elementos Bebidas) en 0bf01ab. Push OK, Vercel auto-deploy Ready en 36s (gubacwedd.vercel.app). Working tree limpio, main al día con origin. La principal incertidumbre abierta: paqueteprecios en prod puede no tener filas para combinaciones year+esfinsemana esperadas; por eso se dejó el sufijo diagnóstico visible en el renglón 'Paquete' del presupuesto. El feedback del usuario en local fue 'no hay fila p/ year=2026, esfinsemana=false; hay 4 otras' — hay filas pero no para la combinación buscada. Siguiente acción depende de lo que vea en prod: si también faltan, hay que sembrar; si hay, puede ser mismatch de tipo. El stack sigue siendo Next.js 16 + React 19 + Supabase + Shadcn + Turbopack; dev server ya no está corriendo."
 }
