@@ -82,6 +82,43 @@ function crearPresupuestoItem(concepto: string, tipo: string, costo: number, dia
   return { concepto, tipo, precio, iva, servicio, descuento, subtotal, cantidad, dias, total }
 }
 
+// Construye el renglón de "Paquete" para el presupuesto. Si preciosPorTipo trae datos
+// (modo tipopersona), devuelve un padre con breakdown de Adultos/Jóvenes; si no, un item flat.
+function crearPresupuestoPaqueteRow(
+  nombreMenu: string,
+  precio: number,
+  preciosPorTipo: Record<string, number> | undefined,
+  dias: number,
+  numInvitados: number,
+  cAdultos: number,
+  cJovenes: number,
+) {
+  if (preciosPorTipo && Object.keys(preciosPorTipo).length > 0) {
+    const pAdultos = Number(preciosPorTipo["Adultos"] ?? 0)
+    const pJovenes = Number(preciosPorTipo["Jóvenes"] ?? preciosPorTipo["Jovenes"] ?? 0)
+    const tAdultos = pAdultos * cAdultos * (dias || 1)
+    const tJovenes = pJovenes * cJovenes * (dias || 1)
+    const breakdown: { concepto: string; precio: number; cantidad: number; total: number }[] = []
+    if (pAdultos > 0) breakdown.push({ concepto: "Adultos", precio: pAdultos, cantidad: cAdultos, total: tAdultos })
+    if (pJovenes > 0) breakdown.push({ concepto: "Jóvenes", precio: pJovenes, cantidad: cJovenes, total: tJovenes })
+    const totalPadre = tAdultos + tJovenes
+    const cantTotal = cAdultos + cJovenes
+    const subtotalPadre = cantTotal > 0 && (dias || 1) > 0 ? totalPadre / (cantTotal * (dias || 1)) : 0
+    const precioPadre = subtotalPadre > 0 ? subtotalPadre / 1.16 : 0
+    const ivaPadre = precioPadre * 0.16
+    return {
+      concepto: nombreMenu,
+      tipo: "Paquete",
+      precio: precioPadre, iva: ivaPadre, servicio: 0, descuento: 0, subtotal: subtotalPadre,
+      cantidad: cantTotal,
+      dias: dias,
+      total: totalPadre,
+      breakdown,
+    } as any
+  }
+  return crearPresupuestoItem(nombreMenu, "Paquete", precio, dias, 0, numInvitados)
+}
+
 // Horarios permitidos: 8:00 AM a 1:00 AM (intervalos de 30 min)
 const HORARIOS_EVENTO = (() => {
   const slots: { value: string; label: string }[] = []
@@ -219,6 +256,8 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
   const [alimentosTipoMenu, setAlimentosTipoMenu] = useState<Record<number, string>>({})
   // Mapa alimentoId → tiene al menos un platillo en la tabla platillos
   const [alimentosConPlatillos, setAlimentosConPlatillos] = useState<Record<number, boolean>>({})
+  // Mapa alimentoId → lista de tipos de platillo (ENTRADAS/PLATO FUERTE/POSTRES) con platillos en catálogo
+  const [alimentosTiposDisponibles, setAlimentosTiposDisponibles] = useState<Record<number, PlatilloTipo[]>>({})
   // Mapa bebidaId → tiene al menos una bebida (consumo) en la tabla bebidas
   const [bebidasConConsumo, setBebidasConConsumo] = useState<Record<number, boolean>>({})
   // Mapa menubebidaId → tipomenu para renderizar cada bebida correctamente
@@ -516,12 +555,16 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
           : platillosDeEseMenu[0]
         if (platilloClave) {
           let precioPaquete = Number(pqInfo.precioporpersona ?? 0) || 0
+          let preciosPorTipo: Record<string, number> | undefined
           if (precioPaquete === 0) {
             const res = await obtenerPrecioPaquetePorPlatillo(Number(row.paqueteid), Number(platilloClave.elementoid ?? platilloClave.id), fd.fechaInicial)
             precioPaquete = res.precio || 0
+            preciosPorTipo = (res as any).precios
           }
           const nombreMenu = menuPrincipal?.descripcion || menuPrincipal?.nombre || menuPrincipal?.elemento || pqInfo.nombre || "Paquete"
-          presItems.push(crearPresupuestoItem(nombreMenu, "Paquete", precioPaquete, dias, 0, numInv))
+          const cAdultos = Number(fd.adultos) || 0
+          const cJovenes = Number(fd.ninos) || 0
+          presItems.push(crearPresupuestoPaqueteRow(nombreMenu, precioPaquete, preciosPorTipo, dias, numInv, cAdultos, cJovenes))
         }
       }
     }
@@ -1242,12 +1285,26 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
           }
         }
         if (faltantesPlatillos.length > 0) {
-          const { data } = await supa.from("platillos").select("menuid").in("menuid", faltantesPlatillos)
+          const { data } = await supa.from("platillos").select("menuid, tipo").in("menuid", faltantesPlatillos)
           if (!cancelado) {
-            const tiene = new Set((data || []).map((r: any) => Number(r.menuid)))
-            const update: Record<number, boolean> = {}
-            for (const id of faltantesPlatillos) update[id] = tiene.has(id)
-            setAlimentosConPlatillos(prev => ({ ...prev, ...update }))
+            const tieneRows: Array<{ menuid: number; tipo: string }> = (data || []).map((r: any) => ({ menuid: Number(r.menuid), tipo: String(r.tipo || "").toUpperCase() }))
+            const tiene = new Set(tieneRows.map(r => r.menuid))
+            const tiposPorMenu: Record<number, Set<PlatilloTipo>> = {}
+            for (const r of tieneRows) {
+              if (r.tipo === "ENTRADAS" || r.tipo === "PLATO FUERTE" || r.tipo === "POSTRES") {
+                if (!tiposPorMenu[r.menuid]) tiposPorMenu[r.menuid] = new Set<PlatilloTipo>()
+                tiposPorMenu[r.menuid].add(r.tipo as PlatilloTipo)
+              }
+            }
+            const updateBool: Record<number, boolean> = {}
+            const updateTipos: Record<number, PlatilloTipo[]> = {}
+            for (const id of faltantesPlatillos) {
+              updateBool[id] = tiene.has(id)
+              const orden = PLATILLOS_TIPOS.filter(t => tiposPorMenu[id]?.has(t))
+              updateTipos[id] = orden
+            }
+            setAlimentosConPlatillos(prev => ({ ...prev, ...updateBool }))
+            setAlimentosTiposDisponibles(prev => ({ ...prev, ...updateTipos }))
           }
         }
       } catch {}
@@ -1463,31 +1520,57 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
           obtenerPlatillosCotizacion(reservacionIdActual).then((platRes) => {
             if (platRes.success && platRes.data) setPlatillosItems(platRes.data)
           })
-          obtenerElementosCotizacion(reservacionIdActual).then((elemRes) => {
+          obtenerElementosCotizacion(reservacionIdActual).then(async (elemRes) => {
             if (elemRes.success && elemRes.data && elemRes.data.length > 0) {
               setElementosPaquete(elemRes.data)
-              const paqueteid = elemRes.data[0]?.paqueteid?.toString()
-              if (paqueteid) {
-                setSelectedPaqueteId(paqueteid)
-                const paqueteInfo = paquetesList.find(
-                  (p: any) => p.paqueteid?.toString() === paqueteid || p.id?.toString() === paqueteid
-                )
-                if (paqueteInfo) setSelectedPaqueteInfo(paqueteInfo)
-                // Cargar secciones del template del paquete para mantenerlas aunque estén vacías
-                obtenerElementosPaquete(Number(paqueteid)).then((tmplRes) => {
-                  if (tmplRes.success && tmplRes.data) {
-                    const secciones = [...new Set(tmplRes.data.map((el: any) => normalizarSeccion(el.tipoelemento || el.tipo || "otros")))]
-                    setSeccionesPaquete(secciones as string[])
-                  }
-                })
+            }
+            // Resolver paqueteid: primero de elementos, luego de eventoxreservaciones como fallback
+            let paqueteid: string | undefined
+            if (elemRes.success && elemRes.data) {
+              for (const el of elemRes.data) {
+                if (el?.paqueteid != null) { paqueteid = String(el.paqueteid); break }
               }
+            }
+            if (!paqueteid) {
+              try {
+                const supaCli = (await import("@/lib/supabase/client")).createClient()
+                const { data: resRow } = await supaCli
+                  .from("eventoxreservaciones")
+                  .select("paqueteid")
+                  .eq("id", reservacionIdActual)
+                  .not("paqueteid", "is", null)
+                  .limit(1)
+                  .maybeSingle()
+                if (resRow?.paqueteid != null) paqueteid = String(resRow.paqueteid)
+              } catch {}
+            }
+            if (paqueteid) {
+              setSelectedPaqueteId(paqueteid)
+              // Buscar primero en la lista ya cargada; si no, fetch directo de `paquetes` para asegurar el nombre
+              let paqueteInfo: any = paquetesList.find(
+                (p: any) => p.paqueteid?.toString() === paqueteid || p.id?.toString() === paqueteid
+              ) || null
+              if (!paqueteInfo) {
+                try {
+                  const supaCli = (await import("@/lib/supabase/client")).createClient()
+                  const { data: paqRow } = await supaCli
+                    .from("paquetes")
+                    .select("id, nombre, precioporpersona, tipopaquete")
+                    .eq("id", Number(paqueteid))
+                    .maybeSingle()
+                  if (paqRow) paqueteInfo = paqRow
+                } catch {}
+              }
+              if (paqueteInfo) setSelectedPaqueteInfo(paqueteInfo)
             }
             // Construir presupuesto con elementos existentes
             setLoadingEditStep("Calculando presupuesto...")
             if (elemRes.success && elemRes.data) {
               const dias = calcularDiasEvento(fi, ff)
               const numInvitados = Number(c.numeroinvitados) || 0
-              const presItems: { concepto: string; tipo: string; precio: number; iva: number; servicio: number; descuento: number; subtotal: number; cantidad: number; dias: number; total: number }[] = []
+              const cAdultos = Number((c as any).adultos) || 0
+              const cJovenes = Number((c as any).ninos) || 0
+              const presItems: any[] = []
               // Paquete (reemplaza la agregación por platillo individual)
               ;(async () => {
                 const supaCli = (await import("@/lib/supabase/client")).createClient()
@@ -1578,12 +1661,14 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                           .eq("id", Number(paqueteid))
                           .maybeSingle()
                         let precioPaquete = Number(paqRow?.precioporpersona ?? 0) || 0
+                        let preciosPorTipo: Record<string, number> | undefined
                         if (precioPaquete === 0) {
                           const res = await obtenerPrecioPaquetePorPlatillo(Number(paqueteid), Number(platilloClave.id), fi)
                           precioPaquete = res.precio || 0
+                          preciosPorTipo = (res as any).precios
                         }
                         const nombreMenu = menuPrincipal?.descripcion || menuPrincipal?.nombre || menuPrincipal?.elemento || paqRow?.nombre || "Paquete"
-                        presItems.push(crearPresupuestoItem(nombreMenu, "Paquete", precioPaquete, dias, 0, numInvitados))
+                        presItems.push(crearPresupuestoPaqueteRow(nombreMenu, precioPaquete, preciosPorTipo, dias, numInvitados, cAdultos, cJovenes))
                       }
                     }
                   }
@@ -2928,6 +3013,24 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
         platilloId = alimentoEl ? Number(alimentoEl.elementoid ?? alimentoEl.id) : -1
       }
       setSelectedAlimentoParentId(platilloId > 0 ? platilloId : null)
+      // Nombre del menú padre (para mostrar en el header del modal)
+      if (platilloId > 0) {
+        try {
+          const supa = (await import("@/lib/supabase/client")).createClient()
+          const { data: menuRow } = await supa.from("menus").select("nombre, descripcion").eq("id", platilloId).maybeSingle()
+          const nombreMenu = (menuRow as any)?.nombre || (menuRow as any)?.descripcion || ""
+          if (nombreMenu) {
+            setSelectedAlimentoParentNombre(nombreMenu)
+          } else {
+            const el = elementosPaquete.find((e: any) => Number(e.elementoid ?? e.id) === platilloId)
+            setSelectedAlimentoParentNombre(el?.descripcion || el?.nombre || el?.elemento || "")
+          }
+        } catch {
+          setSelectedAlimentoParentNombre("")
+        }
+      } else {
+        setSelectedAlimentoParentNombre("")
+      }
       const hotelId = formData.hotel ? Number(formData.hotel) : -1
       const result = await buscarPlatillosItems(platilloId, hotelId, tipoPlatillo)
       if (result.success && result.data) {
@@ -3057,35 +3160,42 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
     const platilloId = Number(platilloClave.elementoid ?? platilloClave.id)
     const resultado = await obtenerPrecioPaquetePorPlatillo(paqueteId, platilloId, formData.fechaInicial)
     const precio = resultado.precio || 0
+    const preciosPorTipo = (resultado as any).precios as Record<string, number> | undefined
     const dbg = (resultado as any).debug || {}
-    // Log siempre (no solo cuando precio=0) para diagnosticar filtros year/esfinsemana.
-    console.log("[Precio Paquete] precio=", precio, "debug=", dbg)
+    console.log("[Precio Paquete] precio=", precio, "precios=", preciosPorTipo, "debug=", dbg)
 
-    // Diagnóstico visible: si precio=0, armamos un sufijo con los filtros aplicados y lo
-    // que encontramos en paqueteprecios para que el usuario vea el estado sin abrir DevTools.
+    const nombreMenuBase = menuPrincipal.descripcion || menuPrincipal.nombre || menuPrincipal.elemento || "Paquete"
+    const dias = calcularDiasEvento(formData.fechaInicial, formData.fechaFinal)
+    const numInvitados = Number(formData.numeroInvitados) || 0
+
+    // Modo tipopersona: un renglón padre con breakdown (Adultos + Jóvenes)
+    if (preciosPorTipo && Object.keys(preciosPorTipo).length > 0) {
+      const cAdultos = Number(formData.adultos) || 0
+      const cJovenes = Number(formData.ninos) || 0
+      const paqueteRow = crearPresupuestoPaqueteRow(nombreMenuBase, 0, preciosPorTipo, dias, numInvitados, cAdultos, cJovenes)
+      setPresupuestoItems(prev => {
+        const sinPaquete = prev.filter(p => p.tipo !== "Paquete")
+        return [...sinPaquete, paqueteRow]
+      })
+      return
+    }
+
+    // Modo flat: un renglón con el precio por persona × invitados
     let diagSuffix = ""
     if (precio === 0) {
       const f = dbg.filtros_fecha || {}
-      const disponibles = Array.isArray(dbg.paqueteprecios_rows_disponibles) ? dbg.paqueteprecios_rows_disponibles.length : -1
-      const err = dbg.paqueteprecios_error || dbg.paqueteprecios_diag_error
+      const err = dbg.paqueteprecios_error || dbg.platillo_error || dbg.paquete_error
+      const rows = Array.isArray(dbg.paqueteprecios_rows_all) ? dbg.paqueteprecios_rows_all : []
       if (err) {
         diagSuffix = ` [err: ${String(err).slice(0, 60)}]`
-      } else if (!dbg.platillo_platillobaseid) {
-        diagSuffix = ` [platillo sin platillobaseid]`
-      } else if (disponibles === 0) {
-        diagSuffix = ` [sin filas paqueteprecios p/ paqueteid+platobaseid]`
-      } else if (disponibles > 0) {
-        const filas = dbg.paqueteprecios_rows_disponibles as any[]
-        const resumen = filas.map((r: any) => `(year=${r.year}, esfin=${r.esfinsemana})`).join(" | ")
-        diagSuffix = ` [busco year=${f.year}, esfinsemana=${f.esFinSemana} | disponibles: ${resumen}]`
+      } else if (rows.length === 0) {
+        diagSuffix = ` [sin filas paqueteprecios p/ paqueteid]`
       } else {
-        diagSuffix = ` [no hay fila p/ year=${f.year}, esfinsemana=${f.esFinSemana}]`
+        const resumen = rows.slice(0, 4).map((r: any) => `(pb=${r.platobaseid ?? "∅"}, y=${r.year ?? "∅"}, fs=${r.esfinsemana ?? "∅"})`).join(" | ")
+        diagSuffix = ` [busco pb=${f.platilloBaseId ?? "∅"}, y=${f.year ?? "∅"}, fs=${f.esFinSemana ?? "∅"} | filas: ${resumen}]`
       }
     }
-    const nombreMenuBase = menuPrincipal.descripcion || menuPrincipal.nombre || menuPrincipal.elemento || "Paquete"
     const nombreMenu = nombreMenuBase + diagSuffix
-    const dias = calcularDiasEvento(formData.fechaInicial, formData.fechaFinal)
-    const numInvitados = Number(formData.numeroInvitados) || 0
     setPresupuestoItems(prev => {
       const sinPaquete = prev.filter(p => p.tipo !== "Paquete")
       return [...sinPaquete, crearPresupuestoItem(nombreMenu, "Paquete", precio, dias, 0, numInvitados)]
@@ -3214,13 +3324,15 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
           buscarPlatillosItems(elementoId, hotelId, "PLATO FUERTE"),
           buscarPlatillosItems(elementoId, hotelId, "POSTRES"),
         ])
-        setPlatillosTabla({
+        const platTablaNew: Record<PlatilloTipo, any[]> = {
           "ENTRADAS": rE.success && rE.data ? rE.data : [],
           "PLATO FUERTE": rP.success && rP.data ? rP.data : [],
           "POSTRES": rPo.success && rPo.data ? rPo.data : [],
-        })
+        }
+        setPlatillosTabla(platTablaNew)
         setPlatillosSeleccion({ "ENTRADAS": null, "PLATO FUERTE": null, "POSTRES": null })
-        setAlimentosTab("ENTRADAS")
+        const primerTipoConDatos = PLATILLOS_TIPOS.find(t => platTablaNew[t].length > 0) || "ENTRADAS"
+        setAlimentosTab(primerTipoConDatos)
         // Preservar el PDF del menú seleccionado en la pestaña de platillos
         setPreviewElementoId(elementoId)
         setPreviewElementoPdf(menuPdf)
@@ -3350,11 +3462,16 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
       buscarPlatillosItems(platilloId, hotelId, "PLATO FUERTE"),
       buscarPlatillosItems(platilloId, hotelId, "POSTRES"),
     ])
-    setPlatillosTabla({
+    const platTabla: Record<PlatilloTipo, any[]> = {
       "ENTRADAS": rE.success && rE.data ? rE.data : [],
       "PLATO FUERTE": rP.success && rP.data ? rP.data : [],
       "POSTRES": rPo.success && rPo.data ? rPo.data : [],
-    })
+    }
+    setPlatillosTabla(platTabla)
+    if ((platTabla[initialTipo] || []).length === 0) {
+      const first = PLATILLOS_TIPOS.find(t => (platTabla[t] || []).length > 0)
+      if (first) setPlatillosActiveTipo(first)
+    }
     setLoadingPlatillosModal(false)
   }
 
@@ -4173,11 +4290,25 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                     const ninos = Number(formData.ninos) || 0
                     const total = adultos + ninos
                     setFormData(prev => ({ ...prev, adultos: val, numeroInvitados: total.toString() }))
-                    setPresupuestoItems(prev => prev.map(p =>
-                      p.tipo === "Paquete" || p.tipo === "Complemento"
-                        ? { ...p, cantidad: total, total: (p.subtotal + (p.servicio || 0)) * total * (p.dias || 1) }
-                        : p
-                    ))
+                    setPresupuestoItems(prev => prev.map((p: any) => {
+                      if (p.tipo === "Paquete" && Array.isArray(p.breakdown) && p.breakdown.length > 0) {
+                        const breakdown = p.breakdown.map((b: any) =>
+                          b.concepto === "Adultos"
+                            ? { ...b, cantidad: adultos, total: b.precio * adultos * (p.dias || 1) }
+                            : b
+                        )
+                        const newTotal = breakdown.reduce((s: number, b: any) => s + (b.total || 0), 0)
+                        const newCant = breakdown.reduce((s: number, b: any) => s + (b.cantidad || 0), 0)
+                        const newSubtotal = newCant > 0 && (p.dias || 1) > 0 ? newTotal / (newCant * (p.dias || 1)) : 0
+                        const newPrecio = newSubtotal > 0 ? newSubtotal / 1.16 : 0
+                        const newIva = newPrecio * 0.16
+                        return { ...p, breakdown, cantidad: newCant, total: newTotal, subtotal: newSubtotal, precio: newPrecio, iva: newIva }
+                      }
+                      if (p.tipo === "Paquete" || p.tipo === "Complemento") {
+                        return { ...p, cantidad: total, total: (p.subtotal + (p.servicio || 0)) * total * (p.dias || 1) }
+                      }
+                      return p
+                    }))
                   }}
                   placeholder="0"
                   className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
@@ -4200,11 +4331,25 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                     const adultos = Number(formData.adultos) || 0
                     const total = adultos + ninos
                     setFormData(prev => ({ ...prev, ninos: val, numeroInvitados: total.toString() }))
-                    setPresupuestoItems(prev => prev.map(p =>
-                      p.tipo === "Paquete" || p.tipo === "Complemento"
-                        ? { ...p, cantidad: total, total: (p.subtotal + (p.servicio || 0)) * total * (p.dias || 1) }
-                        : p
-                    ))
+                    setPresupuestoItems(prev => prev.map((p: any) => {
+                      if (p.tipo === "Paquete" && Array.isArray(p.breakdown) && p.breakdown.length > 0) {
+                        const breakdown = p.breakdown.map((b: any) =>
+                          b.concepto === "Jóvenes"
+                            ? { ...b, cantidad: ninos, total: b.precio * ninos * (p.dias || 1) }
+                            : b
+                        )
+                        const newTotal = breakdown.reduce((s: number, b: any) => s + (b.total || 0), 0)
+                        const newCant = breakdown.reduce((s: number, b: any) => s + (b.cantidad || 0), 0)
+                        const newSubtotal = newCant > 0 && (p.dias || 1) > 0 ? newTotal / (newCant * (p.dias || 1)) : 0
+                        const newPrecio = newSubtotal > 0 ? newSubtotal / 1.16 : 0
+                        const newIva = newPrecio * 0.16
+                        return { ...p, breakdown, cantidad: newCant, total: newTotal, subtotal: newSubtotal, precio: newPrecio, iva: newIva }
+                      }
+                      if (p.tipo === "Paquete" || p.tipo === "Complemento") {
+                        return { ...p, cantidad: total, total: (p.subtotal + (p.servicio || 0)) * total * (p.dias || 1) }
+                      }
+                      return p
+                    }))
                   }}
                   placeholder="0"
                   className="border-blue-200 focus:ring-blue-500 h-8 text-sm"
@@ -5012,12 +5157,17 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                                   </div>
                                   {isExpanded && (
                                     <div className="px-3 py-2 space-y-3 bg-white">
-                                      {isCompleto ? (
-                                        ([
-                                          { label: "Entradas", tipoFiltro: "ENTRADAS" },
-                                          { label: "Plato Fuerte", tipoFiltro: "PLATO FUERTE" },
-                                          { label: "Postres", tipoFiltro: "POSTRES" },
-                                        ] as const).map(({ label, tipoFiltro }) => {
+                                      {isCompleto ? (() => {
+                                        const tiposCat = alimentosTiposDisponibles[alimId]
+                                        const baseTipos = [
+                                          { label: "Entradas", tipoFiltro: "ENTRADAS" as PlatilloTipo },
+                                          { label: "Plato Fuerte", tipoFiltro: "PLATO FUERTE" as PlatilloTipo },
+                                          { label: "Postres", tipoFiltro: "POSTRES" as PlatilloTipo },
+                                        ]
+                                        const tiposRender = tiposCat === undefined
+                                          ? baseTipos
+                                          : baseTipos.filter(t => tiposCat.includes(t.tipoFiltro))
+                                        return tiposRender.map(({ label, tipoFiltro }) => {
                                           const platillosFiltrados = misPlatillos.filter((item: any) => (item.tipo || "").toUpperCase() === tipoFiltro)
                                           return (
                                             <div key={tipoFiltro} className="border-l-2 border-[#1a3d2e]/15 pl-3">
@@ -5028,10 +5178,13 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                                                     <button
                                                       type="button"
                                                       onClick={() => handleAbrirPlatillosModal(tipoFiltro as PlatilloTipo, alimId)}
-                                                      className={`text-sm text-left underline decoration-dotted cursor-pointer break-words ${item.destacado ? "text-[#b87333] hover:text-[#b87333]/70" : "text-[#1a3d2e] hover:text-[#1a3d2e]/70"}`}
+                                                      className={`text-left cursor-pointer break-words ${item.destacado ? "text-[#b87333] hover:text-[#b87333]/70" : "text-[#1a3d2e] hover:text-[#1a3d2e]/70"}`}
                                                       title={`Editar ${label.toLowerCase()}`}
                                                     >
-                                                      {item.nombre || item.descripcion || item.elemento || ""}
+                                                      <span className="text-sm underline decoration-dotted">{item.nombre || item.descripcion || item.elemento || ""}</span>
+                                                      {item.nombre && item.descripcion && item.descripcion !== item.nombre && (
+                                                        <span className="block text-xs text-gray-500 mt-0.5 no-underline">{item.descripcion}</span>
+                                                      )}
                                                     </button>
                                                     <button
                                                       type="button"
@@ -5067,7 +5220,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                                             </div>
                                           )
                                         })
-                                      ) : (
+                                      })() : (
                                         <div className="border-l-2 border-[#1a3d2e]/15 pl-3">
                                           <h4 className="text-[11px] font-bold tracking-widest text-[#1a3d2e] uppercase mb-1">Platillos</h4>
                                           <div className="space-y-1">
@@ -5076,10 +5229,13 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                                                 <button
                                                   type="button"
                                                   onClick={() => handleAbrirAgregar("platillos", null, alimId)}
-                                                  className={`text-sm text-left underline decoration-dotted cursor-pointer break-words ${item.destacado ? "text-[#b87333] hover:text-[#b87333]/70" : "text-[#1a3d2e] hover:text-[#1a3d2e]/70"}`}
+                                                  className={`text-left cursor-pointer break-words ${item.destacado ? "text-[#b87333] hover:text-[#b87333]/70" : "text-[#1a3d2e] hover:text-[#1a3d2e]/70"}`}
                                                   title="Editar platillos"
                                                 >
-                                                  {item.nombre || item.descripcion || item.elemento || ""}
+                                                  <span className="text-sm underline decoration-dotted">{item.nombre || item.descripcion || item.elemento || ""}</span>
+                                                  {item.nombre && item.descripcion && item.descripcion !== item.nombre && (
+                                                    <span className="block text-xs text-gray-500 mt-0.5 no-underline">{item.descripcion}</span>
+                                                  )}
                                                 </button>
                                                 <button
                                                   type="button"
@@ -5929,8 +6085,10 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                       .reduce((s, p) => s + p.total, 0)
                     return presupuestoItems.map((item, index) => {
                       const esCortesiaSalon = item.tipo === "Salón" && item.total > 0 && otrosTotal >= item.total
+                      const breakdown = Array.isArray((item as any).breakdown) ? ((item as any).breakdown as any[]) : []
                       return (
-                    <tr key={index} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                    <React.Fragment key={index}>
+                    <tr className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                       <td className="px-3 py-3 text-gray-500">{index + 1}</td>
                       <td className="px-3 py-3 text-gray-900 font-medium">{item.concepto}</td>
                       <td className="px-3 py-3">
@@ -6011,6 +6169,22 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                         )}
                       </td>
                     </tr>
+                    {breakdown.map((sub: any, sIdx: number) => (
+                      <tr key={`sub-${index}-${sIdx}`} className="bg-orange-50/40">
+                        <td></td>
+                        <td className="pl-10 py-2 text-xs italic text-gray-600">— {sub.concepto}</td>
+                        <td></td>
+                        <td className="px-3 py-2 text-right text-xs text-gray-600">{sub.precio > 0 ? `$${Number(sub.precio).toLocaleString("es-MX", { minimumFractionDigits: 2 })}` : "-"}</td>
+                        <td></td>
+                        <td></td>
+                        <td></td>
+                        <td></td>
+                        <td className="px-3 py-2 text-center text-xs text-gray-600">{sub.cantidad || "-"}</td>
+                        <td></td>
+                        <td className="px-3 py-2 text-right text-xs text-gray-600 font-medium">{sub.total > 0 ? `$${Number(sub.total).toLocaleString("es-MX", { minimumFractionDigits: 2 })}` : "-"}</td>
+                      </tr>
+                    ))}
+                    </React.Fragment>
                       )
                     })
                   })()}
@@ -6685,7 +6859,12 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
           const it = (platillosTabla[tipo] || []).find((el: any) => Number(el.id) === id)
           return it?.nombre || it?.descripcion || null
         }
-        const totalSel = PLATILLOS_TIPOS.reduce((s, t) => s + (platillosSeleccion[t] ? 1 : 0), 0)
+        const tiposFiltrados: PlatilloTipo[] = PLATILLOS_TIPOS.filter(t => (platillosTabla[t] || []).length > 0)
+        const tiposVisibles: PlatilloTipo[] = loadingPlatillosModal
+          ? ([...PLATILLOS_TIPOS] as PlatilloTipo[])
+          : tiposFiltrados
+        const totalSel = tiposVisibles.reduce((s, t) => s + (platillosSeleccion[t] ? 1 : 0), 0)
+        const completo = totalSel === tiposVisibles.length && tiposVisibles.length > 0
         return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl overflow-hidden max-h-[92vh] flex flex-col">
@@ -6698,11 +6877,13 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                     <span className="ml-2 text-amber-300 font-extrabold">— {selectedAlimentoParentNombre}</span>
                   )}
                 </h2>
-                <p className="text-xs text-white/80 mt-0.5">Elige una opción por cada sección (entrada, plato fuerte, postre)</p>
+                <p className="text-xs text-white/80 mt-0.5">
+                  Elige una opción por cada sección ({tiposVisibles.map(t => tipoLabel(t).toLowerCase()).join(", ")})
+                </p>
               </div>
               <div className="flex items-center gap-3">
                 <span className="px-3 py-1 bg-white/20 rounded-full text-sm font-medium">
-                  {totalSel} / {PLATILLOS_TIPOS.length} seleccionados
+                  {totalSel} / {tiposVisibles.length} seleccionados
                 </span>
                 <button type="button" onClick={cerrarPlat} className="text-white/80 hover:text-white hover:bg-white/10 rounded-full p-1.5 transition-colors">
                   <X className="w-5 h-5" />
@@ -6712,7 +6893,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
 
             {/* Tabs de tipos */}
             <div className="flex items-center gap-1 border-b border-slate-200 px-4 bg-gray-50">
-              {PLATILLOS_TIPOS.map((t) => {
+              {tiposVisibles.map((t) => {
                 const hasSel = !!platillosSeleccion[t]
                 const isActive = t === platillosActiveTipo
                 return (
@@ -6798,13 +6979,13 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                           onDoubleClick={async () => {
                             const t = platillosActiveTipo
                             setPlatillosSeleccion(prev => ({ ...prev, [t]: id }))
-                            const idx = PLATILLOS_TIPOS.indexOf(t)
-                            const isLast = idx === PLATILLOS_TIPOS.length - 1
+                            const idx = tiposVisibles.indexOf(t)
+                            const isLast = idx === tiposVisibles.length - 1
                             if (isLast) {
                               const override = { ...platillosSeleccion, [t]: id } as Record<PlatilloTipo, number | null>
                               await handleGuardarPlatillos(override)
                             } else {
-                              setPlatillosActiveTipo(PLATILLOS_TIPOS[idx + 1])
+                              setPlatillosActiveTipo(tiposVisibles[idx + 1])
                               setPlatillosSearch("")
                               setPlatillosPreviewId(null)
                               setPlatillosPreviewPdf("")
@@ -6896,7 +7077,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                   <p className="text-xs font-bold tracking-widest text-[#1a3d2e] uppercase">Tus selecciones</p>
                 </div>
                 <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
-                  {PLATILLOS_TIPOS.map((t) => {
+                  {tiposVisibles.map((t) => {
                     const selId = platillosSeleccion[t]
                     const nombre = nombreDePlatilloId(t, selId)
                     return (
@@ -6924,10 +7105,10 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
             {/* Footer */}
             <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-gray-200 bg-white">
               <div className="text-sm text-gray-600">
-                {totalSel === 3 ? (
+                {completo ? (
                   <span className="text-emerald-700 font-medium">✓ Menú completo</span>
                 ) : (
-                  <span>Faltan {PLATILLOS_TIPOS.length - totalSel} por elegir</span>
+                  <span>Faltan {Math.max(0, tiposVisibles.length - totalSel)} por elegir</span>
                 )}
               </div>
               <div className="flex gap-3">
@@ -6995,14 +7176,18 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
         const isLugar = agregarTipo === "lugar"
         const isAlimentosFlow = agregarTipo === "alimentos"
         const isMenuCompleto = (menuTipoActual || "").toLowerCase() === "completo"
+        const alimentoYaSeleccionado = !!elementosPaquete.find((el: any) => normalizarSeccion(el.tipoelemento || el.tipo || "") === "alimentos")
+        const platilloTiposConDatos: PlatilloTipo[] = PLATILLOS_TIPOS.filter(t => (platillosTabla[t] || []).length > 0)
+        const platilloTiposModalB: PlatilloTipo[] = (alimentoYaSeleccionado && platilloTiposConDatos.length > 0)
+          ? platilloTiposConDatos
+          : ([...PLATILLOS_TIPOS] as PlatilloTipo[])
         const alimentosTabs: string[] = isAlimentosFlow
           ? (menuTipoActual == null
               ? ["alimento"]
               : isMenuCompleto
-                ? ["alimento", "ENTRADAS", "PLATO FUERTE", "POSTRES"]
+                ? ["alimento", ...platilloTiposModalB]
                 : ["alimento", "platillos"])
           : []
-        const alimentoYaSeleccionado = !!elementosPaquete.find((el: any) => normalizarSeccion(el.tipoelemento || el.tipo || "") === "alimentos")
         // Tab activo dentro del flujo Alimentos (ignorado si no es alimentos)
         const activeTab = isAlimentosFlow ? alimentosTab : null
         const isPlatilloTipoTab = activeTab === "ENTRADAS" || activeTab === "PLATO FUERTE" || activeTab === "POSTRES"
@@ -7039,7 +7224,12 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-[#1a3d2e] to-[#2a5a44] text-white">
               <div>
-                <h2 className="text-lg font-bold">{isLugar ? "Modificar Lugar" : `Agregar ${tituloTipo}`}</h2>
+                <h2 className="text-lg font-bold">
+                  {isLugar ? "Modificar Lugar" : `Agregar ${tituloTipo}`}
+                  {agregarTipo === "platillos" && selectedAlimentoParentNombre && (
+                    <span className="ml-2 text-amber-300 font-extrabold">— {selectedAlimentoParentNombre}</span>
+                  )}
+                </h2>
                 <p className="text-xs text-white/80 mt-0.5">
                   {isLugar
                     ? "Selecciona el lugar para esta reservación"

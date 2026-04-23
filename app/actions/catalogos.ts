@@ -534,18 +534,18 @@ export async function asignarPaqueteAReservacion(reservacionId: number, paqueteI
 
 // Función: obtenerPrecioPaquetePorPlatillo: determina el precio del paquete.
 // 1) Si paquetes.precioporpersona > 0, lo usa.
-// 2) Si no, busca platillobaseid del platillo seleccionado y consulta paqueteprecios
-//    filtrando por:
-//      - paqueteid
-//      - platobaseid (platillo clave: Plato Fuerte en Completos, o primero en Individuales)
-//      - year (derivado del año de fechaInicio del evento)
-//      - esfinsemana (true si el día de fechaInicio es Viernes o Sábado, false si es Domingo–Jueves)
-// Los filtros year/esfinsemana solo se aplican si se recibe fechaInicio (retro-compatible con callers antiguos).
-// Retorna info de debug para mostrar en el cliente si falla.
+// 2) Si no, busca la fila más específica en paqueteprecios usando null-como-wildcard:
+//    - Trae TODAS las filas del paqueteid.
+//    - Una fila aplica si cada columna no-nula coincide con el request:
+//        * platobaseid nulo → aplica a cualquier platillo
+//        * year nulo → aplica a cualquier año
+//        * esfinsemana nulo → aplica a cualquier día
+//    - Elige la fila con más columnas no-nulas (más específica).
+//    Esto soporta paquetes con precio por (platobase), (year), (year+esfin),
+//    (platobase+year+esfin), etc. sin hardcodear el modo.
 export async function obtenerPrecioPaquetePorPlatillo(paqueteId: number, platilloId: number, fechaInicio?: string) {
   const debug: any = { paqueteId, platilloId, fechaInicio }
   try {
-    // Paso 1: precio directo del paquete
     const { data: paq, error: errPaq } = await supabase
       .from("paquetes")
       .select("precioporpersona")
@@ -556,18 +556,18 @@ export async function obtenerPrecioPaquetePorPlatillo(paqueteId: number, platill
     const precioDirecto = Number(paq?.precioporpersona ?? 0)
     if (precioDirecto > 0) return { success: true, precio: precioDirecto, debug }
 
-    // Paso 2: obtener platillobaseid del platillo seleccionado
-    const { data: platillo, error: errPlat } = await supabase
-      .from("platillos")
-      .select("platillobaseid")
-      .eq("id", platilloId)
-      .maybeSingle()
-    debug.platillo_platillobaseid = platillo?.platillobaseid ?? null
-    if (errPlat) debug.platillo_error = errPlat.message
-    const platilloBaseId = platillo?.platillobaseid
-    if (!platilloBaseId) return { success: true, precio: 0, debug }
+    let platilloBaseId: number | null = null
+    if (platilloId && platilloId > 0) {
+      const { data: platillo, error: errPlat } = await supabase
+        .from("platillos")
+        .select("platillobaseid")
+        .eq("id", platilloId)
+        .maybeSingle()
+      debug.platillo_platillobaseid = platillo?.platillobaseid ?? null
+      if (errPlat) debug.platillo_error = errPlat.message
+      platilloBaseId = platillo?.platillobaseid ?? null
+    }
 
-    // Paso 3: derivar year + esfinsemana desde fechaInicio (si viene).
     // Día de semana: 0=Dom, 1=Lun, 2=Mar, 3=Mié, 4=Jue, 5=Vie, 6=Sáb.
     // Fin de semana = Viernes (5) o Sábado (6); entre semana = Domingo (0) a Jueves (4).
     let year: number | null = null
@@ -581,36 +581,52 @@ export async function obtenerPrecioPaquetePorPlatillo(paqueteId: number, platill
         esFinSemana = dow === 5 || dow === 6
       }
     }
-    debug.filtros_fecha = { year, esFinSemana }
+    debug.filtros_fecha = { year, esFinSemana, platilloBaseId }
 
-    // Paso 4: consultar paqueteprecios con todos los filtros aplicables
-    let query = supabase
+    const { data: allRows, error: errPp } = await supabase
       .from("paqueteprecios")
-      .select("precioporpersona, year, esfinsemana")
+      .select("precioporpersona, year, esfinsemana, platobaseid, tipopersona")
       .eq("paqueteid", paqueteId)
-      .eq("platobaseid", platilloBaseId)
-    if (year != null) query = query.eq("year", year)
-    if (esFinSemana != null) query = query.eq("esfinsemana", esFinSemana)
-
-    const { data: ppRows, error: errPp } = await query.limit(1)
-    debug.paqueteprecios_rows_filtered = ppRows
+    debug.paqueteprecios_rows_all = allRows
     if (errPp) debug.paqueteprecios_error = errPp.message
 
-    // Si los filtros no devolvieron fila, diagnosticar: traer todas las filas de paqueteprecios
-    // para ese paqueteid + platobaseid (sin filtros de fecha) para ver qué combinaciones existen.
-    if ((!ppRows || ppRows.length === 0) && (year != null || esFinSemana != null)) {
-      const { data: allRows, error: errAll } = await supabase
-        .from("paqueteprecios")
-        .select("precioporpersona, year, esfinsemana")
-        .eq("paqueteid", paqueteId)
-        .eq("platobaseid", platilloBaseId)
-        .limit(10)
-      debug.paqueteprecios_rows_disponibles = allRows
-      if (errAll) debug.paqueteprecios_diag_error = errAll.message
+    type PPRow = { precioporpersona: any; year: number | null; esfinsemana: boolean | null; platobaseid: number | null; tipopersona: string | null }
+    const rows = (allRows || []) as PPRow[]
+
+    const normTp = (tp: string | null | undefined): string => {
+      const s = String(tp ?? "").trim()
+      if (!s || s === "N/A" || s === "0") return ""
+      return s
+    }
+    const matchFn = (r: PPRow) => {
+      if (r.platobaseid != null && r.platobaseid !== platilloBaseId) return false
+      if (r.year != null && r.year !== year) return false
+      if (r.esfinsemana != null && r.esfinsemana !== esFinSemana) return false
+      return true
+    }
+    const especificidad = (r: PPRow) =>
+      (r.platobaseid != null ? 1 : 0) + (r.year != null ? 1 : 0) + (r.esfinsemana != null ? 1 : 0)
+
+    const tipopersonasSet = new Set(rows.map((r) => normTp(r.tipopersona)).filter(Boolean))
+    if (tipopersonasSet.size > 0) {
+      const precios: Record<string, number> = {}
+      const matchedRows: Record<string, PPRow | null> = {}
+      for (const tp of tipopersonasSet) {
+        const subset = rows.filter((r) => normTp(r.tipopersona) === tp).filter(matchFn)
+        subset.sort((a, b) => especificidad(b) - especificidad(a))
+        const best = subset[0] || null
+        if (best) precios[tp] = Number(best.precioporpersona ?? 0)
+        matchedRows[tp] = best
+      }
+      debug.paqueteprecios_match_por_tipopersona = matchedRows
+      return { success: true, precio: 0, precios, debug }
     }
 
-    const pp = (ppRows && ppRows.length > 0) ? ppRows[0] : null
-    return { success: true, precio: Number(pp?.precioporpersona ?? 0), debug }
+    const matches = rows.filter(matchFn)
+    matches.sort((a, b) => especificidad(b) - especificidad(a))
+    const best = matches[0] || null
+    debug.paqueteprecios_match = best
+    return { success: true, precio: Number(best?.precioporpersona ?? 0), debug }
   } catch (error: any) {
     debug.exception = error?.message || String(error)
     return { success: false, precio: 0, debug }
