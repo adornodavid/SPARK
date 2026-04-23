@@ -21,9 +21,9 @@ export default async function ProtectedLayout({
     <QuotationsProvider>
       <div className="flex min-h-svh w-full">
         <AdminSidebar userRole={session.Rol} />
-        <div className="ml-[100px] flex flex-1 flex-col">
+        <div className="ml-[100px] flex flex-1 flex-col min-w-0">
           <AdminHeader user={session} />
-          <main className="flex-1 overflow-y-auto bg-background p-6">{children}</main>
+          <main className="flex-1 min-w-0 overflow-y-auto bg-background p-6">{children}</main>
         </div>
       </div>
     </QuotationsProvider>

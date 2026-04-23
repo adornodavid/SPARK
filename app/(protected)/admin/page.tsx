@@ -6,7 +6,15 @@ import { Users, Lock, Settings, CloudDownload } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { obtenerSesion } from "@/app/actions/session"
 
-const modules = [
+interface ModuleItem {
+  title: string
+  description: string
+  icon: typeof Users
+  href: string
+  soloSuperAdmin?: boolean
+}
+
+const modules: ModuleItem[] = [
   {
     title: "Usuarios",
     description: "Gestión de usuarios en el sistema",
@@ -30,18 +38,21 @@ const modules = [
     description: "Extracción de datos desde Pipedrive CRM",
     icon: CloudDownload,
     href: "/admin/extraccion-pipedrive",
+    soloSuperAdmin: true,
   },
   {
     title: "Extracción MeetingHub",
     description: "Carga masiva de datos desde MeetingHub vía Excel",
     icon: CloudDownload,
     href: "/admin/extraccion-meetinghub",
+    soloSuperAdmin: true,
   },
 ]
 
 export default function AdminPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
+  const [sesionRolId, setSesionRolId] = useState<number>(0)
 
   useEffect(() => {
     async function checkSession() {
@@ -53,16 +64,20 @@ export default function AdminPage() {
       }
 
       const allowedRoles = [1, 2, 3, 4]
-      if (!allowedRoles.includes(Number(sessionData.RolId))) {
+      const rolId = Number(sessionData.RolId)
+      if (!allowedRoles.includes(rolId)) {
         router.push("/dashboard")
         return
       }
 
+      setSesionRolId(rolId)
       setLoading(false)
     }
 
     checkSession()
   }, [router])
+
+  const modulosVisibles = modules.filter((m) => !m.soloSuperAdmin || sesionRolId === 1)
 
   if (loading) {
     return (
@@ -83,7 +98,7 @@ export default function AdminPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {modules.map((mod) => (
+        {modulosVisibles.map((mod) => (
           <Card
             key={mod.href}
             onClick={() => router.push(mod.href)}

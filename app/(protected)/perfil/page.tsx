@@ -1,13 +1,13 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useSearchParams, useRouter } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Checkbox } from "@/components/ui/checkbox"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { ArrowLeft, KeyRound, Lock, Save, Hotel, User, CheckCircle2, XCircle } from "lucide-react"
 import {
   obtenerUsuarioDetalle,
@@ -15,12 +15,10 @@ import {
   actualizarAccesoUsuario,
   actualizarPasswordUsuario,
   obtenerUsuariosXHotel,
-  agregarUsuarioXHotel,
-  eliminarUsuarioXHotel,
   validarUsuarioUnico,
+  verificarPasswordActual,
 } from "@/app/actions/usuarios"
 import { obtenerRoles } from "@/app/actions/configuraciones"
-import { listaHotelesParaAsignacion } from "@/app/actions/hoteles"
 import { obtenerSesion } from "@/app/actions/session"
 import { toast } from "sonner"
 
@@ -54,24 +52,17 @@ interface UsuarioXHotel {
   acronimo: string
   hotel: string
   activo: boolean
+  hotelActivo: boolean
 }
 
-interface HotelAsignable {
-  value: string
-  text: string
-  activo: boolean
-}
-
-export default function EditarUsuarioPage() {
-  const searchParams = useSearchParams()
+export default function PerfilPage() {
   const router = useRouter()
-  const id = Number(searchParams.get("id"))
 
   const [loading, setLoading] = useState(true)
+  const [id, setId] = useState<number>(0)
   const [usuario, setUsuario] = useState<UsuarioDetalle | null>(null)
   const [roles, setRoles] = useState<Rol[]>([])
   const [sesionRolId, setSesionRolId] = useState<number>(0)
-  const [sesionUsuarioId, setSesionUsuarioId] = useState<number>(0)
 
   // Info básica form
   const [inputNombre, setInputNombre] = useState("")
@@ -93,43 +84,38 @@ export default function EditarUsuarioPage() {
   const [validandoEmail, setValidandoEmail] = useState(false)
 
   // Password form
+  const [passwordActual, setPasswordActual] = useState("")
+  const [passwordActualValidada, setPasswordActualValidada] = useState<null | boolean>(null)
+  const [validandoPasswordActual, setValidandoPasswordActual] = useState(false)
   const [password1, setPassword1] = useState("")
   const [password2, setPassword2] = useState("")
   const [savingPassword, setSavingPassword] = useState(false)
 
-  // Hoteles
+  // Hoteles (solo lectura)
   const [hotelesUsuario, setHotelesUsuario] = useState<UsuarioXHotel[]>([])
-  const [hotelesDisponibles, setHotelesDisponibles] = useState<HotelAsignable[]>([])
-  const [hotelesSeleccionadosLocal, setHotelesSeleccionadosLocal] = useState<Set<number>>(new Set())
-  const [savingHoteles, setSavingHoteles] = useState(false)
-
-  async function loadHoteles() {
-    const result = await obtenerUsuariosXHotel(id)
-    if (result.success && result.data) {
-      setHotelesUsuario(result.data)
-      setHotelesSeleccionadosLocal(new Set(result.data.map((h) => h.hotelid)))
-    }
-  }
 
   useEffect(() => {
-    if (!id || isNaN(id)) {
-      router.push("/admin/usuarios")
-      return
-    }
-
     async function loadData() {
-      const [resultUsuario, resultRoles, resultHoteles, resultDdlHoteles, sesion] = await Promise.all([
-        obtenerUsuarioDetalle(id),
-        obtenerRoles(),
-        obtenerUsuariosXHotel(id),
-        listaHotelesParaAsignacion(),
-        obtenerSesion(),
-      ])
-
-      if (sesion) {
-        setSesionRolId(Number(sesion.RolId) || 0)
-        setSesionUsuarioId(Number(sesion.UsuarioId) || 0)
+      const sesion = await obtenerSesion()
+      if (!sesion || !sesion.UsuarioId) {
+        router.push("/login")
+        return
       }
+
+      const sesionUserId = Number(sesion.UsuarioId)
+      if (!sesionUserId || isNaN(sesionUserId)) {
+        router.push("/login")
+        return
+      }
+
+      setId(sesionUserId)
+      setSesionRolId(Number(sesion.RolId) || 0)
+
+      const [resultUsuario, resultRoles, resultHoteles] = await Promise.all([
+        obtenerUsuarioDetalle(sesionUserId),
+        obtenerRoles(),
+        obtenerUsuariosXHotel(sesionUserId),
+      ])
 
       if (resultUsuario.success && resultUsuario.data) {
         setUsuario(resultUsuario.data)
@@ -141,18 +127,17 @@ export default function EditarUsuarioPage() {
         setInputEmail(resultUsuario.data.email || "")
         setInputRolId(resultUsuario.data.rolid?.toString() || "")
 
-        // Auto-validar usuario/email cargados (excluyendo al propio usuario editado)
+        // Auto-validar valores cargados (excluyendo al propio usuario)
         if (resultUsuario.data.usuario) {
-          const r = await validarUsuarioUnico("usuario", resultUsuario.data.usuario, id)
+          const r = await validarUsuarioUnico("usuario", resultUsuario.data.usuario, sesionUserId)
           if (r.success) setUsuarioValidado(!r.existe)
         }
         if (resultUsuario.data.email) {
-          const r = await validarUsuarioUnico("email", resultUsuario.data.email, id)
+          const r = await validarUsuarioUnico("email", resultUsuario.data.email, sesionUserId)
           if (r.success) setEmailValidado(!r.existe)
         }
       } else {
-        toast.error(resultUsuario.error || "Error al cargar usuario")
-        router.push("/admin/usuarios")
+        toast.error(resultUsuario.error || "Error al cargar el perfil")
       }
 
       if (resultRoles.success && resultRoles.data) {
@@ -161,22 +146,63 @@ export default function EditarUsuarioPage() {
 
       if (resultHoteles.success && resultHoteles.data) {
         setHotelesUsuario(resultHoteles.data)
-        setHotelesSeleccionadosLocal(new Set(resultHoteles.data.map((h) => h.hotelid)))
-      }
-
-      if (resultDdlHoteles.success && resultDdlHoteles.data) {
-        setHotelesDisponibles(resultDdlHoteles.data)
       }
 
       setLoading(false)
     }
 
     loadData()
-  }, [id, router])
+  }, [router])
 
   // Reset validación cuando cambia el input
   useEffect(() => { setUsuarioValidado(null) }, [inputUsuario])
   useEffect(() => { setEmailValidado(null) }, [inputEmail])
+  useEffect(() => { setPasswordActualValidada(null) }, [passwordActual])
+
+  async function handleValidarUsuario() {
+    if (inputUsuario.trim().length < 3) {
+      toast.error("El usuario debe tener al menos 3 caracteres")
+      return
+    }
+    setValidandoUsuario(true)
+    const result = await validarUsuarioUnico("usuario", inputUsuario.trim(), id)
+    if (result.success) {
+      setUsuarioValidado(!result.existe)
+    } else {
+      toast.error(result.error)
+    }
+    setValidandoUsuario(false)
+  }
+
+  async function handleValidarEmail() {
+    if (inputEmail.trim().length < 3) {
+      toast.error("El email debe tener al menos 3 caracteres")
+      return
+    }
+    setValidandoEmail(true)
+    const result = await validarUsuarioUnico("email", inputEmail.trim(), id)
+    if (result.success) {
+      setEmailValidado(!result.existe)
+    } else {
+      toast.error(result.error)
+    }
+    setValidandoEmail(false)
+  }
+
+  async function handleValidarPasswordActual() {
+    if (!passwordActual) {
+      toast.error("Ingresa tu contraseña actual")
+      return
+    }
+    setValidandoPasswordActual(true)
+    const result = await verificarPasswordActual(id, passwordActual)
+    if (result.success) {
+      setPasswordActualValidada(result.coincide)
+    } else {
+      toast.error(result.error)
+    }
+    setValidandoPasswordActual(false)
+  }
 
   async function handleActualizarInfo() {
     if (!inputNombre.trim()) {
@@ -221,6 +247,10 @@ export default function EditarUsuarioPage() {
       toast.error("Las contraseñas no coinciden")
       return
     }
+    if (passwordActualValidada !== true) {
+      toast.error("Debes validar tu contraseña actual")
+      return
+    }
 
     setSavingPassword(true)
     const result = await actualizarPasswordUsuario(id, password1)
@@ -229,100 +259,12 @@ export default function EditarUsuarioPage() {
       toast.success("Contraseña actualizada correctamente")
       setPassword1("")
       setPassword2("")
+      setPasswordActual("")
+      setPasswordActualValidada(null)
     } else {
       toast.error(result.error)
     }
     setSavingPassword(false)
-  }
-
-  function handleToggleHotelLocal(hotelIdStr: string) {
-    const hotelIdNum = Number(hotelIdStr)
-    setHotelesSeleccionadosLocal((prev) => {
-      const next = new Set(prev)
-      if (next.has(hotelIdNum)) next.delete(hotelIdNum)
-      else next.add(hotelIdNum)
-      return next
-    })
-  }
-
-  function handleSeleccionarTodos() {
-    setHotelesSeleccionadosLocal(new Set(hotelesDisponibles.map((h) => Number(h.value))))
-  }
-
-  function handleDeseleccionarTodos() {
-    setHotelesSeleccionadosLocal(new Set())
-  }
-
-  async function handleActualizarHoteles() {
-    setSavingHoteles(true)
-    const asignadosActuales = new Map(hotelesUsuario.map((h) => [h.hotelid, h]))
-    const seleccionados = hotelesSeleccionadosLocal
-
-    // Insertar: los seleccionados que no están en la tabla
-    const paraInsertar: number[] = []
-    seleccionados.forEach((hotelId) => {
-      if (!asignadosActuales.has(hotelId)) paraInsertar.push(hotelId)
-    })
-
-    // Borrar: los que están en la tabla pero ya no están seleccionados
-    const paraBorrar: { idrec: number; hotel: string }[] = []
-    asignadosActuales.forEach((row, hotelId) => {
-      if (!seleccionados.has(hotelId)) paraBorrar.push({ idrec: row.idrec, hotel: row.hotel })
-    })
-
-    let errores = 0
-    for (const hotelId of paraInsertar) {
-      const r = await agregarUsuarioXHotel(id, hotelId)
-      if (!r.success) {
-        errores++
-        toast.error(`Al agregar hotel ${hotelId}: ${r.error}`)
-      }
-    }
-    for (const item of paraBorrar) {
-      const r = await eliminarUsuarioXHotel(item.idrec)
-      if (!r.success) {
-        errores++
-        toast.error(`Al quitar ${item.hotel}: ${r.error}`)
-      }
-    }
-
-    await loadHoteles()
-    if (errores === 0) {
-      toast.success(
-        `Hoteles actualizados correctamente (${paraInsertar.length} agregado${paraInsertar.length === 1 ? "" : "s"}, ${paraBorrar.length} removido${paraBorrar.length === 1 ? "" : "s"})`
-      )
-    }
-    setSavingHoteles(false)
-  }
-
-  async function handleValidarUsuario() {
-    if (inputUsuario.trim().length < 3) {
-      toast.error("El usuario debe tener al menos 3 caracteres")
-      return
-    }
-    setValidandoUsuario(true)
-    const result = await validarUsuarioUnico("usuario", inputUsuario.trim(), id)
-    if (result.success) {
-      setUsuarioValidado(!result.existe)
-    } else {
-      toast.error(result.error)
-    }
-    setValidandoUsuario(false)
-  }
-
-  async function handleValidarEmail() {
-    if (inputEmail.trim().length < 3) {
-      toast.error("El email debe tener al menos 3 caracteres")
-      return
-    }
-    setValidandoEmail(true)
-    const result = await validarUsuarioUnico("email", inputEmail.trim(), id)
-    if (result.success) {
-      setEmailValidado(!result.existe)
-    } else {
-      toast.error(result.error)
-    }
-    setValidandoEmail(false)
   }
 
   if (loading) {
@@ -330,7 +272,7 @@ export default function EditarUsuarioPage() {
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-          <p className="mt-4 text-muted-foreground">Cargando usuario...</p>
+          <p className="mt-4 text-muted-foreground">Cargando perfil...</p>
         </div>
       </div>
     )
@@ -338,48 +280,34 @@ export default function EditarUsuarioPage() {
 
   if (!usuario) return null
 
-  // Permisos por rol
+  // Permisos por rol (en perfil propio el usuario puede cambiar su password siempre)
   const esRolAdmin = sesionRolId === 1 || sesionRolId === 2
-  const esUsuarioPropio = sesionUsuarioId === id
   const puedeEditarAcceso = esRolAdmin
-  const puedeEditarPassword = esRolAdmin || esUsuarioPropio
+  const puedeEditarPassword = true
 
-  // Si el rol del usuario editado coincide con el de la sesión, se muestra esa única
-  // opción y el Select queda deshabilitado (no puedes cambiar a alguien de tu mismo rango).
-  const mismoRolQueSesion = sesionRolId > 0 && Number(inputRolId) === sesionRolId
-
-  // Roles que puede asignar el usuario que inició sesión
-  // 1=SuperAdmin: todos | 2=Administrador: [3,4] | 3=Gerente: [4] | 4=Asesor: [4]
-  const rolesPermitidos = (() => {
-    if (mismoRolQueSesion) return roles.filter((r) => r.id === sesionRolId)
-    if (sesionRolId === 1) return roles
-    if (sesionRolId === 2) return roles.filter((r) => r.id === 3 || r.id === 4)
-    return roles.filter((r) => r.id === 4)
-  })()
-
-  const rolSelectDisabled = !puedeEditarAcceso || mismoRolQueSesion
-
-  // Habilitar botón "Actualizar" de Acceso solo con validaciones OK
+  // Habilitado solo si ambas validaciones están en "disponible" (o el input quedó vacío)
   const usuarioOk = inputUsuario.trim().length === 0 || usuarioValidado === true
   const emailOk = inputEmail.trim().length === 0 || emailValidado === true
   const puedeActualizarAcceso = puedeEditarAcceso && usuarioOk && emailOk
 
-  // Diff local vs servidor para habilitar botón "Actualizar" de Hoteles
-  const asignadosServidorSet = new Set(hotelesUsuario.map((h) => h.hotelid))
-  const hayCambiosHoteles =
-    asignadosServidorSet.size !== hotelesSeleccionadosLocal.size ||
-    [...hotelesSeleccionadosLocal].some((hId) => !asignadosServidorSet.has(hId))
+  const passwordsCoinciden = password1 === password2
+  const passwordIngresada = password1.trim().length > 0 && password2.trim().length > 0
+  const puedeActualizarPassword =
+    puedeEditarPassword &&
+    passwordActualValidada === true &&
+    passwordIngresada &&
+    passwordsCoinciden
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Button variant="outline" size="icon" onClick={() => router.push(`/admin/usuarios/ver?id=${id}`)}>
+        <Button variant="outline" size="icon" onClick={() => router.push("/dashboard")}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div>
-          <h1 className="text-3xl font-bold">Editar: {usuario.nombrecompleto}</h1>
-          <p className="text-muted-foreground mt-1">Modificar datos del usuario</p>
+          <h1 className="text-3xl font-bold">Mi Perfil</h1>
+          <p className="text-muted-foreground mt-1">{usuario.nombrecompleto}</p>
         </div>
       </div>
 
@@ -520,12 +448,12 @@ export default function EditarUsuarioPage() {
 
             <div className="space-y-2">
               <Label htmlFor="rol">Rol</Label>
-              <Select value={inputRolId} onValueChange={setInputRolId} disabled={rolSelectDisabled}>
+              <Select value={inputRolId} onValueChange={setInputRolId} disabled>
                 <SelectTrigger id="rol">
                   <SelectValue placeholder="Seleccionar rol" />
                 </SelectTrigger>
                 <SelectContent>
-                  {rolesPermitidos.map((rol) => (
+                  {roles.map((rol) => (
                     <SelectItem key={rol.id} value={rol.id.toString()}>
                       {rol.nombre}
                     </SelectItem>
@@ -552,6 +480,41 @@ export default function EditarUsuarioPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Contraseña actual */}
+          <div className="space-y-2 max-w-md">
+            <Label htmlFor="passwordActual">Introduce tu contraseña actual</Label>
+            <div className="flex gap-2">
+              <Input
+                id="passwordActual"
+                type="password"
+                value={passwordActual}
+                onChange={(e) => setPasswordActual(e.target.value)}
+                placeholder="Contraseña actual"
+                className={passwordActualValidada === false ? "border-red-500" : passwordActualValidada === true ? "border-emerald-500" : ""}
+              />
+              <Button
+                type="button"
+                variant={passwordActualValidada === false ? "destructive" : "outline"}
+                size="sm"
+                onClick={handleValidarPasswordActual}
+                disabled={validandoPasswordActual || passwordActual.length === 0}
+                className="shrink-0"
+              >
+                {validandoPasswordActual ? "..." : "Validar"}
+              </Button>
+            </div>
+            {passwordActualValidada === false && (
+              <p className="text-xs text-red-500 flex items-center gap-1">
+                <XCircle className="h-3 w-3" /> La contraseña no coincide
+              </p>
+            )}
+            {passwordActualValidada === true && (
+              <p className="text-xs text-emerald-600 flex items-center gap-1">
+                <CheckCircle2 className="h-3 w-3" /> Contraseña correcta
+              </p>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="password1">Nueva contraseña</Label>
@@ -561,7 +524,7 @@ export default function EditarUsuarioPage() {
                 value={password1}
                 onChange={(e) => setPassword1(e.target.value)}
                 placeholder="Ingresa la nueva contraseña"
-                disabled={!puedeEditarPassword}
+                disabled={passwordActualValidada !== true}
               />
             </div>
             <div className="space-y-2">
@@ -572,94 +535,80 @@ export default function EditarUsuarioPage() {
                 value={password2}
                 onChange={(e) => setPassword2(e.target.value)}
                 placeholder="Repite la nueva contraseña"
-                disabled={!puedeEditarPassword}
+                disabled={passwordActualValidada !== true}
+                className={password2.length > 0 ? (passwordsCoinciden ? "border-emerald-500" : "border-red-500") : ""}
               />
+              {password2.length > 0 && (
+                passwordsCoinciden ? (
+                  <p className="text-xs text-emerald-600 flex items-center gap-1">
+                    <CheckCircle2 className="h-3 w-3" /> Las contraseñas coinciden
+                  </p>
+                ) : (
+                  <p className="text-xs text-red-500 flex items-center gap-1">
+                    <XCircle className="h-3 w-3" /> Las contraseñas no coinciden
+                  </p>
+                )
+              )}
             </div>
           </div>
-          {puedeEditarPassword && (
-            <Button onClick={handleActualizarPassword} disabled={savingPassword} className="gap-2">
-              <Lock className="h-4 w-4" />
-              {savingPassword ? "Actualizando..." : "Actualizar contraseña"}
-            </Button>
-          )}
+          <Button
+            onClick={handleActualizarPassword}
+            disabled={savingPassword || !puedeActualizarPassword}
+            className="gap-2"
+          >
+            <Lock className="h-4 w-4" />
+            {savingPassword ? "Actualizando..." : "Actualizar contraseña"}
+          </Button>
         </CardContent>
       </Card>
 
-      {/* Bloque: Hoteles */}
+      {/* Bloque: Hoteles (solo lectura) */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <Hotel className="h-5 w-5 text-primary" />
-            Hoteles Asignados
+            Hoteles con Acceso
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {hotelesDisponibles.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No hay hoteles disponibles</p>
-          ) : (
-            <>
-              <div className="flex flex-wrap gap-2 mb-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleSeleccionarTodos}
-                  disabled={savingHoteles || hotelesSeleccionadosLocal.size === hotelesDisponibles.length}
-                >
-                  Seleccionar todos
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDeseleccionarTodos}
-                  disabled={savingHoteles || hotelesSeleccionadosLocal.size === 0}
-                >
-                  Deseleccionar todos
-                </Button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {hotelesDisponibles.map((hotel) => {
-                  const hotelIdNum = Number(hotel.value)
-                  const seleccionado = hotelesSeleccionadosLocal.has(hotelIdNum)
-                  return (
-                    <label
-                      key={hotel.value}
-                      className={`flex items-center gap-3 rounded-lg border p-3 transition-colors ${
-                        savingHoteles ? "cursor-wait opacity-60" : "cursor-pointer"
-                      } ${
-                        seleccionado
-                          ? "border-primary bg-primary/5"
-                          : "border-border/50 hover:border-border"
-                      }`}
-                    >
-                      <Checkbox
-                        checked={seleccionado}
-                        disabled={savingHoteles}
-                        onCheckedChange={() => handleToggleHotelLocal(hotel.value)}
-                      />
-                      <span className="text-sm font-medium flex-1">{hotel.text}</span>
-                      {!hotel.activo && (
-                        <span className="text-[10px] uppercase tracking-wide rounded-full border px-2 py-0.5 bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800">
-                          Inactivo
+          <div className="rounded-xl border border-border/50 overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-border/50">
+                  <TableHead>Acrónimo</TableHead>
+                  <TableHead>Hotel</TableHead>
+                  <TableHead>Estatus</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {hotelesUsuario.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center text-muted-foreground py-8">
+                      No tienes hoteles asignados
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  hotelesUsuario.map((h) => (
+                    <TableRow key={h.idrec} className="border-border/50">
+                      <TableCell className="font-medium">{h.acronimo}</TableCell>
+                      <TableCell>{h.hotel}</TableCell>
+                      <TableCell>
+                        <span
+                          className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+                            h.hotelActivo
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800"
+                              : "bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800"
+                          }`}
+                        >
+                          {h.hotelActivo ? "Activo" : "Inactivo"}
                         </span>
-                      )}
-                    </label>
-                  )
-                })}
-              </div>
-              <div className="mt-4">
-                <Button
-                  onClick={handleActualizarHoteles}
-                  disabled={savingHoteles || !hayCambiosHoteles}
-                  className="gap-2"
-                >
-                  <Save className="h-4 w-4" />
-                  {savingHoteles ? "Actualizando..." : "Actualizar"}
-                </Button>
-              </div>
-            </>
-          )}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </div>

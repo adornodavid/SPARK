@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { obtenerUsuarios } from "@/app/actions/usuarios"
 import { obtenerRoles } from "@/app/actions/configuraciones"
+import { obtenerSesion } from "@/app/actions/session"
 import { UsuariosTable } from "@/components/admin/usuarios/usuarios-table"
 import { toast } from "sonner"
 
@@ -36,20 +37,33 @@ export default function UsuariosPage() {
   const [usuarios, setUsuarios] = useState<UsuarioRow[]>([])
   const [loading, setLoading] = useState(true)
   const [roles, setRoles] = useState<Rol[]>([])
+  const [sesionRolId, setSesionRolId] = useState<number>(0)
 
   // Filtros
   const [filtroBusqueda, setFiltroBusqueda] = useState("")
   const [filtroRolId, setFiltroRolId] = useState("Todos")
   const [filtroEstatus, setFiltroEstatus] = useState("Todos")
 
+  // Roles ocultos según el rol de la sesión (no pueden ver estos rolids)
+  // 1 SuperAdmin: ninguno oculto | 2 Admin: oculta 1 | 3 Gerente: oculta 1,2 | 4 Asesor: oculta 1,2,3
+  const rolesOcultos = (() => {
+    if (sesionRolId === 2) return new Set([1])
+    if (sesionRolId === 3) return new Set([1, 2])
+    if (sesionRolId === 4) return new Set([1, 2, 3])
+    return new Set<number>()
+  })()
+
   useEffect(() => {
-    async function loadRoles() {
-      const result = await obtenerRoles()
-      if (result.success && result.data) {
-        setRoles(result.data)
+    async function loadRolesYSesion() {
+      const [resultRoles, sesion] = await Promise.all([obtenerRoles(), obtenerSesion()])
+      if (resultRoles.success && resultRoles.data) {
+        setRoles(resultRoles.data)
+      }
+      if (sesion) {
+        setSesionRolId(Number(sesion.RolId) || 0)
       }
     }
-    loadRoles()
+    loadRolesYSesion()
   }, [])
 
   const loadUsuarios = useCallback(async (busqueda = "", rolid = -1, activo = "Todos") => {
@@ -81,9 +95,12 @@ export default function UsuariosPage() {
     loadUsuarios()
   }
 
-  const totalUsuarios = usuarios.length
-  const activos = usuarios.filter((u) => u.activo === true || u.activo === "true").length
-  const inactivos = usuarios.filter((u) => u.activo === false || u.activo === "false").length
+  const usuariosVisibles = usuarios.filter((u) => !rolesOcultos.has(Number(u.rolid)))
+  const rolesVisibles = roles.filter((r) => !rolesOcultos.has(r.id))
+
+  const totalUsuarios = usuariosVisibles.length
+  const activos = usuariosVisibles.filter((u) => u.activo === true || u.activo === "true").length
+  const inactivos = usuariosVisibles.filter((u) => u.activo === false || u.activo === "false").length
 
   return (
     <div className="space-y-6">
@@ -125,7 +142,7 @@ export default function UsuariosPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="Todos">Todos</SelectItem>
-                {roles.map((rol) => (
+                {rolesVisibles.map((rol) => (
                   <SelectItem key={rol.id} value={rol.id.toString()}>
                     {rol.nombre}
                   </SelectItem>
@@ -174,7 +191,7 @@ export default function UsuariosPage() {
       </div>
 
       {/* Tabla */}
-      <UsuariosTable usuarios={usuarios} loading={loading} onUpdate={handleBuscar} />
+      <UsuariosTable usuarios={usuariosVisibles} loading={loading} onUpdate={handleBuscar} />
     </div>
   )
 }

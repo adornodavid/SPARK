@@ -465,10 +465,13 @@ export async function estatusActivoHotel(id: number, activo: boolean): Promise<{
 }
 
 // Función: listaDesplegableHoteles / ddlHoteles: Función que se utiliza para los dropdownlist
-export async function listaDesplegableHoteles(id = -1, descripcion = "") {
+export async function listaDesplegableHoteles(id = -1, descripcion = "", incluirInactivos = false) {
   try {
     // Query principal
-    let query = supabase.from("hoteles").select("id, nombre").eq("activo", true)
+    let query = supabase.from("hoteles").select("id, nombre")
+    if (!incluirInactivos) {
+      query = query.eq("activo", true)
+    }
 
     // Filtros en query, dependiendo parametros
     if (id !== -1) {
@@ -500,5 +503,36 @@ export async function listaDesplegableHoteles(id = -1, descripcion = "") {
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error obteniendo lista desplegable de hoteles: " + errorMessage }
+  }
+}
+
+// Función: listaHotelesParaAsignacion: Lista todos los hoteles (activos e inactivos) con su flag activo para UI de asignación
+export async function listaHotelesParaAsignacion(): Promise<{
+  success: boolean
+  error: string
+  data: Array<{ value: string; text: string; activo: boolean }> | null
+}> {
+  try {
+    const { data, error } = await supabase
+      .from("hoteles")
+      .select("id, nombre, activo")
+      .order("nombre", { ascending: true })
+
+    if (error) {
+      return { success: false, error: "Error obteniendo hoteles: " + error.message, data: null }
+    }
+
+    return {
+      success: true,
+      error: "",
+      data: (data || []).map((h) => ({
+        value: h.id.toString(),
+        text: h.nombre,
+        activo: !!h.activo,
+      })),
+    }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, error: "Error en listaHotelesParaAsignacion: " + errorMessage, data: null }
   }
 }

@@ -60,7 +60,7 @@ export default function CrearUsuarioPage() {
     async function loadData() {
       const [resultRoles, resultHoteles] = await Promise.all([
         obtenerRoles(),
-        listaDesplegableHoteles(),
+        listaDesplegableHoteles(-1, "", true),
       ])
 
       if (resultRoles.success && resultRoles.data) {
@@ -426,7 +426,28 @@ export default function CrearUsuarioPage() {
           {hoteles.length === 0 ? (
             <p className="text-muted-foreground text-sm">No hay hoteles disponibles</p>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <>
+              <div className="flex flex-wrap gap-2 mb-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setHotelesSeleccionados(hoteles.map((h) => h.value))}
+                  disabled={hotelesSeleccionados.length === hoteles.length}
+                >
+                  Seleccionar todos
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setHotelesSeleccionados([])}
+                  disabled={hotelesSeleccionados.length === 0}
+                >
+                  Deseleccionar todos
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {hoteles.map((hotel) => (
                 <label
                   key={hotel.value}
@@ -443,7 +464,8 @@ export default function CrearUsuarioPage() {
                   <span className="text-sm font-medium">{hotel.text}</span>
                 </label>
               ))}
-            </div>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

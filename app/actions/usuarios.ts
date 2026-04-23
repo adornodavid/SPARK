@@ -6,7 +6,7 @@
 import { createClient } from "@supabase/supabase-js"
 import type { oUsuario } from "@/types/usuarios"
 import type { ddlItem } from "@/types/common"
-import { imagenSubir, HashData } from "@/app/actions/utilerias"
+import { imagenSubir, HashData, CompareHash } from "@/app/actions/utilerias"
 import { revalidatePath } from "next/cache"
 
 /* ==================================================
@@ -147,17 +147,23 @@ export async function objetoUsuarios(
 export async function validarUsuarioUnico(
   campo: "usuario" | "email",
   valor: string,
+  excluirId = 0,
 ): Promise<{ success: boolean; existe: boolean; error: string }> {
   try {
     if (!valor || valor.trim().length < 3) {
       return { success: false, existe: false, error: "El valor debe tener al menos 3 caracteres" }
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("usuarios")
       .select("id")
       .eq(campo, valor.trim())
-      .maybeSingle()
+
+    if (excluirId > 0) {
+      query = query.neq("id", excluirId)
+    }
+
+    const { data, error } = await query.maybeSingle()
 
     if (error) {
       return { success: false, existe: false, error: "Error al validar: " + error.message }
@@ -167,6 +173,37 @@ export async function validarUsuarioUnico(
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, existe: false, error: "Error en validarUsuarioUnico: " + errorMessage }
+  }
+}
+
+// Función: verificarPasswordActual: Compara una contraseña en texto contra el hash almacenado
+export async function verificarPasswordActual(
+  id: number,
+  password: string,
+): Promise<{ success: boolean; coincide: boolean; error: string }> {
+  try {
+    if (!password) {
+      return { success: false, coincide: false, error: "La contraseña no puede estar vacía" }
+    }
+
+    const { data, error } = await supabase
+      .from("usuarios")
+      .select("password")
+      .eq("id", id)
+      .maybeSingle()
+
+    if (error) {
+      return { success: false, coincide: false, error: "Error al consultar usuario: " + error.message }
+    }
+    if (!data || !data.password) {
+      return { success: false, coincide: false, error: "Usuario sin contraseña registrada" }
+    }
+
+    const coincide = await CompareHash(password, data.password)
+    return { success: true, coincide, error: "" }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    return { success: false, coincide: false, error: "Error en verificarPasswordActual: " + errorMessage }
   }
 }
 
@@ -588,9 +625,18 @@ export async function actualizarInfoBasicaUsuario(
       return { success: false, error: "El nombre completo es requerido" }
     }
 
+    const puestoLimpio = puesto.trim() || null
+    const telefonoLimpio = telefono.trim() || null
+    const celularLimpio = celular.trim() || null
+
     const { error } = await supabase
       .from("usuarios")
-      .update({ nombrecompleto: nombrecompleto.trim(), puesto: puesto.trim(), telefono: telefono.trim(), celular: celular.trim() })
+      .update({
+        nombrecompleto: nombrecompleto.trim(),
+        puesto: puestoLimpio,
+        telefono: telefonoLimpio,
+        celular: celularLimpio,
+      })
       .eq("id", id)
 
     if (error) {
@@ -730,6 +776,7 @@ export async function obtenerUsuariosXHotel(
     acronimo: string
     hotel: string
     activo: boolean
+    hotelActivo: boolean
   }[] | null
 }> {
   try {
@@ -760,11 +807,13 @@ export async function obtenerUsuariosXHotel(
 
     const [resUsuarios, resHoteles] = await Promise.all([
       supabase.from("usuarios").select("id, nombrecompleto").in("id", usuarioIds),
-      supabase.from("hoteles").select("id, acronimo, nombre").in("id", hotelIds),
+      supabase.from("hoteles").select("id, acronimo, nombre, activo").in("id", hotelIds),
     ])
 
     const usuariosMap = new Map((resUsuarios.data || []).map((u: any) => [u.id, u.nombrecompleto]))
-    const hotelesMap = new Map((resHoteles.data || []).map((h: any) => [h.id, { acronimo: h.acronimo, nombre: h.nombre }]))
+    const hotelesMap = new Map(
+      (resHoteles.data || []).map((h: any) => [h.id, { acronimo: h.acronimo, nombre: h.nombre, activo: !!h.activo }])
+    )
 
     const mapped = data.map((row: any) => ({
       idrec: row.idrec,
@@ -774,6 +823,7 @@ export async function obtenerUsuariosXHotel(
       acronimo: hotelesMap.get(row.hotelid)?.acronimo || "",
       hotel: hotelesMap.get(row.hotelid)?.nombre || "",
       activo: row.activo,
+      hotelActivo: hotelesMap.get(row.hotelid)?.activo ?? false,
     }))
 
     return { success: true, error: "", data: mapped }
