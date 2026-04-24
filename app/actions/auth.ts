@@ -89,6 +89,7 @@ export async function loginUser(
       nombrecompleto: userData.nombrecompleto,
       rolid: userData.rolid,
       rol: roleData.nombre,
+      hotelid: userData.hotelid != null ? String(userData.hotelid) : "0",
       hoteles: hotelesString,
     })
 

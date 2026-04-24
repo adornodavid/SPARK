@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { obtenerUsuarios } from "@/app/actions/usuarios"
 import { obtenerRoles } from "@/app/actions/configuraciones"
+import { listaDesplegableHoteles } from "@/app/actions/hoteles"
 import { obtenerSesion } from "@/app/actions/session"
 import { UsuariosTable } from "@/components/admin/usuarios/usuarios-table"
 import { toast } from "sonner"
@@ -22,6 +23,8 @@ interface UsuarioRow {
   puesto: string | null
   rol: string
   rolid: number
+  hotelid: number | null
+  hotel: string | null
   ultimoingreso: string | null
   activo: boolean | string
   imgurl: string | null
@@ -32,17 +35,24 @@ interface Rol {
   nombre: string
 }
 
+interface HotelItem {
+  value: string
+  text: string
+}
+
 export default function UsuariosPage() {
   const router = useRouter()
   const [usuarios, setUsuarios] = useState<UsuarioRow[]>([])
   const [loading, setLoading] = useState(true)
   const [roles, setRoles] = useState<Rol[]>([])
+  const [hoteles, setHoteles] = useState<HotelItem[]>([])
   const [sesionRolId, setSesionRolId] = useState<number>(0)
 
   // Filtros
   const [filtroBusqueda, setFiltroBusqueda] = useState("")
   const [filtroRolId, setFiltroRolId] = useState("Todos")
   const [filtroEstatus, setFiltroEstatus] = useState("Todos")
+  const [filtroHotelId, setFiltroHotelId] = useState("Todos")
 
   // Roles ocultos según el rol de la sesión (no pueden ver estos rolids)
   // 1 SuperAdmin: ninguno oculto | 2 Admin: oculta 1 | 3 Gerente: oculta 1,2 | 4 Asesor: oculta 1,2,3
@@ -54,45 +64,62 @@ export default function UsuariosPage() {
   })()
 
   useEffect(() => {
-    async function loadRolesYSesion() {
-      const [resultRoles, sesion] = await Promise.all([obtenerRoles(), obtenerSesion()])
+    async function loadInicial() {
+      const [resultRoles, resultHoteles, sesion] = await Promise.all([
+        obtenerRoles(),
+        listaDesplegableHoteles(-1, "", true),
+        obtenerSesion(),
+      ])
       if (resultRoles.success && resultRoles.data) {
         setRoles(resultRoles.data)
+      }
+      if (resultHoteles.success && resultHoteles.data) {
+        setHoteles(resultHoteles.data)
       }
       if (sesion) {
         setSesionRolId(Number(sesion.RolId) || 0)
       }
     }
-    loadRolesYSesion()
+    loadInicial()
   }, [])
 
-  const loadUsuarios = useCallback(async (busqueda = "", rolid = -1, activo = "Todos") => {
-    setLoading(true)
-    const result = await obtenerUsuarios(-1, busqueda, rolid, activo)
+  const loadUsuarios = useCallback(
+    async (busqueda = "", rolid = -1, activo = "Todos", hotelid = -1) => {
+      setLoading(true)
+      const result = await obtenerUsuarios(-1, busqueda, rolid, activo, hotelid)
 
-    if (result.success && result.data) {
-      setUsuarios(result.data as UsuarioRow[])
-    } else {
-      toast.error(result.error || "Error al cargar usuarios")
-      setUsuarios([])
-    }
-    setLoading(false)
-  }, [])
+      if (result.success && result.data) {
+        setUsuarios(result.data as UsuarioRow[])
+      } else {
+        toast.error(result.error || "Error al cargar usuarios")
+        setUsuarios([])
+      }
+      setLoading(false)
+    },
+    [],
+  )
 
+  // Auto-búsqueda con debounce al cambiar cualquier filtro
   useEffect(() => {
-    loadUsuarios()
-  }, [loadUsuarios])
+    const timer = setTimeout(() => {
+      const rolid = filtroRolId === "Todos" ? -1 : Number(filtroRolId)
+      const hotelid = filtroHotelId === "Todos" ? -1 : Number(filtroHotelId)
+      loadUsuarios(filtroBusqueda.trim(), rolid, filtroEstatus, hotelid)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [filtroBusqueda, filtroRolId, filtroEstatus, filtroHotelId, loadUsuarios])
 
   function handleBuscar() {
     const rolid = filtroRolId === "Todos" ? -1 : Number(filtroRolId)
-    loadUsuarios(filtroBusqueda.trim(), rolid, filtroEstatus)
+    const hotelid = filtroHotelId === "Todos" ? -1 : Number(filtroHotelId)
+    loadUsuarios(filtroBusqueda.trim(), rolid, filtroEstatus, hotelid)
   }
 
   function handleLimpiar() {
     setFiltroBusqueda("")
     setFiltroRolId("Todos")
     setFiltroEstatus("Todos")
-    loadUsuarios()
+    setFiltroHotelId("Todos")
   }
 
   const usuariosVisibles = usuarios.filter((u) => !rolesOcultos.has(Number(u.rolid)))
@@ -163,7 +190,23 @@ export default function UsuariosPage() {
               </SelectContent>
             </Select>
           </div>
-          <Button onClick={handleBuscar} className="h-9 gap-2">
+          <div className="space-y-1 w-[220px]">
+            <label className="text-xs text-muted-foreground">Hoteles</label>
+            <Select value={filtroHotelId} onValueChange={setFiltroHotelId}>
+              <SelectTrigger className="h-9">
+                <SelectValue placeholder="Todos" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Todos">Todos</SelectItem>
+                {hoteles.map((hotel) => (
+                  <SelectItem key={hotel.value} value={hotel.value}>
+                    {hotel.text}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button onClick={handleBuscar} className="hidden h-9 gap-2">
             <Search className="h-4 w-4" />
             Buscar
           </Button>

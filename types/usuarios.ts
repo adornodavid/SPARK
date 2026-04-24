@@ -39,6 +39,7 @@ export interface oSession {
   NombreCompleto: string
   RolId: string
   Rol: string
+  HotelId: string
   Hoteles: string
   SesionActiva: boolean
 }

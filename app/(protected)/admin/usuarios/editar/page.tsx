@@ -35,6 +35,7 @@ interface UsuarioDetalle {
   imgurl: string | null
   rol: string
   rolid: number
+  hotelid: number | null
   activo: boolean | string
   ultimoingreso: string | null
   fechacreacion: string | null
@@ -78,6 +79,7 @@ export default function EditarUsuarioPage() {
   const [inputPuesto, setInputPuesto] = useState("")
   const [inputTelefono, setInputTelefono] = useState("")
   const [inputCelular, setInputCelular] = useState("")
+  const [inputHotelId, setInputHotelId] = useState("")
   const [savingInfo, setSavingInfo] = useState(false)
 
   // Acceso form
@@ -141,6 +143,13 @@ export default function EditarUsuarioPage() {
         setInputEmail(resultUsuario.data.email || "")
         setInputRolId(resultUsuario.data.rolid?.toString() || "")
 
+        // Hotel principal: usa hotelid del usuario, o primer hotel disponible si es NULL
+        if (resultUsuario.data.hotelid != null) {
+          setInputHotelId(String(resultUsuario.data.hotelid))
+        } else if (resultDdlHoteles.success && resultDdlHoteles.data && resultDdlHoteles.data.length > 0) {
+          setInputHotelId(resultDdlHoteles.data[0].value)
+        }
+
         // Auto-validar usuario/email cargados (excluyendo al propio usuario editado)
         if (resultUsuario.data.usuario) {
           const r = await validarUsuarioUnico("usuario", resultUsuario.data.usuario, id)
@@ -185,7 +194,8 @@ export default function EditarUsuarioPage() {
     }
 
     setSavingInfo(true)
-    const result = await actualizarInfoBasicaUsuario(id, inputNombre, inputPuesto, inputTelefono, inputCelular)
+    const hotelIdNum = inputHotelId && inputHotelId.trim() !== "" ? Number(inputHotelId) : null
+    const result = await actualizarInfoBasicaUsuario(id, inputNombre, inputPuesto, inputTelefono, inputCelular, hotelIdNum)
 
     if (result.success) {
       toast.success("Información actualizada correctamente")
@@ -393,6 +403,21 @@ export default function EditarUsuarioPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="hotelPrincipal">Hotel</Label>
+              <Select value={inputHotelId} onValueChange={setInputHotelId}>
+                <SelectTrigger id="hotelPrincipal">
+                  <SelectValue placeholder="Seleccionar hotel" />
+                </SelectTrigger>
+                <SelectContent>
+                  {hotelesDisponibles.map((hotel) => (
+                    <SelectItem key={hotel.value} value={hotel.value}>
+                      {hotel.text}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="nombrecompleto">Nombre Completo</Label>
               <Input

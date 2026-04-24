@@ -19,6 +19,7 @@ import {
   verificarPasswordActual,
 } from "@/app/actions/usuarios"
 import { obtenerRoles } from "@/app/actions/configuraciones"
+import { listaDesplegableHoteles } from "@/app/actions/hoteles"
 import { obtenerSesion } from "@/app/actions/session"
 import { toast } from "sonner"
 
@@ -69,6 +70,7 @@ export default function PerfilPage() {
   const [inputPuesto, setInputPuesto] = useState("")
   const [inputTelefono, setInputTelefono] = useState("")
   const [inputCelular, setInputCelular] = useState("")
+  const [inputHotelNombre, setInputHotelNombre] = useState("")
   const [savingInfo, setSavingInfo] = useState(false)
 
   // Acceso form
@@ -110,6 +112,19 @@ export default function PerfilPage() {
 
       setId(sesionUserId)
       setSesionRolId(Number(sesion.RolId) || 0)
+
+      // Nombre del hotel principal desde la cookie HotelId
+      const hotelIdCookie = Number(sesion.HotelId)
+      if (hotelIdCookie > 0) {
+        const resHotel = await listaDesplegableHoteles(hotelIdCookie, "", true)
+        if (resHotel.success && resHotel.data && resHotel.data.length > 0) {
+          setInputHotelNombre(resHotel.data[0].text)
+        } else {
+          setInputHotelNombre("Sin Asignación")
+        }
+      } else {
+        setInputHotelNombre("Sin Asignación")
+      }
 
       const [resultUsuario, resultRoles, resultHoteles] = await Promise.all([
         obtenerUsuarioDetalle(sesionUserId),
@@ -321,6 +336,16 @@ export default function PerfilPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="hotelPrincipal">Hotel</Label>
+              <Input
+                id="hotelPrincipal"
+                type="text"
+                value={inputHotelNombre}
+                disabled
+                readOnly
+              />
+            </div>
             <div className="space-y-2">
               <Label htmlFor="nombrecompleto">Nombre Completo</Label>
               <Input

@@ -37,6 +37,7 @@ export default function CrearUsuarioPage() {
   const [inputPuesto, setInputPuesto] = useState("")
   const [inputTelefono, setInputTelefono] = useState("")
   const [inputCelular, setInputCelular] = useState("")
+  const [inputHotelId, setInputHotelId] = useState("")
 
   // Acceso
   const [inputUsuario, setInputUsuario] = useState("")
@@ -68,6 +69,9 @@ export default function CrearUsuarioPage() {
       }
       if (resultHoteles.success && resultHoteles.data) {
         setHoteles(resultHoteles.data)
+        if (resultHoteles.data.length > 0) {
+          setInputHotelId(resultHoteles.data[0].value)
+        }
       }
 
       setLoading(false)
@@ -177,6 +181,7 @@ export default function CrearUsuarioPage() {
     formData.append("puesto", inputPuesto.trim())
     formData.append("usuario", inputUsuario.trim())
     formData.append("rolid", inputRolId)
+    formData.append("hotelid", inputHotelId)
 
     const result = await crearUsuario(formData)
 
@@ -234,6 +239,21 @@ export default function CrearUsuarioPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="hotelPrincipal">Hotel</Label>
+              <Select value={inputHotelId} onValueChange={setInputHotelId}>
+                <SelectTrigger id="hotelPrincipal">
+                  <SelectValue placeholder="Seleccionar hotel" />
+                </SelectTrigger>
+                <SelectContent>
+                  {hoteles.map((hotel) => (
+                    <SelectItem key={hotel.value} value={hotel.value}>
+                      {hotel.text}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="nombrecompleto">Nombre Completo *</Label>
               <Input

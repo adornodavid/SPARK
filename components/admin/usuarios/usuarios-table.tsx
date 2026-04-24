@@ -28,6 +28,8 @@ interface UsuarioRow {
   puesto: string | null
   rol: string
   rolid: number
+  hotelid: number | null
+  hotel: string | null
   ultimoingreso: string | null
   activo: boolean | string
   imgurl: string | null
@@ -76,6 +78,7 @@ export function UsuariosTable({ usuarios, loading, onUpdate }: UsuariosTableProp
       <Table>
         <TableHeader>
           <TableRow className="border-border/50">
+            <TableHead>Hotel</TableHead>
             <TableHead>Nombre</TableHead>
             <TableHead>Usuario</TableHead>
             <TableHead>Email</TableHead>
@@ -90,13 +93,20 @@ export function UsuariosTable({ usuarios, loading, onUpdate }: UsuariosTableProp
         <TableBody>
           {usuarios.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={8} className="text-center text-muted-foreground py-12">
+              <TableCell colSpan={10} className="text-center text-muted-foreground py-12">
                 No hay usuarios registrados
               </TableCell>
             </TableRow>
           ) : (
             usuarios.map((usuario) => (
               <TableRow key={usuario.usuarioid} className="border-border/50">
+                <TableCell className="text-sm">
+                  {usuario.hotel ? (
+                    <span>{usuario.hotel}</span>
+                  ) : (
+                    <span className="text-muted-foreground italic">Sin Asignación</span>
+                  )}
+                </TableCell>
                 <TableCell>
                   <p className="font-medium">{usuario.nombrecompleto}</p>
                 </TableCell>

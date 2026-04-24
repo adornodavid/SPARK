@@ -222,6 +222,8 @@ export async function crearUsuario(formData: FormData) {
     const puesto = formData.get("puesto") as string
     const usuario = formData.get("usuario") as string
     const rolid = Number.parseInt(formData.get("rolid") as string)
+    const hotelidRaw = formData.get("hotelid") as string | null
+    const hotelid = hotelidRaw && hotelidRaw.trim() !== "" ? Number.parseInt(hotelidRaw) : null
     const fecha = new Date().toISOString().split("T")[0] // Formato YYYY-MM-DD
     const activo = true
 
@@ -290,6 +292,7 @@ export async function crearUsuario(formData: FormData) {
         puesto: puesto || null,
         usuario,
         rolid,
+        hotelid,
         imgurl: imagenurl,
         fechacreacion: fecha,
         activo,
@@ -322,6 +325,7 @@ export async function obtenerUsuarios(
   busqueda = "",
   rolid = -1,
   activo = "Todos",
+  hotelid = -1,
 ): Promise<{ success: boolean; error: string; data: unknown }> {
   try {
     // Query principal
@@ -359,8 +363,50 @@ export async function obtenerUsuarios(
       }
     }
 
-    // Regreso de data
-    return { success: true, error: "", data: data }
+    if (!data || data.length === 0) {
+      return { success: true, error: "", data: [] }
+    }
+
+    // Enriquecer con hotelid (tabla usuarios) y nombre del hotel (tabla hoteles)
+    const userIds = data.map((u: any) => u.usuarioid)
+    const { data: userHotels } = await supabase
+      .from("usuarios")
+      .select("id, hotelid")
+      .in("id", userIds)
+
+    const hotelIdByUser = new Map<number, number | null>(
+      (userHotels || []).map((u: any) => [u.id, u.hotelid ?? null])
+    )
+
+    const hotelIdsUnicos = [
+      ...new Set(
+        (userHotels || [])
+          .map((u: any) => u.hotelid)
+          .filter((h: number | null) => h !== null && h !== undefined)
+      ),
+    ] as number[]
+
+    let hotelNameById = new Map<number, string>()
+    if (hotelIdsUnicos.length > 0) {
+      const { data: hotelesData } = await supabase
+        .from("hoteles")
+        .select("id, nombre")
+        .in("id", hotelIdsUnicos)
+      hotelNameById = new Map((hotelesData || []).map((h: any) => [h.id, h.nombre]))
+    }
+
+    const enriquecido = (data as any[]).map((u) => {
+      const hid = hotelIdByUser.get(u.usuarioid) ?? null
+      return {
+        ...u,
+        hotelid: hid,
+        hotel: hid !== null ? hotelNameById.get(hid) ?? null : null,
+      }
+    })
+
+    const filtrado = hotelid !== -1 ? enriquecido.filter((u) => u.hotelid === hotelid) : enriquecido
+
+    return { success: true, error: "", data: filtrado }
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     return { success: false, error: "Error en funcion obtenerUsuarios: " + errorMessage, data: null }
@@ -497,6 +543,7 @@ export async function obtenerUsuarioDetalle(id: number): Promise<{
     imgurl: string | null
     rol: string
     rolid: number
+    hotelid: number | null
     activo: boolean
     ultimoingreso: string | null
     fechacreacion: string | null
@@ -519,10 +566,10 @@ export async function obtenerUsuarioDetalle(id: number): Promise<{
       return { success: false, error: "Usuario no encontrado", data: null }
     }
 
-    // Obtener columna activo de la tabla usuarios (no está en la vista)
-    const { data: activoData } = await supabase
+    // Obtener columnas activo y hotelid de la tabla usuarios (no están en la vista)
+    const { data: extraData } = await supabase
       .from("usuarios")
-      .select("activo")
+      .select("activo, hotelid")
       .eq("id", id)
       .maybeSingle()
 
@@ -551,7 +598,8 @@ export async function obtenerUsuarioDetalle(id: number): Promise<{
         imgurl: usuarioData.imgurl,
         rol: usuarioData.rol,
         rolid: usuarioData.rolid,
-        activo: activoData?.activo ?? false,
+        hotelid: extraData?.hotelid ?? null,
+        activo: extraData?.activo ?? false,
         ultimoingreso: usuarioData.ultimoingreso,
         fechacreacion: usuarioData.fechacreacion,
         hoteles,
@@ -612,13 +660,15 @@ export async function actualizarAccesoUsuario(
   }
 }
 
-// Función: actualizarInfoBasicaUsuario: Actualiza nombrecompleto, puesto, telefono y celular
+// Función: actualizarInfoBasicaUsuario: Actualiza nombrecompleto, puesto, telefono, celular y hotelid
+// hotelid es opcional; pasa `undefined` para NO modificar el valor actual (ej. desde /perfil).
 export async function actualizarInfoBasicaUsuario(
   id: number,
   nombrecompleto: string,
   puesto: string,
   telefono: string,
   celular: string,
+  hotelid?: number | null,
 ): Promise<{ success: boolean; error: string }> {
   try {
     if (!nombrecompleto.trim()) {
@@ -629,14 +679,19 @@ export async function actualizarInfoBasicaUsuario(
     const telefonoLimpio = telefono.trim() || null
     const celularLimpio = celular.trim() || null
 
+    const updatePayload: Record<string, unknown> = {
+      nombrecompleto: nombrecompleto.trim(),
+      puesto: puestoLimpio,
+      telefono: telefonoLimpio,
+      celular: celularLimpio,
+    }
+    if (hotelid !== undefined) {
+      updatePayload.hotelid = hotelid
+    }
+
     const { error } = await supabase
       .from("usuarios")
-      .update({
-        nombrecompleto: nombrecompleto.trim(),
-        puesto: puestoLimpio,
-        telefono: telefonoLimpio,
-        celular: celularLimpio,
-      })
+      .update(updatePayload)
       .eq("id", id)
 
     if (error) {

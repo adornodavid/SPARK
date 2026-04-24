@@ -29,6 +29,7 @@ export async function crearSesion(userData: {
   nombrecompleto: string
   rolid: string
   rol: string
+  hotelid: string
   hoteles: string
 }): Promise<void> {
   // Crear string de sesión con formato: clave:valor|clave:valor
@@ -39,6 +40,7 @@ export async function crearSesion(userData: {
     `NombreCompleto:${userData.nombrecompleto}`,
     `RolId:${userData.rolid}`,
     `Rol:${userData.rol}`,
+    `HotelId:${userData.hotelid}`,
     `Hoteles:${userData.hoteles}`,
     `SesionActiva:true`,
   ].join("|")
@@ -84,6 +86,7 @@ export async function obtenerSesion(): Promise<oSession | null> {
       NombreCompleto: datos.NombreCompleto || "",
       RolId: datos.RolId || "",
       Rol: datos.Rol || "",
+      HotelId: datos.HotelId || "0",
       Hoteles: datos.Hoteles || "",
       SesionActiva: datos.SesionActiva === "true",
     }
