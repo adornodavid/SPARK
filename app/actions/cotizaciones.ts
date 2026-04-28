@@ -178,7 +178,7 @@ export async function obtenerEventosPorHotel(
   try {
     const { data, error } = await supabase
       .from("vw_oeventos")
-      .select("id, nombreevento, salon, salonid, fechainicio, fechafin, horainicio, horafin, horapremontaje, horapostmontaje, horasextras, estatus, cliente, numeroinvitados, tiporegistro")
+      .select("id, nombreevento, salon, salonid, fechainicio, fechafin, horainicio, horafin, horapremontaje, horapostmontaje, horasextras, estatus, estatuscomercial, totalmonto, cliente, numeroinvitados, tiporegistro")
       .eq("hotelid", hotelId)
       .lte("fechainicio", fechaFin)
       .gte("fechafin", fechaInicio)
@@ -248,6 +248,7 @@ export async function crearCotizacion(formData: FormData) {
     const adultos = formData.get("adultos") as string
     const ninos = formData.get("ninos") as string
     const estatusid = formData.get("estatusid") as string
+    const estatuscomercialid = formData.get("estatuscomercialid") as string
     const categoriaevento = formData.get("categoriaevento") as string
     const subtotal = formData.get("subtotal") as string
     const impuestos = formData.get("impuestos") as string
@@ -324,6 +325,7 @@ export async function crearCotizacion(formData: FormData) {
       montodescuento: montodescuento ? Number(montodescuento) : null,
       activo: true,
       tiporegistroid: 1,
+      estatuscomercialid: estatuscomercialid ? Number(estatuscomercialid) : 1,
     }
 
     // Paso 4: Ejecutar Query de INSERT en tabla eventos
@@ -610,7 +612,8 @@ export async function actualizarCotizacion(formData: FormData) {
     const numeroinvitados = formData.get("numeroinvitados") as string
     const adultos = formData.get("adultos") as string
     const ninos = formData.get("ninos") as string
-    const estatusid = formData.get("estatusid") as string
+    const estatusid = formData.get("estatusid") as string | null
+    const estatuscomercialid = formData.get("estatuscomercialid") as string | null
     const categoriaevento = formData.get("categoriaevento") as string
     const subtotal = formData.get("subtotal") as string
     const impuestos = formData.get("impuestos") as string
@@ -647,13 +650,20 @@ export async function actualizarCotizacion(formData: FormData) {
       fechainicio,
       fechafin,
       totalmonto: totalmonto || null,
-      estatusid: estatusid ? Number(estatusid) : null,
       categoriaevento: categoriaevento || null,
       subtotal: subtotal ? Number(subtotal) : null,
       impuestos: impuestos ? Number(impuestos) : null,
       porcentajedescuento: porcentajedescuento ? Number(porcentajedescuento) : null,
       montodescuento: montodescuento ? Number(montodescuento) : null,
       fechaactualizacion,
+    }
+    // estatusid solo se actualiza si el form lo manda (en edición no se manda — se preserva el valor en DB)
+    if (estatusid != null && estatusid !== "") {
+      updateData.estatusid = Number(estatusid)
+    }
+    // estatuscomercialid: el form siempre lo manda (controlado por el dropdown disabled, default id=1)
+    if (estatuscomercialid != null && estatuscomercialid !== "") {
+      updateData.estatuscomercialid = Number(estatuscomercialid)
     }
 
     // Paso 5: UPDATE en tabla eventos

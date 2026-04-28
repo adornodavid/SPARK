@@ -15,18 +15,17 @@ interface CalendarFilterPanelProps {
   onHotelChange: (value: string) => void
   onSalonChange: (value: string) => void
   filters: {
-    cotizaciones: boolean
-    reservaciones: boolean
-    canceladas: boolean
-    interno: boolean
+    tentativo: boolean
+    definitivo: boolean
+    cancelado: boolean
   }
   onFiltersChange: (filters: {
-    cotizaciones: boolean
-    reservaciones: boolean
-    canceladas: boolean
-    interno: boolean
+    tentativo: boolean
+    definitivo: boolean
+    cancelado: boolean
   }) => void
   userHoteles: string // Comma-separated hotel IDs from session
+  hideAllHotels?: boolean // Si true oculta opción "Todos los hoteles" (vista Disponibilidad)
 }
 
 export default function CalendarFilterPanel({
@@ -37,6 +36,7 @@ export default function CalendarFilterPanel({
   filters,
   onFiltersChange,
   userHoteles,
+  hideAllHotels = false,
 }: CalendarFilterPanelProps) {
   const [hotelesList, setHotelesList] = useState<{ value: string; text: string }[]>([])
   const [salonesList, setSalonesList] = useState<{ value: string; text: string }[]>([])
@@ -78,10 +78,10 @@ export default function CalendarFilterPanel({
       })
   }, [selectedHotel])
 
-  // Cuando cambia hotel: resetear salon
+  // onHotelChange en el dashboard ya resetea salon e incluye los updateUrlParams,
+  // evitamos encadenar onSalonChange aquí para no disparar re-renders duplicados.
   const handleHotelChange = (value: string) => {
     onHotelChange(value)
-    onSalonChange("all")
   }
 
   return (
@@ -105,9 +105,11 @@ export default function CalendarFilterPanel({
                 <SelectValue placeholder="Seleccionar hotel" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">
-                  <span className="font-semibold">Todos los hoteles</span>
-                </SelectItem>
+                {!hideAllHotels && (
+                  <SelectItem value="all">
+                    <span className="font-semibold">Todos los hoteles</span>
+                  </SelectItem>
+                )}
                 {hotelesList.map((hotel) => {
                   const isAssigned = userHotelIds.includes(hotel.value)
                   return (
@@ -159,73 +161,56 @@ export default function CalendarFilterPanel({
 
         {/* Status Filters */}
         <div className="mt-6 pt-4 border-t">
-          <Label className="text-sm font-semibold mb-3 block">Filtrar por tipo y estatus:</Label>
+          <Label className="text-sm font-semibold mb-3 block">Filtrar por estatus comercial:</Label>
           <div className="flex flex-wrap gap-4">
             <div className="flex items-center space-x-2">
               <Checkbox
-                id="cotizaciones"
-                checked={filters.cotizaciones}
+                id="tentativo"
+                checked={filters.tentativo}
                 onCheckedChange={(checked) =>
-                  onFiltersChange({ ...filters, cotizaciones: checked as boolean })
+                  onFiltersChange({ ...filters, tentativo: checked as boolean })
                 }
               />
               <label
-                htmlFor="cotizaciones"
+                htmlFor="tentativo"
                 className="text-sm font-medium leading-none cursor-pointer flex items-center gap-1.5"
               >
-                <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-400"></span>
-                Cotizaciones
+                <span className="inline-block w-2.5 h-2.5 rounded-full bg-yellow-500"></span>
+                Tentativo
               </label>
             </div>
 
             <div className="flex items-center space-x-2">
               <Checkbox
-                id="reservaciones"
-                checked={filters.reservaciones}
+                id="definitivo"
+                checked={filters.definitivo}
                 onCheckedChange={(checked) =>
-                  onFiltersChange({ ...filters, reservaciones: checked as boolean })
+                  onFiltersChange({ ...filters, definitivo: checked as boolean })
                 }
               />
               <label
-                htmlFor="reservaciones"
+                htmlFor="definitivo"
                 className="text-sm font-medium leading-none cursor-pointer flex items-center gap-1.5"
               >
-                <span className="inline-block w-2.5 h-2.5 rounded-full bg-purple-900/80"></span>
-                Reservaciones
+                <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-700"></span>
+                Definitivo
               </label>
             </div>
 
             <div className="flex items-center space-x-2">
               <Checkbox
-                id="interno"
-                checked={filters.interno}
+                id="cancelado"
+                checked={filters.cancelado}
                 onCheckedChange={(checked) =>
-                  onFiltersChange({ ...filters, interno: checked as boolean })
+                  onFiltersChange({ ...filters, cancelado: checked as boolean })
                 }
               />
               <label
-                htmlFor="interno"
+                htmlFor="cancelado"
                 className="text-sm font-medium leading-none cursor-pointer flex items-center gap-1.5"
               >
-                <span className="inline-block w-2.5 h-2.5 rounded-full bg-[#0c7da8]"></span>
-                Interno
-              </label>
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="canceladas"
-                checked={filters.canceladas}
-                onCheckedChange={(checked) =>
-                  onFiltersChange({ ...filters, canceladas: checked as boolean })
-                }
-              />
-              <label
-                htmlFor="canceladas"
-                className="text-sm font-medium leading-none cursor-pointer flex items-center gap-1.5"
-              >
-                <span className="inline-block w-2.5 h-2.5 rounded-full bg-gray-400"></span>
-                Canceladas
+                <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-700"></span>
+                Cancelado
               </label>
             </div>
           </div>

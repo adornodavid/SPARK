@@ -25,14 +25,13 @@ function DashboardContent() {
   )
 
   const [filters, setFilters] = useState({
-    cotizaciones: true,
-    reservaciones: true,
-    canceladas: false,
-    interno: true,
+    tentativo: true,
+    definitivo: true,
+    cancelado: false,
   })
 
-  // Calendar view mode: "classic" or "availability"
-  const [calendarView, setCalendarView] = useState<"classic" | "availability">("classic")
+  // Calendar view mode: "availability" (default) o "classic"
+  const [calendarView, setCalendarView] = useState<"availability" | "classic">("availability")
 
   // Day Detail Sheet state
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -64,6 +63,17 @@ function DashboardContent() {
       }
 
       setSession(sessionData)
+
+      // Si la URL no especificó hotelId, preseleccionar el hotel del usuario (sesión.HotelId)
+      const urlHotelId = searchParams.get("hotelId")
+      if (!urlHotelId && sessionData.HotelId && sessionData.HotelId !== "0") {
+        setSelectedHotel(sessionData.HotelId)
+        setSelectedSalon("all")
+        const params = new URLSearchParams()
+        params.set("hotelId", sessionData.HotelId)
+        window.history.replaceState(null, "", `/dashboard?${params.toString()}`)
+      }
+
       setLoading(false)
     }
 
@@ -165,28 +175,34 @@ function DashboardContent() {
             Calendario multipropiedad de reservaciones y cotizaciones
           </p>
         </div>
-        <div className="flex bg-muted rounded-lg border p-0.5">
+        <div className="flex bg-blue-50 rounded-lg border border-blue-200 p-0.5 shadow-sm">
           <button
-            onClick={() => setCalendarView("classic")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-              calendarView === "classic"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
-            Clásico
-          </button>
-          <button
-            onClick={() => setCalendarView("availability")}
+            onClick={() => {
+              setCalendarView("availability")
+              // En Disponibilidad no se permite "Todos los hoteles" — caer al hotel de sesión si aplica.
+              if (selectedHotel === "all" && session?.HotelId && session.HotelId !== "0") {
+                handleHotelChange(session.HotelId)
+              }
+            }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
               calendarView === "availability"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
+                ? "bg-white text-blue-700 shadow-sm border border-blue-200"
+                : "text-blue-600 hover:text-blue-700 hover:bg-blue-100/60"
             }`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /></svg>
             Disponibilidad
+          </button>
+          <button
+            onClick={() => setCalendarView("classic")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+              calendarView === "classic"
+                ? "bg-white text-blue-700 shadow-sm border border-blue-200"
+                : "text-blue-600 hover:text-blue-700 hover:bg-blue-100/60"
+            }`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+            Clásico
           </button>
         </div>
       </div>
@@ -200,6 +216,7 @@ function DashboardContent() {
         filters={filters}
         onFiltersChange={setFilters}
         userHoteles={session?.Hoteles || ""}
+        hideAllHotels={calendarView === "availability"}
       />
 
       {/* Calendar Grid + Sidebar / Availability Calendar */}
@@ -220,10 +237,19 @@ function DashboardContent() {
           />
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           <DashboardAvailabilityCalendar
             hotelId={selectedHotel}
+            selectedSalon={selectedSalon}
+            filters={filters}
             onDayClick={handleDayClick}
+          />
+
+          <CalendarSidebar
+            selectedHotel={selectedHotel}
+            selectedSalon={selectedSalon}
+            filters={filters}
+            onEventClick={handleDayClick}
           />
         </div>
       )}
@@ -235,6 +261,7 @@ function DashboardContent() {
         selectedDate={selectedDate}
         selectedHotel={selectedHotel}
         selectedSalon={selectedSalon}
+        filters={filters}
       />
     </div>
   )

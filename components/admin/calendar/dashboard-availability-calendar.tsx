@@ -1,9 +1,11 @@
 "use client"
 
-import { useState, useEffect, useMemo, useCallback } from "react"
-import { ChevronLeft, ChevronRight, Calendar, Clock, CalendarDays, CalendarRange, ArrowLeft } from "lucide-react"
+import { useState, useEffect, useMemo, useRef } from "react"
+import { useRouter } from "next/navigation"
+import { ChevronLeft, ChevronRight, Calendar, Clock, CalendarDays, CalendarRange, ArrowLeft, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { obtenerEventosPorHotel } from "@/app/actions/cotizaciones"
+import { getEstatusComercialStyle, normalizarEstatusComercial, type EstatusComercial } from "./estatus-comercial-colors"
 
 /* ==================================================
   Types
@@ -13,12 +15,20 @@ interface CalendarEvent {
   fechainicio: string; fechafin: string; horainicio: string; horafin: string
   estatus: string; cliente: string; numeroinvitados: number
   tipo: "reservacion" | "cotizacion"
+  estatuscomercial: EstatusComercial | null
+  totalmonto: number
 }
 type ViewMode = "day" | "week" | "month"
 interface SalonItem { value: string; text: string }
 
 interface DashboardAvailabilityCalendarProps {
   hotelId: string
+  selectedSalon?: string
+  filters?: {
+    tentativo: boolean
+    definitivo: boolean
+    cancelado: boolean
+  }
   onDayClick?: (dateStr: string) => void
 }
 
@@ -39,22 +49,22 @@ const MONTHS_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio
   Helpers
 ================================================== */
 function toDateStr(d: Date) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}` }
+function fmtMonto(n: number) {
+  if (n >= 1000) return `$${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}K`
+  return `$${Math.round(n)}`
+}
 function addDays(d: Date, n: number) { const r = new Date(d); r.setDate(r.getDate() + n); return r }
 function getWeekStart(d: Date) { const r = new Date(d); r.setDate(r.getDate() - (r.getDay() === 0 ? 6 : r.getDay() - 1)); return r }
 function parseHour(t: string) { if (!t) return -1; return parseInt(t.split(":")[0], 10) }
 function getEventBarColor(ev: CalendarEvent) {
-  if (ev.tipo === "reservacion") {
-    const e = ev.estatus?.toLowerCase() || ""
-    if (e.includes("cancel")) return "bg-gray-400"
-    return "bg-purple-900"
-  }
-  return "bg-amber-400"
+  return getEstatusComercialStyle(ev.estatuscomercial).dot
 }
 
 /* ==================================================
   Main Component
 ================================================== */
-export default function DashboardAvailabilityCalendar({ hotelId, onDayClick }: DashboardAvailabilityCalendarProps) {
+export default function DashboardAvailabilityCalendar({ hotelId, selectedSalon = "all", filters, onDayClick }: DashboardAvailabilityCalendarProps) {
+  const router = useRouter()
   const [viewMode, setViewMode] = useState<ViewMode>("week")
   const [previousView, setPreviousView] = useState<ViewMode | null>(null)
   const [currentDate, setCurrentDate] = useState(new Date())
@@ -82,30 +92,50 @@ export default function DashboardAvailabilityCalendar({ hotelId, onDayClick }: D
     return { start: new Date(currentDate.getFullYear(), 0, 1), end: new Date(currentDate.getFullYear(), 11, 31) }
   }, [viewMode, currentDate])
 
-  const loadEvents = useCallback(async () => {
-    if (!hotelId || hotelId === "all") return
-    setLoading(true)
-    const result = await obtenerEventosPorHotel(Number(hotelId), toDateStr(dateRange.start), toDateStr(dateRange.end))
-    const byKey = new Map<string, CalendarEvent>()
-    if (result.success && result.data) {
-      for (const e of result.data) {
-        const tipo = String(e.tiporegistro).toLowerCase() === "reservacion" ? "reservacion" : "cotizacion"
-        const k = `${tipo}-${e.id}-${e.salonid}`
-        if (byKey.has(k)) continue
-        byKey.set(k, {
-          id: e.id, nombreevento: e.nombreevento || (tipo === "reservacion" ? "Reservación" : "Cotización"),
-          salonName: e.salon || salonNameMap.get(String(e.salonid)) || "Salón",
-          salonid: e.salonid, fechainicio: e.fechainicio, fechafin: e.fechafin,
-          horainicio: e.horainicio || "", horafin: e.horafin || "",
-          estatus: e.estatus || "", cliente: e.cliente || "",
-          numeroinvitados: e.numeroinvitados || 0, tipo,
-        })
-      }
-    }
-    setEvents(Array.from(byKey.values())); setLoading(false)
-  }, [hotelId, dateRange, salonNameMap])
+  const reqIdRef = useRef(0)
 
-  useEffect(() => { loadEvents() }, [loadEvents])
+  useEffect(() => {
+    // Si no hay hotel específico, limpiamos events y salimos sin spinner.
+    if (!hotelId || hotelId === "all") {
+      setEvents([])
+      setLoading(false)
+      return
+    }
+    const reqId = ++reqIdRef.current
+    let cancelado = false
+    setLoading(true)
+    ;(async () => {
+      try {
+        const result = await obtenerEventosPorHotel(Number(hotelId), toDateStr(dateRange.start), toDateStr(dateRange.end))
+        if (cancelado || reqId !== reqIdRef.current) return
+        const byKey = new Map<string, CalendarEvent>()
+        if (result.success && result.data) {
+          for (const e of result.data) {
+            const tipo = String(e.tiporegistro).toLowerCase() === "reservacion" ? "reservacion" : "cotizacion"
+            const k = `${tipo}-${e.id}-${e.salonid}`
+            if (byKey.has(k)) continue
+            byKey.set(k, {
+              id: e.id, nombreevento: e.nombreevento || (tipo === "reservacion" ? "Reservación" : "Cotización"),
+              salonName: e.salon || salonNameMap.get(String(e.salonid)) || "Salón",
+              salonid: e.salonid, fechainicio: e.fechainicio, fechafin: e.fechafin,
+              horainicio: e.horainicio || "", horafin: e.horafin || "",
+              estatus: e.estatus || "", cliente: e.cliente || "",
+              numeroinvitados: e.numeroinvitados || 0, tipo,
+              estatuscomercial: normalizarEstatusComercial(e.estatuscomercial),
+              totalmonto: Number(e.totalmonto) || 0,
+            })
+          }
+        }
+        if (!cancelado && reqId === reqIdRef.current) setEvents(Array.from(byKey.values()))
+      } catch (err) {
+        console.error("[DashboardAvailabilityCalendar] fetch error:", err)
+        if (!cancelado && reqId === reqIdRef.current) setEvents([])
+      } finally {
+        if (!cancelado && reqId === reqIdRef.current) setLoading(false)
+      }
+    })()
+    return () => { cancelado = true }
+  }, [hotelId, dateRange, salonNameMap])
 
   function goToDayView(date: Date, from: ViewMode) { setPreviousView(from); setCurrentDate(date); setViewMode("day") }
   function goBack() { if (previousView) { setViewMode(previousView); setPreviousView(null) } }
@@ -119,9 +149,20 @@ export default function DashboardAvailabilityCalendar({ hotelId, onDayClick }: D
     })
   }
 
-  function getEventsForCell(sId: string, ds: string) { return events.filter((e) => e.salonid === Number(sId) && e.fechainicio <= ds && e.fechafin >= ds) }
-  function getEventsForHourCell(sId: string, ds: string, hr: number) {
+  // Aplica los filtros de estatuscomercial antes de consumir `events` en las celdas.
+  const filteredEvents = useMemo(() => {
+    if (!filters) return events
     return events.filter((e) => {
+      if (e.estatuscomercial === "Tentativo" && !filters.tentativo) return false
+      if (e.estatuscomercial === "Definitivo" && !filters.definitivo) return false
+      if (e.estatuscomercial === "Cancelado" && !filters.cancelado) return false
+      return true
+    })
+  }, [events, filters])
+
+  function getEventsForCell(sId: string, ds: string) { return filteredEvents.filter((e) => e.salonid === Number(sId) && e.fechainicio <= ds && e.fechafin >= ds) }
+  function getEventsForHourCell(sId: string, ds: string, hr: number) {
+    return filteredEvents.filter((e) => {
       if (e.salonid !== Number(sId) || e.fechainicio > ds || e.fechafin < ds) return false
       const s = parseHour(e.horainicio), en = parseHour(e.horafin)
       if (s < 0 || en < 0) return true
@@ -186,6 +227,32 @@ export default function DashboardAvailabilityCalendar({ hotelId, onDayClick }: D
           <Button type="button" variant="outline" size="sm" onClick={() => setCurrentDate(new Date())} className="text-xs h-7 border-blue-200 text-blue-700 hover:bg-blue-50">Hoy</Button>
           <Button type="button" variant="ghost" size="icon" onClick={() => navigate(-1)} className="h-7 w-7 text-blue-600 hover:bg-blue-100"><ChevronLeft className="w-4 h-4" /></Button>
           <Button type="button" variant="ghost" size="icon" onClick={() => navigate(1)} className="h-7 w-7 text-blue-600 hover:bg-blue-100"><ChevronRight className="w-4 h-4" /></Button>
+          <div className="w-px h-5 bg-blue-200 mx-1" />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => router.push("/reservacion-interna/new")}
+            className="gap-1 h-7 text-xs border-amber-500 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Reservación Interna
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => {
+              const params = new URLSearchParams()
+              if (hotelId !== "all") params.set("hotelId", hotelId)
+              if (selectedSalon !== "all") params.set("salonId", selectedSalon)
+              const qs = params.toString()
+              router.push(`/cotizaciones/new${qs ? `?${qs}` : ""}`)
+            }}
+            className="gap-1 h-7 text-xs bg-foreground text-background hover:bg-foreground/90"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Generar Cotizacion
+          </Button>
         </div>
       </div>
 
@@ -201,7 +268,7 @@ export default function DashboardAvailabilityCalendar({ hotelId, onDayClick }: D
             isToday={isToday} isPast={isPast} />
         )}
         {viewMode === "month" && (
-          <MonthView year={currentDate.getFullYear()} salones={salones} events={events}
+          <MonthView year={currentDate.getFullYear()} salones={salones} events={filteredEvents}
             onMonthClick={(month) => {
               const now = new Date()
               const yr = currentDate.getFullYear()
@@ -212,12 +279,12 @@ export default function DashboardAvailabilityCalendar({ hotelId, onDayClick }: D
         )}
       </div>
 
-      {/* Legend */}
+      {/* Legend — estatus comercial */}
       <div className="flex items-center gap-3 px-4 py-2 border-t border-blue-100 bg-gray-50/50 flex-wrap">
         <span className="text-[10px] text-gray-500 uppercase font-semibold tracking-wide">Leyenda:</span>
-        <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-purple-900" /><span className="text-[10px] text-gray-600">Reservación</span></div>
-        <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-amber-400" /><span className="text-[10px] text-gray-600">Cotización</span></div>
-        <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-gray-400" /><span className="text-[10px] text-gray-600">Cancelada</span></div>
+        <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-yellow-500" /><span className="text-[10px] text-gray-600">Tentativo</span></div>
+        <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-emerald-700" /><span className="text-[10px] text-gray-600">Definitivo</span></div>
+        <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-red-700" /><span className="text-[10px] text-gray-600">Cancelado</span></div>
       </div>
     </div>
   )
@@ -265,20 +332,19 @@ function DayView({ date, salones, getEventsForHourCell, onCellClick }: {
                     isPastDay ? "bg-gray-50" : primary ? "cursor-pointer" : "hover:bg-blue-50/30"
                   }`}
                   onClick={() => onCellClick?.(dateStr)}
-                  title={primary ? `${primary.tipo === "reservacion" ? "RESERVACIÓN" : "COTIZACIÓN"}: ${primary.nombreevento}\n${primary.horainicio?.slice(0, 5)} – ${primary.horafin?.slice(0, 5)}\nCliente: ${primary.cliente}` : "Disponible"}>
+                  title={primary ? `${(getEstatusComercialStyle(primary.estatuscomercial).label).toUpperCase()}: ${primary.nombreevento}\n${primary.horainicio?.slice(0, 5)} – ${primary.horafin?.slice(0, 5)}\nCliente: ${primary.cliente}\nTotal: ${fmtMonto(primary.totalmonto)}` : "Disponible"}>
                   {primary && (() => {
                     const pos = getEventSpanPos(primary, h.hour24)
-                    const hasRes = primary.tipo === "reservacion"
                     const roundL = pos === "start" || pos === "single" ? "rounded-l" : ""
                     const roundR = pos === "end" || pos === "single" ? "rounded-r" : ""
                     const insetL = pos === "start" || pos === "single" ? "left-0.5" : "left-0"
                     const insetR = pos === "end" || pos === "single" ? "right-0.5" : "right-0"
                     const showLabel = pos === "start" || pos === "single"
                     return (
-                      <div className={`absolute top-1 bottom-1 ${insetL} ${insetR} ${roundL} ${roundR} ${getEventBarColor(primary)} ${hasRes ? "opacity-85" : "opacity-60"}`}>
+                      <div className={`absolute top-1 bottom-1 ${insetL} ${insetR} ${roundL} ${roundR} ${getEventBarColor(primary)} opacity-85`}>
                         {showLabel && (
                           <div className="absolute inset-0 flex items-center pl-1.5">
-                            <span className={`text-[9px] font-bold truncate ${hasRes ? "text-white" : "text-amber-900"}`}>{primary.nombreevento?.slice(0, 12)}</span>
+                            <span className="text-[9px] font-bold truncate text-white">{primary.nombreevento?.slice(0, 12)}</span>
                           </div>
                         )}
                       </div>
@@ -321,32 +387,31 @@ function WeekView({ days, salones, getEventsForCell, onDayClick, isToday, isPast
           <td className="p-2 font-semibold text-gray-800 border-b border-r border-blue-100 sticky left-0 bg-white group-hover:bg-blue-50/30 z-10 truncate w-[120px]">{salon.text}</td>
           {days.map((d) => {
             const ds = toDateStr(d), evts = getEventsForCell(salon.value, ds)
-            const res = evts.filter(e => e.tipo === "reservacion"), cot = evts.filter(e => e.tipo === "cotizacion")
             const past = isPast(d)
+            let tentativo = 0, definitivo = 0, cancelado = 0
+            let totTent = 0, totDef = 0, totCanc = 0
+            for (const e of evts) {
+              if (e.estatuscomercial === "Tentativo") { tentativo++; totTent += e.totalmonto }
+              else if (e.estatuscomercial === "Definitivo") { definitivo++; totDef += e.totalmonto }
+              else if (e.estatuscomercial === "Cancelado") { cancelado++; totCanc += e.totalmonto }
+            }
+            const total = tentativo + definitivo + cancelado
 
             return (
-              <td key={ds} className={`border-b border-r border-blue-50 p-1 align-top min-h-[56px] h-[56px] transition-all ${
+              <td key={ds} className={`border-b border-r border-blue-50 p-1.5 align-top min-h-[56px] h-[56px] transition-all ${
                 past ? "bg-gray-50/80" : "cursor-pointer hover:bg-blue-50/50"
               }`} onClick={() => { if (!past) onDayClick(d) }}>
-                {res.slice(0, 2).map(r => (
-                  <div key={`r-${r.id}-${r.salonid}-${ds}`} className="rounded px-1.5 py-0.5 mb-0.5 border text-[10px] leading-tight truncate bg-purple-100 border-purple-400 text-purple-900">
-                    <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-purple-900 flex-shrink-0" /><span className="font-semibold truncate">{r.nombreevento?.slice(0, 10)}</span></div>
-                    <div className="text-[9px] text-purple-600 opacity-70">{r.horainicio?.slice(0, 5)} – {r.horafin?.slice(0, 5)}</div>
+                {total > 0 ? (
+                  <div className="space-y-0.5">
+                    {tentativo > 0 && <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-yellow-500 flex-shrink-0" /><span className="text-[10px] text-yellow-800 font-semibold">{tentativo} tent. {fmtMonto(totTent)}</span></div>}
+                    {definitivo > 0 && <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-emerald-700 flex-shrink-0" /><span className="text-[10px] text-emerald-800 font-semibold">{definitivo} def. {fmtMonto(totDef)}</span></div>}
+                    {cancelado > 0 && <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-red-700 flex-shrink-0" /><span className="text-[10px] text-red-800 font-semibold">{cancelado} canc. {fmtMonto(totCanc)}</span></div>}
                   </div>
-                ))}
-                {res.length > 2 && <div className="text-[9px] text-purple-700 pl-1">+{res.length - 2}</div>}
-                {cot.slice(0, 2).map(c => (
-                  <div key={`c-${c.id}-${c.salonid}-${ds}`} className="rounded px-1.5 py-0.5 mb-0.5 border text-[10px] leading-tight truncate bg-amber-50 border-amber-200 text-amber-800">
-                    <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" /><span className="font-semibold truncate">{c.nombreevento?.slice(0, 10)}</span></div>
-                    <div className="text-[9px] text-amber-600 opacity-70">{c.horainicio?.slice(0, 5)} – {c.horafin?.slice(0, 5)}</div>
-                  </div>
-                ))}
-                {cot.length > 2 && <div className="text-[9px] text-amber-500 pl-1">+{cot.length - 2}</div>}
-                {evts.length === 0 && !past && (
+                ) : !past ? (
                   <div className="h-full flex items-center justify-center opacity-0 group-hover:opacity-30">
                     <span className="text-[10px] text-blue-400">Disponible</span>
                   </div>
-                )}
+                ) : null}
               </td>
             )
           })}
@@ -367,16 +432,19 @@ function MonthView({ year, salones, events, onMonthClick }: {
   const currentYear = new Date().getFullYear()
   const MONTHS_SHORT = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
-  function getMonthCounts(salonId: string, month: number): { res: number; cot: number } {
+  function getMonthCounts(salonId: string, month: number) {
     const monthStart = `${year}-${String(month + 1).padStart(2, "0")}-01`
     const monthEnd = `${year}-${String(month + 1).padStart(2, "0")}-${new Date(year, month + 1, 0).getDate()}`
-    let res = 0, cot = 0
+    let tentativo = 0, definitivo = 0, cancelado = 0
+    let totTent = 0, totDef = 0, totCanc = 0
     for (const e of events) {
       if (e.salonid !== Number(salonId)) continue
       if (e.fechainicio > monthEnd || e.fechafin < monthStart) continue
-      if (e.tipo === "reservacion") res++; else cot++
+      if (e.estatuscomercial === "Tentativo") { tentativo++; totTent += e.totalmonto }
+      else if (e.estatuscomercial === "Definitivo") { definitivo++; totDef += e.totalmonto }
+      else if (e.estatuscomercial === "Cancelado") { cancelado++; totCanc += e.totalmonto }
     }
-    return { res, cot }
+    return { tentativo, definitivo, cancelado, totTent, totDef, totCanc }
   }
 
   const isPastMonth = (m: number) => year < currentYear || (year === currentYear && m < currentMonth)
@@ -399,21 +467,29 @@ function MonthView({ year, salones, events, onMonthClick }: {
           <tr key={salon.value} className="group">
             <td className="p-2 font-semibold text-gray-800 border-b border-r border-blue-100 sticky left-0 bg-white group-hover:bg-blue-50/30 z-10 truncate w-[120px]">{salon.text}</td>
             {MONTHS_SHORT.map((_, month) => {
-              const { res, cot } = getMonthCounts(salon.value, month)
+              const { tentativo, definitivo, cancelado, totTent, totDef, totCanc } = getMonthCounts(salon.value, month)
               const past = isPastMonth(month)
               const current = isCurrentMonth(month)
-              const total = res + cot
+              const total = tentativo + definitivo + cancelado
+
+              // Total monto programado: tentativo + definitivo (excluye cancelado).
+              // Solo en vista Mes — representa "total de cotizaciones y eventos programados".
+              const totalProgramado = totTent + totDef
 
               return (
-                <td key={month} className={`border-b border-r border-blue-50 p-1.5 align-top transition-all h-[52px] ${
+                <td key={month} className={`border-b border-r border-blue-50 p-1.5 align-top transition-all min-h-[52px] ${
                   past ? "bg-gray-50/50 cursor-not-allowed"
                   : current ? "bg-blue-50 cursor-pointer hover:bg-blue-100"
                   : "cursor-pointer hover:bg-blue-50"
                 }`} onClick={() => onMonthClick(month)}>
                   {total > 0 ? (
                     <div className="space-y-0.5">
-                      {res > 0 && <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-purple-900 flex-shrink-0" /><span className="text-[10px] text-purple-900 font-semibold">{res} res.</span></div>}
-                      {cot > 0 && <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" /><span className="text-[10px] text-amber-700 font-semibold">{cot} cot.</span></div>}
+                      {tentativo > 0 && <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-yellow-500 flex-shrink-0" /><span className="text-[10px] text-yellow-800 font-semibold">{tentativo} tent.</span></div>}
+                      {definitivo > 0 && <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-emerald-700 flex-shrink-0" /><span className="text-[10px] text-emerald-800 font-semibold">{definitivo} def.</span></div>}
+                      {cancelado > 0 && <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-red-700 flex-shrink-0" /><span className="text-[10px] text-red-800 font-semibold">{cancelado} canc.</span></div>}
+                      <div className="mt-0.5 px-1 py-0 rounded bg-blue-50 border border-blue-200 text-center">
+                        <span className="text-[9px] font-semibold text-blue-700 tracking-tight leading-tight">{fmtMonto(totalProgramado)}</span>
+                      </div>
                     </div>
                   ) : !past ? (
                     <div className="h-full flex items-center justify-center opacity-0 group-hover:opacity-40 transition-opacity">

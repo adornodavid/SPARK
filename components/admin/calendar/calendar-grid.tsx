@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -14,15 +14,21 @@ import { obtenerCalendariosPorRango } from "@/app/actions/calendario"
 import type { oCalendario } from "@/types/calendario"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
+import {
+  ESTATUS_COMERCIAL_ORDER,
+  estatusComercialPresentes,
+  getEstatusComercialStyle,
+  normalizarEstatusComercial,
+  type EstatusComercial,
+} from "./estatus-comercial-colors"
 
 interface CalendarGridProps {
   selectedHotel: string
   selectedSalon: string
   filters: {
-    cotizaciones: boolean
-    reservaciones: boolean
-    canceladas: boolean
-    interno: boolean
+    tentativo: boolean
+    definitivo: boolean
+    cancelado: boolean
   }
   onDayClick: (dateStr: string) => void
 }
@@ -81,10 +87,15 @@ export default function CalendarGrid({
     return { rangoInicio: `${year}-01-01`, rangoFin: `${year}-12-31` }
   }, [])
 
+  // reqId protege contra stale responses: el último fetch siempre gana.
+  const reqIdRef = useRef(0)
+
   // Fetch events for current view
   useEffect(() => {
-    const fetchEventos = async () => {
-      setLoading(true)
+    const reqId = ++reqIdRef.current
+    let cancelado = false
+    setLoading(true)
+    ;(async () => {
       try {
         const hotelId = selectedHotel === "all" ? -1 : Number.parseInt(selectedHotel)
         const salonId = selectedSalon === "all" ? -1 : Number.parseInt(selectedSalon)
@@ -100,30 +111,33 @@ export default function CalendarGrid({
           salonId,
         )
 
+        if (cancelado || reqId !== reqIdRef.current) return
         if (result.success && Array.isArray(result.data)) {
           setEventos(result.data as oCalendario[])
         } else {
           setEventos([])
         }
-      } catch {
-        toast.error("Error al cargar eventos del calendario")
-        setEventos([])
+      } catch (err) {
+        console.error("[CalendarGrid] fetch error:", err)
+        if (!cancelado && reqId === reqIdRef.current) {
+          toast.error("Error al cargar eventos del calendario")
+          setEventos([])
+        }
       } finally {
-        setLoading(false)
+        if (!cancelado && reqId === reqIdRef.current) setLoading(false)
       }
-    }
-
-    fetchEventos()
+    })()
+    return () => { cancelado = true }
   }, [currentMonth, currentYear, selectedHotel, selectedSalon, showYearView, getMonthRange, getYearRange])
 
-  // Filter events based on type/status checkboxes
+  // Filter events por estatuscomercial (Tentativo / Definitivo / Cancelado).
+  // Valores fuera de ese set pasan siempre (defensivo: no ocultamos por desconocimiento).
   const getFilteredEventos = useCallback(() => {
     return eventos.filter((evento) => {
-      const interno = (((evento as any).categoriaevento || "") as string).toLowerCase().trim() === "interno"
-      if (interno && !filters.interno) return false
-      if (!interno && evento.tipo === "Cotizacion" && !filters.cotizaciones) return false
-      if (!interno && evento.tipo === "Reservacion" && !filters.reservaciones) return false
-      if (isCancelada(evento.estatus) && !filters.canceladas) return false
+      const ec = String((evento as any).estatuscomercial || "").trim()
+      if (ec === "Tentativo" && !filters.tentativo) return false
+      if (ec === "Definitivo" && !filters.definitivo) return false
+      if (ec === "Cancelado" && !filters.cancelado) return false
       return true
     })
   }, [eventos, filters])
@@ -139,95 +153,38 @@ export default function CalendarGrid({
     [getFilteredEventos],
   )
 
-  // Color coding: amber=cotizado, purple=reservacion, rojo pastel=cotizacion cancelada, gray=otros cancelados
-  const isCancelada = (estatus: string) => estatus?.toLowerCase().includes("cancelada") || estatus?.toLowerCase() === "cancelada"
-
-  const esInterno = (evento: oCalendario) => (((evento as any).categoriaevento || "") as string).toLowerCase().trim() === "interno"
-
-  const getEventColor = (evento: oCalendario) => {
-    // Cotización cancelada - Rojo pastel
-    if (evento.tipo === "Cotizacion" && isCancelada(evento.estatus)) {
-      return "bg-red-600/85 text-white"
-    }
-    // Otras canceladas / Realizado - Gray
-    if (isCancelada(evento.estatus) || evento.estatus === "realizado") {
-      return "bg-gray-400 text-white"
-    }
-    // Categoría Interno - Azul corporativo (#0c7da8)
-    if (esInterno(evento)) {
-      return "bg-[#0c7da8] text-white"
-    }
-    // Cotizacion activa - Amber/Yellow
-    if (evento.tipo === "Cotizacion") {
-      return "bg-amber-400 text-white"
-    }
-    // Cualquier Reservacion activa - Morado oscuro
-    if (evento.tipo === "Reservacion") {
-      return "bg-purple-900/80 text-white"
-    }
-    return "bg-gray-300 text-white"
-  }
-
-  // Determina los tipos de eventos activos en un día
-  const getDayEventTypes = (dayEvents: oCalendario[]) => {
-    const hasReservacion = dayEvents.some(
-      (e) => e.tipo === "Reservacion" && !isCancelada(e.estatus) && e.estatus !== "realizado",
-    )
-    const hasCotizacion = dayEvents.some(
-      (e) => e.tipo === "Cotizacion" && !isCancelada(e.estatus) && e.estatus !== "realizado",
-    )
-    const hasCancelada = dayEvents.some(
-      (e) => isCancelada(e.estatus) || e.estatus === "realizado",
-    )
-    return { hasReservacion, hasCotizacion, hasCancelada }
-  }
-
-  // Color sólido de fondo (para un solo tipo). Si hay >1 tipo activo, retorna "" (gradient lo maneja).
+  // Color coding por `estatuscomercial` (Tentativo / Definitivo / Cancelado).
+  // Color sólido de fondo cuando todos los eventos del día comparten estatuscomercial.
+  // Si hay >1 estatus presente, retorna "" (el gradient lo maneja).
   const getDayStatusColor = (dayEvents: oCalendario[]) => {
     if (dayEvents.length === 0) return ""
-    const activos = dayEvents.filter((e) => !isCancelada(e.estatus) && e.estatus !== "realizado")
-    const hasReserv = activos.some((e) => e.tipo === "Reservacion" && !esInterno(e))
-    const hasCot = activos.some((e) => e.tipo === "Cotizacion" && !esInterno(e))
-    const hasInt = activos.some(esInterno)
-    const tiposActivos = [hasReserv, hasCot, hasInt].filter(Boolean).length
-    if (tiposActivos > 1) return "" // gradient
-    if (hasReserv) return "bg-purple-900/80 text-white"
-    if (hasInt) return "bg-[#0c7da8] text-white"
-    if (hasCot) return "bg-amber-400 text-white"
-    // Solo cotizaciones canceladas
-    const hasCotCancelada = dayEvents.some((e) => e.tipo === "Cotizacion" && isCancelada(e.estatus))
-    if (hasCotCancelada) return "bg-red-600/85 text-white"
-    return "bg-gray-400 text-white"
+    const presentes = estatusComercialPresentes(dayEvents)
+    if (presentes.length === 1) {
+      return getEstatusComercialStyle(presentes[0]).fill
+    }
+    if (presentes.length === 0) {
+      // Eventos sin estatuscomercial reconocido
+      return getEstatusComercialStyle(null).fill
+    }
+    return "" // gradient
   }
 
-  // Estilo diagonal/franjas para días con múltiples tipos de evento
-  const getDayDiagonalStyle = (dayEvents: oCalendario[]): React.CSSProperties | undefined => {
-    const activos = dayEvents.filter((e) => !isCancelada(e.estatus) && e.estatus !== "realizado")
-    const hasReserv = activos.some((e) => e.tipo === "Reservacion" && !esInterno(e))
-    const hasCot = activos.some((e) => e.tipo === "Cotizacion" && !esInterno(e))
-    const hasInt = activos.some(esInterno)
-    const COLOR_RES = "rgb(88 28 135 / 0.8)"
-    const COLOR_COT = "rgb(251 191 36)"
-    const COLOR_INT = "#0c7da8"
-    const tiposActivos = [hasReserv, hasCot, hasInt].filter(Boolean).length
-    if (tiposActivos < 2) return undefined
-    if (tiposActivos === 3) {
-      return {
-        background: `linear-gradient(135deg, ${COLOR_RES} 0%, ${COLOR_RES} 33%, ${COLOR_INT} 33%, ${COLOR_INT} 66%, ${COLOR_COT} 66%, ${COLOR_COT} 100%)`,
-        color: "white",
-      }
+  // Formateador compacto de montos ($12K si >=1000, si no $N)
+  const fmtMonto = (n: number) => {
+    if (n >= 1000) return `$${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}K`
+    return `$${Math.round(n)}`
+  }
+
+  // Gradient diagonal para días con 2 o 3 estatus comerciales presentes.
+  const getDayDiagonalStyle = (presentes: EstatusComercial[]): React.CSSProperties | undefined => {
+    if (presentes.length < 2) return undefined
+    const colors = presentes.map((k) => getEstatusComercialStyle(k).rgb)
+    if (colors.length === 2) {
+      return { background: `linear-gradient(135deg, ${colors[0]} 50%, ${colors[1]} 50%)` }
     }
-    // 2 tipos: diagonal a 50/50
-    if (hasReserv && hasCot) {
-      return { background: `linear-gradient(135deg, ${COLOR_RES} 50%, ${COLOR_COT} 50%)`, color: "white" }
+    return {
+      background: `linear-gradient(135deg, ${colors[0]} 33%, ${colors[1]} 33%, ${colors[1]} 66%, ${colors[2]} 66%)`,
     }
-    if (hasReserv && hasInt) {
-      return { background: `linear-gradient(135deg, ${COLOR_RES} 50%, ${COLOR_INT} 50%)`, color: "white" }
-    }
-    if (hasCot && hasInt) {
-      return { background: `linear-gradient(135deg, ${COLOR_INT} 50%, ${COLOR_COT} 50%)`, color: "white" }
-    }
-    return undefined
   }
 
   // Calendar math helpers
@@ -439,74 +396,104 @@ export default function CalendarGrid({
                 const eventosDelDia = day ? getEventosForDay(day, currentMonth, currentYear) : []
                 const hasEvents = eventosDelDia.length > 0
                 const statusColor = getDayStatusColor(eventosDelDia)
-                const primaryEvento = eventosDelDia[0]
-
-                const diagonalStyle = hasEvents ? getDayDiagonalStyle(eventosDelDia) : undefined
-                const isDiagonal = !!diagonalStyle
-                // Aplicar opacidad reducida en días pasados (sigue mostrando color pero "deshabilitado")
-                const finalStyle: React.CSSProperties | undefined = diagonalStyle
-                  ? (past ? { ...diagonalStyle, opacity: 0.25 } : diagonalStyle)
-                  : undefined
-                const reservaciones = eventosDelDia.filter((e) => e.tipo === "Reservacion" && !isCancelada(e.estatus) && e.estatus !== "realizado")
-                const cotizaciones = eventosDelDia.filter((e) => e.tipo === "Cotizacion" && !isCancelada(e.estatus) && e.estatus !== "realizado")
+                const presentes = estatusComercialPresentes(eventosDelDia)
+                const esMulti = presentes.length >= 2
+                const eventosPorEstatus: Record<EstatusComercial, oCalendario[]> = {
+                  Tentativo: [],
+                  Definitivo: [],
+                  Cancelado: [],
+                }
+                const totalPorEstatus: Record<EstatusComercial, number> = {
+                  Tentativo: 0,
+                  Definitivo: 0,
+                  Cancelado: 0,
+                }
+                for (const ev of eventosDelDia) {
+                  const k = normalizarEstatusComercial((ev as any).estatuscomercial)
+                  if (!k) continue
+                  eventosPorEstatus[k].push(ev)
+                  totalPorEstatus[k] += Number((ev as any).totalmonto) || 0
+                }
 
                 return (
                   <div
                     key={index}
                     onClick={() => day && handleDayClick(day)}
-                    style={finalStyle}
                     className={`
-                      relative aspect-square p-2 rounded-lg transition-all duration-200 cursor-pointer
+                      relative aspect-square rounded-lg transition-all duration-200 cursor-pointer overflow-hidden
                       ${day === null ? "bg-transparent cursor-default" : ""}
                       ${past && day !== null && !hasEvents ? "bg-muted/20 text-muted-foreground/50" : ""}
                       ${!past && day !== null && !hasEvents
                         ? "bg-card border border-border hover:border-lime-500 hover:shadow-lg hover:scale-105"
                         : ""
                       }
-                      ${day !== null && hasEvents && !isDiagonal
+                      ${day !== null && hasEvents && !esMulti
                         ? `hover:scale-105 hover:shadow-xl ${statusColor} ${past ? "opacity-25" : ""}`
                         : ""
                       }
-                      ${day !== null && hasEvents && isDiagonal
-                        ? "hover:scale-105 hover:shadow-xl"
+                      ${day !== null && hasEvents && esMulti
+                        ? `hover:scale-105 hover:shadow-xl ${past ? "opacity-25" : ""}`
                         : ""
                       }
                       ${isTodayDay ? "ring-2 ring-lime-600 ring-offset-2" : ""}
                     `}
                   >
+                    {day && hasEvents && esMulti && (
+                      <>
+                        {/* Fondo en gradient diagonal (cubre la tarjeta) */}
+                        <div
+                          className="absolute inset-0"
+                          style={getDayDiagonalStyle(presentes)}
+                        />
+                        {/* Texto por cuña — alineado al corner que le corresponde */}
+                        {presentes[0] && (
+                          <div className="absolute top-1 left-1 text-[0.7rem] font-bold text-white leading-[1.15] drop-shadow-[0_1px_2px_rgba(0,0,0,0.7)] z-[5]">
+                            <div>{eventosPorEstatus[presentes[0]].length} {presentes[0].slice(0, 4).toLowerCase()}.</div>
+                            <div>{fmtMonto(totalPorEstatus[presentes[0]])}</div>
+                          </div>
+                        )}
+                        {presentes[1] && presentes.length === 2 && (
+                          <div className="absolute bottom-1 right-1 text-right text-[0.7rem] font-bold text-white leading-[1.15] drop-shadow-[0_1px_2px_rgba(0,0,0,0.7)] z-[5]">
+                            <div>{eventosPorEstatus[presentes[1]].length} {presentes[1].slice(0, 4).toLowerCase()}.</div>
+                            <div>{fmtMonto(totalPorEstatus[presentes[1]])}</div>
+                          </div>
+                        )}
+                        {presentes.length === 3 && (
+                          <>
+                            {/* Segundo estatus en el centro de la diagonal */}
+                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center text-[0.7rem] font-bold text-white leading-[1.15] drop-shadow-[0_1px_2px_rgba(0,0,0,0.7)] z-[5]">
+                              <div>{eventosPorEstatus[presentes[1]].length} {presentes[1].slice(0, 4).toLowerCase()}.</div>
+                              <div>{fmtMonto(totalPorEstatus[presentes[1]])}</div>
+                            </div>
+                            {/* Tercero abajo-derecha */}
+                            <div className="absolute bottom-1 right-1 text-right text-[0.7rem] font-bold text-white leading-[1.15] drop-shadow-[0_1px_2px_rgba(0,0,0,0.7)] z-[5]">
+                              <div>{eventosPorEstatus[presentes[2]].length} {presentes[2].slice(0, 4).toLowerCase()}.</div>
+                              <div>{fmtMonto(totalPorEstatus[presentes[2]])}</div>
+                            </div>
+                          </>
+                        )}
+                      </>
+                    )}
                     {day && (
-                      <div className="flex flex-col h-full overflow-hidden">
+                      <div className="relative z-10 flex flex-col h-full overflow-hidden p-2">
                         <div
                           className={`
                             text-sm font-bold mb-1 text-center
                             ${isTodayDay && !hasEvents ? "text-lime-600" : ""}
                             ${past && !hasEvents ? "text-muted-foreground/50" : ""}
-                            ${hasEvents ? "text-white" : ""}
+                            ${hasEvents && !esMulti ? "text-white" : ""}
                             ${!hasEvents && !past && !isTodayDay ? "text-foreground" : ""}
                           `}
                         >
-                          {day}
+                          {hasEvents && esMulti ? (
+                            <span className="inline-flex items-center justify-center text-white bg-black/50 rounded-full min-w-[22px] h-[22px] px-1.5 text-xs">
+                              {day}
+                            </span>
+                          ) : (
+                            day
+                          )}
                         </div>
-                        {!past && hasEvents && isDiagonal && (
-                          <div className="flex-1 flex flex-col justify-between overflow-hidden text-white gap-0.5">
-                            {/* Reservación arriba-izquierda */}
-                            <div className="text-[0.55rem] leading-tight">
-                              <div className="font-bold truncate">{reservaciones[0]?.nombreevento}</div>
-                              <div className="truncate opacity-90">{reservaciones[0]?.salon}</div>
-                              <div className="inline-block text-[0.5rem] font-bold bg-white/25 px-1 py-0.5 rounded uppercase">
-                                {reservaciones.length} reserv.
-                              </div>
-                            </div>
-                            {/* Cotización abajo-derecha */}
-                            <div className="text-[0.55rem] leading-tight text-right">
-                              <div className="font-bold truncate">{cotizaciones[0]?.nombreevento}</div>
-                              <div className="inline-block text-[0.5rem] font-bold bg-white/25 px-1 py-0.5 rounded uppercase">
-                                {cotizaciones.length} cotiz.
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                        {!past && hasEvents && !isDiagonal && (
+                        {!past && hasEvents && !esMulti && (
                           <div className="flex-1 flex flex-col gap-0.5 overflow-hidden text-white">
                             {eventosDelDia.slice(0, 1).map((evento, idx) => (
                               <div key={idx} className="flex flex-col gap-0.5 text-[0.6rem] leading-tight">
@@ -522,16 +509,11 @@ export default function CalendarGrid({
                               </div>
                             ))}
                             <div className="mt-auto flex flex-wrap gap-0.5 justify-center">
-                              {reservaciones.length > 0 && (
-                                <span className="text-[0.5rem] font-bold bg-white/25 px-1 py-0.5 rounded uppercase">
-                                  {reservaciones.length} reserv.
+                              {presentes.map((k) => (
+                                <span key={k} className="text-[0.65rem] font-bold bg-white/25 px-1 py-0.5 rounded">
+                                  {eventosPorEstatus[k].length} {k.slice(0, 4).toLowerCase()}. · {fmtMonto(totalPorEstatus[k])}
                                 </span>
-                              )}
-                              {cotizaciones.length > 0 && (
-                                <span className="text-[0.5rem] font-bold bg-white/25 px-1 py-0.5 rounded uppercase">
-                                  {cotizaciones.length} cotiz.
-                                </span>
-                              )}
+                              ))}
                             </div>
                           </div>
                         )}

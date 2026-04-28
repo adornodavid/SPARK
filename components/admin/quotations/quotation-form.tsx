@@ -9,7 +9,7 @@ import { listaDesplegableSalones, objetoSalon, objetoSalones } from "@/app/actio
 import { crearCotizacion, actualizarCotizacion, objetoCotizacion, crearReservacion, actualizarReservacion, eliminarReservacion } from "@/app/actions/cotizaciones"
 import { obtenerDisponibilidadSalon, obtenerReservacionesPorDia } from "@/app/actions/reservaciones"
 import { AvailabilityCalendar } from "./availability-calendar"
-import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, buscarConsumoPorMenu, agregarElementoACotizacion, obtenerPrecioPaquetePorPlatillo, duplicarElementosReservacion, asignarPaqueteAReservacion, buscarLugaresPorHotel, modificarLugarCotizacion, listaEstatusCotizacion, obtenerDocumentoPDF, obtenerPlatillosCotizacion, buscarPlatillosItems, obtenerFormatoCotizacion, obtenerUsuarioSesionActual, obtenerEmpresaPorCliente, obtenerGrupoEmpresa, obtenerComplementosPorHotel, obtenerPlatilloItemPorId, obtenerAudiovisualPorHotel, obtenerElementosPaqueteOriginal } from "@/app/actions/catalogos"
+import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, buscarConsumoPorMenu, agregarElementoACotizacion, obtenerPrecioPaquetePorPlatillo, duplicarElementosReservacion, asignarPaqueteAReservacion, buscarLugaresPorHotel, modificarLugarCotizacion, listaEstatusCotizacion, listaEstatusComercialVisual, obtenerDocumentoPDF, obtenerPlatillosCotizacion, buscarPlatillosItems, obtenerFormatoCotizacion, obtenerUsuarioSesionActual, obtenerEmpresaPorCliente, obtenerGrupoEmpresa, obtenerComplementosPorHotel, obtenerPlatilloItemPorId, obtenerAudiovisualPorHotel, obtenerElementosPaqueteOriginal } from "@/app/actions/catalogos"
 import { listaCategoriaEvento } from "@/app/actions/cotizaciones"
 import { Users, MapPin, DollarSign, User, Mail, Phone, Building2, Check, X, CalendarIcon, FileText, UserPlus } from "lucide-react"
 import { Calendar } from "@/components/ui/calendar"
@@ -41,6 +41,19 @@ const TIPO_A_SECCION: Record<string, string> = {
   cortesias: "cortesias",
   servicio: "servicio",
 }
+
+// Label que se muestra en la columna "Tipo" del presupuesto cuando un elemento se agrega
+// con costo > 0 y no forma parte del paquete original. Cada sección genera un renglón por elemento.
+const TIPO_LABEL_POR_SECCION: Record<string, string> = {
+  alimentos: "Alimento adicional",
+  bebidas: "Bebida adicional",
+  consumo: "Consumo",
+  mobiliario: "Mobiliario",
+  servicio: "Servicio",
+  cortesias: "Cortesía",
+  lugar: "Lugar",
+}
+const TIPOS_GESTIONADOS_AUTO = new Set(Object.values(TIPO_LABEL_POR_SECCION))
 function normalizarSeccion(tipo: string): string {
   const lower = tipo.toLowerCase().trim()
   return TIPO_A_SECCION[lower] ?? lower
@@ -74,11 +87,22 @@ async function getImageDimensions(base64: string): Promise<{ width: number; heig
   })
 }
 
+// Fórmula unificada del renglón de presupuesto.
+// `descuento` se interpreta como PORCENTAJE (0–100) aplicado sobre el subtotal.
+// Subtotal ajustado = subtotal × (1 - descuento/100) + servicio.
+// Total = subtotal ajustado × cantidad × dias.
+function calcularTotalesRow(subtotal: number, servicio: number, descuento: number, cantidad: number, dias: number) {
+  const descPct = Math.min(Math.max(Number(descuento) || 0, 0), 100)
+  const subtotalAjustado = subtotal * (1 - descPct / 100) + (Number(servicio) || 0)
+  const total = subtotalAjustado * (cantidad || 1) * (dias || 1)
+  return { subtotalAjustado, total }
+}
+
 function crearPresupuestoItem(concepto: string, tipo: string, costo: number, dias: number, servicio = 0, cantidad = 0, descuento = 0) {
   const subtotal = costo
   const precio = subtotal > 0 ? subtotal / 1.16 : 0
   const iva = precio * 0.16
-  const total = (subtotal + servicio - descuento) * (cantidad || 1) * (dias || 1)
+  const { total } = calcularTotalesRow(subtotal, servicio, descuento, cantidad, dias)
   return { concepto, tipo, precio, iva, servicio, descuento, subtotal, cantidad, dias, total }
 }
 
@@ -1035,10 +1059,13 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [elementosPaquete])
 
-  // Recalcula renglones "Alimento adicional" / "Bebida adicional" en presupuesto
-  // (alimentos o bebidas que están en la cotización pero NO formaban parte del paquete original)
-  // Precio para alimentos: 1) menus.costo si > 0; 2) si no, costo del platillo clave elegido
-  //   (platillos.id = id del platillo que el usuario agregó al menú, platillos.menuid = id del menú).
+  // Recalcula renglones por-elemento en presupuesto para secciones con costo individual:
+  // alimentos, bebidas, consumo, mobiliario, servicio, cortesías, lugar.
+  // Regla: sólo elementos con costo > 0 que NO formen parte del paquete original (los del paquete
+  // se cobran en el renglón "Paquete"). Cantidad = numInvitados; total = costo × numInvitados × dias.
+  // Para alimentos con tipomenu "Individual" se genera un renglón POR platillo (cada platillo
+  // tiene su propio costo). Fallback de costo: 1) el.costo del view; 2) costoMap (menus/menubebidas);
+  // 3) costo del platillo clave (sólo alimentos).
   useEffect(() => {
     // Esperar a que sepamos qué trae el paquete original antes de decidir qué es "adicional".
     // Sin este guard, durante la carga inicial todos los menús del paquete se marcarían adicionales por error.
@@ -1048,7 +1075,8 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
     const adicionales: { concepto: string; tipo: string; precio: number; iva: number; servicio: number; descuento: number; subtotal: number; cantidad: number; dias: number; total: number }[] = []
     for (const el of elementosPaquete) {
       const tipoSec = normalizarSeccion(el.tipoelemento || el.tipo || "")
-      if (tipoSec !== "alimentos" && tipoSec !== "bebidas") continue
+      const tipoLabel = TIPO_LABEL_POR_SECCION[tipoSec]
+      if (!tipoLabel) continue
       const tipoCanon = String(el.tipoelemento || "").toLowerCase().trim()
       const elemId = Number(el.elementoid ?? el.id)
       if (!Number.isFinite(elemId)) continue
@@ -1056,8 +1084,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
       // Si el paquete tiene elementos definidos y este sí está incluido, no es adicional
       if (paqueteOriginalKeys.size > 0 && paqueteOriginalKeys.has(key)) continue
 
-      const nombreMenu = el.descripcion || el.nombre || el.elemento || (tipoSec === "alimentos" ? "Menú adicional" : "Bebida adicional")
-      const tipoLabel = tipoSec === "alimentos" ? "Alimento adicional" : "Bebida adicional"
+      const nombreMenu = el.descripcion || el.nombre || el.elemento || tipoLabel
 
       // Caso especial: alimentos de tipomenu "Individual" → un renglón POR cada platillo seleccionado
       if (tipoSec === "alimentos") {
@@ -1066,6 +1093,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
         if (tipoMenu === "individual" && platillosDeMenu.length > 0) {
           for (const plat of platillosDeMenu) {
             const cPlat = Number(plat?.costo) || 0
+            if (cPlat <= 0) continue
             const nombrePlat = plat?.nombre || plat?.descripcion || "Platillo"
             adicionales.push(crearPresupuestoItem(`${nombreMenu} — ${nombrePlat}`, tipoLabel, cPlat, dias, 0, numInvitados))
           }
@@ -1086,10 +1114,11 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
         if (cPlat > 0) costo = cPlat
       }
 
+      if (costo <= 0) continue
       adicionales.push(crearPresupuestoItem(nombreMenu, tipoLabel, costo, dias, 0, numInvitados))
     }
     setPresupuestoItems(prev => {
-      const sinAdicionales = prev.filter(p => p.tipo !== "Alimento adicional" && p.tipo !== "Bebida adicional")
+      const sinAdicionales = prev.filter(p => !TIPOS_GESTIONADOS_AUTO.has(p.tipo))
       return [...sinAdicionales, ...adicionales]
     })
   }, [elementosPaquete, platillosItems, alimentosTipoMenu, paqueteOriginalKeys, paqueteOriginalKeysLoaded, costoMap, selectedPaqueteId, formData.fechaInicial, formData.fechaFinal, formData.numeroInvitados])
@@ -1322,21 +1351,19 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
         setCategoriasEvento(lista)
       }
     })
-    listaEstatusCotizacion(isReservacionInterna ? "Reservacion" : "Cotizacion").then(r => {
+    // En modo reservación interna incluimos id=2 (Definitivo) aunque visual=false,
+    // porque ese es el default operacional para esos registros.
+    const extraIds = isReservacionInterna ? [2] : []
+    listaEstatusComercialVisual(extraIds).then(r => {
       if (r.success && r.data) {
         const lista = r.data as ddlItem[]
         setEstatusList(lista)
-        // En modo creación, pre-seleccionar el estatus por defecto
+        // Default en creación: id=2 (Definitivo) si reservación-interna, id=1 (Tentativo) en cotización.
         if (!effectiveEditId) {
-          if (isReservacionInterna) {
-            // Reservación interna: estatus por defecto id=14
-            const def = lista.find((e) => e.value === "14")
-            if (def) setPendingEstatusId(def.value)
-            else if (lista.length > 0) setPendingEstatusId(lista[0].value)
-          } else {
-            const borrador = lista.find((e) => e.text.trim().toLowerCase() === "borrador")
-            if (borrador) setPendingEstatusId(borrador.value)
-          }
+          const defaultId = isReservacionInterna ? "2" : "1"
+          const def = lista.find((e) => e.value === defaultId)
+          if (def) setPendingEstatusId(def.value)
+          else if (lista.length > 0) setPendingEstatusId(lista[0].value)
         }
       }
     })
@@ -1421,7 +1448,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
         nombreEvento:        c.nombreevento              ?? "",
         categoriaEvento:     categoriaEventoId,
         tipoEvento:          tid,
-        estatusId:           c.estatusid?.toString()     ?? "",
+        estatusId:           c.estatuscomercialid?.toString() ?? "1",
         adultos:             c.numeroinvitados?.toString() ?? "",
         ninos:               "0",
         numeroInvitados:     c.numeroinvitados?.toString() ?? "",
@@ -2771,16 +2798,9 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
         }
         y += headerH
 
-        // Regla de cortesía: si la suma de los otros conceptos (excluyendo Audiovisual) cubre el total del salón,
-        // el salón se muestra como "Cortesía" y no suma al total.
-        const otrosTotalPdf = presupuestoItems
-          .filter((p: any) => p.tipo !== "Salón" && p.tipo !== "Audiovisual" && p.tipo !== "Hora extra")
-          .reduce((s: number, p: any) => s + (p.total || 0), 0)
-
         // Data rows
         for (let idx = 0; idx < presupuestoItems.length; idx++) {
           const item = presupuestoItems[idx]
-          const esCortesiaSalon = item.tipo === "Salón" && item.total > 0 && otrosTotalPdf >= item.total
           const rowH = 6.5
           checkNewPage(rowH + 2)
 
@@ -2819,7 +2839,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
             item.subtotal > 0 ? fmt(item.subtotal) : "Por definir",
             item.cantidad ? String(item.cantidad) : "-",
             String(item.dias),
-            esCortesiaSalon ? "Cortesía" : (item.total > 0 ? fmt(item.total) : "Por definir"),
+            (item.descuento || 0) >= 100 ? "Cortesía" : (item.total > 0 ? fmt(item.total) : "Por definir"),
           ]
 
           colX = tableX
@@ -2864,11 +2884,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
         const totalLabelX = tableX + cols.slice(0, 9).reduce((a, b) => a + b, 0) - 2
         doc.text("Total", totalLabelX, y + 5, { align: "right" })
 
-        // Valor total (excluye salón cuando aplica como cortesía)
-        const grandTotal = presupuestoItems.reduce((sum: number, i: any) => {
-          const esCortesia = i.tipo === "Salón" && i.total > 0 && otrosTotalPdf >= i.total
-          return sum + (esCortesia ? 0 : (i.total || 0))
-        }, 0)
+        const grandTotal = presupuestoItems.reduce((sum: number, i: any) => sum + (i.total || 0), 0)
         doc.setFontSize(8.5)
         doc.setTextColor(50, 50, 50)
         const totalValX = tableX + contentWidth - 2
@@ -2975,12 +2991,13 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
       setPdfGenerated(true)
 
       // Cambiar estatus de la cotización a "Cotizacion Generada" (id = 3)
+      // Nota: formData.estatusId ahora representa estatuscomercialid (no estatusid),
+      // por lo que NO se sincroniza el cambio aquí — solo se persiste en DB.
       try {
         const eventoIdActual = eventoId ?? (effectiveEditId ? Number(effectiveEditId) : null)
         if (eventoIdActual) {
           const supa = (await import("@/lib/supabase/client")).createClient()
           await supa.from("eventos").update({ estatusid: 3 }).eq("id", eventoIdActual)
-          setFormData(prev => ({ ...prev, estatusId: "3" }))
         }
       } catch (e) {
         console.error("Error actualizando estatus a 'Cotizacion Generada':", e)
@@ -3770,7 +3787,9 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
   }
 
   const handleClienteSelect = async (cliente: { value: string; text: string }) => {
-    setFormData(prev => ({ ...prev, nombreCliente: cliente.text }))
+    // Limpiar primero email/telefono/empresa/grupo del cliente anterior — luego se rellena con los del nuevo cliente.
+    // Evita que datos viejos persistan si el nuevo cliente no tiene esos campos o si el fetch falla.
+    setFormData(prev => ({ ...prev, nombreCliente: cliente.text, email: "", telefono: "", empresa: "", grupo: "" }))
     setSelectedClienteId(cliente.value)
     setShowClienteDropdown(false)
 
@@ -3852,7 +3871,13 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
       formDataToSubmit.append("impuestos", formData.impuestos)
       formDataToSubmit.append("porcentajedescuento", formData.descuentoPorcentaje)
       formDataToSubmit.append("montodescuento", formData.montoDescuento)
-      formDataToSubmit.append("estatusid", formData.estatusId)
+      // estatusid (operacional) solo se hardcodea en CREACIÓN; en edición el backend lo conserva.
+      const isCreating = !(effectiveEditId || eventoId)
+      if (isCreating) {
+        formDataToSubmit.append("estatusid", isReservacionInterna ? "14" : "1")
+      }
+      // estatuscomercialid lo controla el dropdown disabled (default id=1, lista de visual=true).
+      formDataToSubmit.append("estatuscomercialid", formData.estatusId)
       formDataToSubmit.append("categoriaevento", formData.categoriaEvento)
       formDataToSubmit.append("clienteid", selectedClienteId)
       formDataToSubmit.append("numerohabitaciones", requerirHabitaciones ? formData.numeroHabitaciones : "")
@@ -4732,7 +4757,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                 <Select
                   value={formData.estatusId}
                   onValueChange={(v) => setFormData(prev => ({ ...prev, estatusId: v }))}
-                  disabled={!effectiveEditId && !cotizacionId}
+                  disabled
                 >
                   <SelectTrigger id="estatus" className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full">
                     <SelectValue placeholder="Selecciona estatus" />
@@ -6069,7 +6094,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                     <th className="text-right px-3 py-3 font-medium w-28">Precio</th>
                     <th className="text-right px-3 py-3 font-medium w-24">IVA</th>
                     <th className="text-right px-3 py-3 font-medium w-28">Servicio (propina)</th>
-                    <th className="text-right px-3 py-3 font-medium w-28">Descuento (MXN)</th>
+                    <th className="text-right px-3 py-3 font-medium w-28">Descuento (%)</th>
                     <th className="text-right px-3 py-3 font-medium w-28">Subtotal</th>
                     <th className="text-center px-3 py-3 font-medium w-20">Cantidad</th>
                     <th className="text-center px-3 py-3 font-medium w-16">Días</th>
@@ -6077,16 +6102,9 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                   </tr>
                 </thead>
                 <tbody>
-                  {(() => {
-                    // Regla de cortesía: si la suma de los demás conceptos (excluyendo Audiovisual)
-                    // es >= total del salón, el salón queda como cortesía y no suma al total.
-                    const otrosTotal = presupuestoItems
-                      .filter(p => p.tipo !== "Salón" && p.tipo !== "Audiovisual" && p.tipo !== "Hora extra")
-                      .reduce((s, p) => s + p.total, 0)
-                    return presupuestoItems.map((item, index) => {
-                      const esCortesiaSalon = item.tipo === "Salón" && item.total > 0 && otrosTotal >= item.total
-                      const breakdown = Array.isArray((item as any).breakdown) ? ((item as any).breakdown as any[]) : []
-                      return (
+                  {presupuestoItems.map((item, index) => {
+                    const breakdown = Array.isArray((item as any).breakdown) ? ((item as any).breakdown as any[]) : []
+                    return (
                     <React.Fragment key={index}>
                     <tr className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                       <td className="px-3 py-3 text-gray-500">{index + 1}</td>
@@ -6120,47 +6138,48 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                             const val = e.target.value ? Number(e.target.value) : 0
                             setPresupuestoItems(prev => prev.map((p, i) => {
                               if (i !== index) return p
-                              const cant = p.cantidad || 1
-                              const dias = p.dias || 1
-                              const desc = p.descuento || 0
-                              return { ...p, servicio: val, total: (p.subtotal + val - desc) * cant * dias }
+                              const { total } = calcularTotalesRow(p.subtotal, val, p.descuento || 0, p.cantidad || 1, p.dias || 1)
+                              return { ...p, servicio: val, total }
                             }))
                           }}
                           className="w-24 text-right border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[#1a3d2e] focus:border-[#1a3d2e]"
                         />
                       </td>
                       <td className="px-3 py-3 text-right">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={item.descuento || ""}
-                          placeholder="-"
-                          onChange={(e) => {
-                            const val = e.target.value ? Number(e.target.value) : 0
-                            setPresupuestoItems(prev => prev.map((p, i) => {
-                              if (i !== index) return p
-                              const cant = p.cantidad || 1
-                              const dias = p.dias || 1
-                              const serv = p.servicio || 0
-                              return { ...p, descuento: val, total: (p.subtotal + serv - val) * cant * dias }
-                            }))
-                          }}
-                          className="w-24 text-right border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[#1a3d2e] focus:border-[#1a3d2e]"
-                        />
+                        <div className="inline-flex items-center gap-1 whitespace-nowrap">
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.01"
+                            value={item.descuento || ""}
+                            placeholder="0"
+                            onChange={(e) => {
+                              const raw = e.target.value ? Number(e.target.value) : 0
+                              const val = Math.min(Math.max(raw, 0), 100)
+                              setPresupuestoItems(prev => prev.map((p, i) => {
+                                if (i !== index) return p
+                                const { total } = calcularTotalesRow(p.subtotal, p.servicio || 0, val, p.cantidad || 1, p.dias || 1)
+                                return { ...p, descuento: val, total }
+                              }))
+                            }}
+                            className="w-16 text-right border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[#1a3d2e] focus:border-[#1a3d2e]"
+                          />
+                          <span className="text-gray-500">%</span>
+                        </div>
                       </td>
                       <td className="px-3 py-3 text-right text-gray-900">
                         {(() => {
-                          const subTotalAjustado = item.subtotal + (item.servicio || 0) - (item.descuento || 0)
-                          return subTotalAjustado > 0
-                            ? `$${subTotalAjustado.toLocaleString("es-MX", { minimumFractionDigits: 2 })}`
+                          const { subtotalAjustado } = calcularTotalesRow(item.subtotal, item.servicio || 0, item.descuento || 0, 1, 1)
+                          return subtotalAjustado > 0
+                            ? `$${subtotalAjustado.toLocaleString("es-MX", { minimumFractionDigits: 2 })}`
                             : (item.subtotal > 0 ? `$${(0).toLocaleString("es-MX", { minimumFractionDigits: 2 })}` : "Por definir")
                         })()}
                       </td>
                       <td className="px-3 py-3 text-center text-gray-900">{item.cantidad || "-"}</td>
                       <td className="px-3 py-3 text-center text-gray-900">{item.dias}</td>
                       <td className="px-3 py-3 text-right text-gray-900 font-medium">
-                        {esCortesiaSalon ? (
+                        {(item.descuento || 0) >= 100 ? (
                           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
                             Cortesía
                           </span>
@@ -6185,20 +6204,15 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                       </tr>
                     ))}
                     </React.Fragment>
-                      )
-                    })
-                  })()}
+                    )
+                  })}
                 </tbody>
                 <tfoot>
                   <tr className="bg-[#1a3d2e]/5 border-t-2 border-[#1a3d2e]/20">
                     <td colSpan={10} className="px-3 py-3 text-right font-semibold text-gray-900">Total</td>
                     <td className="px-3 py-3 text-right font-bold text-[#1a3d2e] text-base">
                       {(() => {
-                        const otrosTotal = presupuestoItems.filter(p => p.tipo !== "Salón" && p.tipo !== "Audiovisual" && p.tipo !== "Hora extra").reduce((s, p) => s + p.total, 0)
-                        const total = presupuestoItems.reduce((sum, i) => {
-                          const esCortesiaSalon = i.tipo === "Salón" && i.total > 0 && otrosTotal >= i.total
-                          return sum + (esCortesiaSalon ? 0 : i.total)
-                        }, 0)
+                        const total = presupuestoItems.reduce((sum, i) => sum + (i.total || 0), 0)
                         return total > 0 ? `$${total.toLocaleString("es-MX", { minimumFractionDigits: 2 })}` : "Por definir"
                       })()}
                     </td>

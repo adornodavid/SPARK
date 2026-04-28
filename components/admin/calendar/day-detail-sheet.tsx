@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import {
   Sheet,
   SheetContent,
@@ -22,12 +22,12 @@ import {
   Plus,
   FileText,
   Loader2,
-  Pencil,
 } from "lucide-react"
 import { obtenerEventosPorDia } from "@/app/actions/calendario"
 import type { oCalendario } from "@/types/calendario"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
+import { getEstatusComercialStyle, normalizarEstatusComercial } from "./estatus-comercial-colors"
 
 interface DayDetailSheetProps {
   open: boolean
@@ -35,6 +35,11 @@ interface DayDetailSheetProps {
   selectedDate: string | null // "YYYY-MM-DD"
   selectedHotel: string
   selectedSalon: string
+  filters?: {
+    tentativo: boolean
+    definitivo: boolean
+    cancelado: boolean
+  }
 }
 
 export default function DayDetailSheet({
@@ -43,10 +48,23 @@ export default function DayDetailSheet({
   selectedDate,
   selectedHotel,
   selectedSalon,
+  filters,
 }: DayDetailSheetProps) {
   const router = useRouter()
-  const [eventos, setEventos] = useState<oCalendario[]>([])
+  const [allEventos, setAllEventos] = useState<oCalendario[]>([])
   const [loading, setLoading] = useState(false)
+
+  // Filtra por estatuscomercial sin refetch — sólo filtros client-side.
+  const eventos = useMemo(() => {
+    if (!filters) return allEventos
+    return allEventos.filter((e) => {
+      const ec = normalizarEstatusComercial((e as any).estatuscomercial)
+      if (ec === "Tentativo" && !filters.tentativo) return false
+      if (ec === "Definitivo" && !filters.definitivo) return false
+      if (ec === "Cancelado" && !filters.cancelado) return false
+      return true
+    })
+  }, [allEventos, filters])
 
   useEffect(() => {
     if (!open || !selectedDate) return
@@ -59,16 +77,16 @@ export default function DayDetailSheet({
         const result = await obtenerEventosPorDia(selectedDate, hotelId, salonId)
 
         if (result.success && Array.isArray(result.data)) {
-          setEventos(result.data as oCalendario[])
+          setAllEventos(result.data as oCalendario[])
         } else {
-          setEventos([])
+          setAllEventos([])
           if (!result.success) {
             toast.error("Error cargando eventos del dia")
           }
         }
       } catch {
         toast.error("Error de conexion al cargar eventos")
-        setEventos([])
+        setAllEventos([])
       } finally {
         setLoading(false)
       }
@@ -77,41 +95,16 @@ export default function DayDetailSheet({
     fetchEventos()
   }, [open, selectedDate, selectedHotel, selectedSalon])
 
-  const esInterno = (evento: oCalendario) => (((evento as any).categoriaevento || "") as string).toLowerCase().trim() === "interno"
-  const estatusLc = (evento: oCalendario) => ((evento.estatus || "") as string).toLowerCase().trim()
-
-  const getStatusColor = (evento: oCalendario) => {
-    const e = estatusLc(evento)
-    if (e.includes("cancel")) return "bg-muted border-border text-muted-foreground"
-    if (e === "realizado") return "bg-muted border-border text-muted-foreground"
-    // Categoría Interno → azul corporativo (#0c7da8)
-    if (esInterno(evento)) return "bg-[#0c7da8]/10 border-[#0c7da8] text-[#0c7da8]"
-    if (evento.tipo === "Reservacion" && (e === "reservada" || e === "confirmada"))
-      return "bg-red-50 border-red-300 text-red-800"
-    if (evento.tipo === "Reservacion" && e === "pendiente")
-      return "bg-cyan-50 border-cyan-300 text-cyan-800"
-    if (evento.tipo === "Reservacion") return "bg-purple-50 border-purple-300 text-purple-900"
-    if (evento.tipo === "Cotizacion") return "bg-amber-50 border-amber-300 text-amber-800"
-    return "bg-muted border-border text-muted-foreground"
-  }
+  const getStatusColor = (evento: oCalendario) =>
+    getEstatusComercialStyle((evento as any).estatuscomercial).soft
 
   const getStatusBadge = (evento: oCalendario) => {
-    const e = estatusLc(evento)
-    if (e.includes("cancel"))
-      return <Badge variant="outline" className="border-gray-400 text-gray-600 text-[10px]">Cancelada</Badge>
-    if (e === "realizado")
-      return <Badge variant="outline" className="border-gray-500 text-gray-600 text-[10px]">Realizado</Badge>
-    if (esInterno(evento))
-      return <Badge variant="outline" className="border-[#0c7da8] text-[#0c7da8] text-[10px]">Interno</Badge>
-    if (evento.tipo === "Reservacion" && (e === "reservada" || e === "confirmada"))
-      return <Badge variant="outline" className="border-red-500 text-red-700 text-[10px]">Confirmado</Badge>
-    if (evento.tipo === "Reservacion" && e === "pendiente")
-      return <Badge variant="outline" className="border-cyan-500 text-cyan-700 text-[10px]">Pendiente</Badge>
-    if (evento.tipo === "Reservacion")
-      return <Badge variant="outline" className="border-purple-500 text-purple-700 text-[10px]">Reservación</Badge>
-    if (evento.tipo === "Cotizacion")
-      return <Badge variant="outline" className="border-amber-500 text-amber-700 text-[10px]">Cotizado</Badge>
-    return <Badge variant="outline" className="text-[10px]">{evento.estatus}</Badge>
+    const style = getEstatusComercialStyle((evento as any).estatuscomercial)
+    return (
+      <Badge variant="outline" className={`${style.border} text-[10px]`}>
+        {style.label}
+      </Badge>
+    )
   }
 
   const formatDate = (dateStr: string) => {
@@ -122,6 +115,39 @@ export default function DayDetailSheet({
       month: "long",
       day: "numeric",
     })
+  }
+
+  // Helpers de navegación — comparten params (hotel/salon/fecha) y cierran el sheet.
+  const buildQs = () => {
+    const params = new URLSearchParams()
+    if (selectedHotel !== "all") params.set("hotelId", selectedHotel)
+    if (selectedSalon !== "all") params.set("salonId", selectedSalon)
+    if (selectedDate) {
+      params.set("fechaInicio", selectedDate)
+      params.set("fechaFin", selectedDate)
+    }
+    return params.toString()
+  }
+
+  const irACotizacion = () => {
+    onOpenChange(false)
+    const qs = buildQs()
+    router.push(`/cotizaciones/new${qs ? `?${qs}` : ""}`)
+  }
+
+  const irAReservacionInterna = () => {
+    onOpenChange(false)
+    const qs = buildQs()
+    router.push(`/reservacion-interna/new${qs ? `?${qs}` : ""}`)
+  }
+
+  const editarEvento = (evento: oCalendario) => {
+    onOpenChange(false)
+    const esInterno = (((evento as any).categoriaevento || "") as string).toLowerCase().trim() === "interno"
+    const ruta = esInterno
+      ? `/reservacion-interna/new?editId=${evento.id}`
+      : `/cotizaciones/new?editId=${evento.id}`
+    router.push(ruta)
   }
 
   // Group events by hotel for multi-property view
@@ -165,36 +191,56 @@ export default function DayDetailSheet({
               <p className="text-xs text-muted-foreground mt-1">
                 Este dia esta disponible para nuevas cotizaciones
               </p>
-              <Button
-                className="mt-4 gap-2 bg-foreground text-background hover:bg-foreground/90"
-                onClick={() => {
-                  onOpenChange(false)
-                  const params = new URLSearchParams()
-                  if (selectedHotel !== "all") params.set("hotelId", selectedHotel)
-                  if (selectedSalon !== "all") params.set("salonId", selectedSalon)
-                  if (selectedDate) {
-                    params.set("fechaInicio", selectedDate)
-                    params.set("fechaFin", selectedDate)
-                  }
-                  const qs = params.toString()
-                  router.push(`/cotizaciones/new${qs ? `?${qs}` : ""}`)
-                }}
-              >
-                <Plus className="h-4 w-4" />
-                Cotizar este salon
-              </Button>
+              <div className="mt-4 flex flex-col sm:flex-row gap-2 w-full max-w-sm">
+                <Button
+                  variant="outline"
+                  className="flex-1 gap-2 border-amber-500 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                  onClick={() => irAReservacionInterna()}
+                >
+                  <Plus className="h-4 w-4" />
+                  Reservación Interna
+                </Button>
+                <Button
+                  className="flex-1 gap-2 bg-foreground text-background hover:bg-foreground/90"
+                  onClick={() => irACotizacion()}
+                >
+                  <Plus className="h-4 w-4" />
+                  Generar Cotización
+                </Button>
+              </div>
             </div>
           ) : (
             <>
-              {/* Summary */}
-              <div className="flex items-center gap-3 px-2">
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <FileText className="h-3.5 w-3.5" />
-                  <span className="font-medium">{eventos.length} evento{eventos.length !== 1 ? "s" : ""}</span>
+              {/* Summary + Acciones rápidas */}
+              <div className="flex items-center justify-between gap-2 px-2 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <FileText className="h-3.5 w-3.5" />
+                    <span className="font-medium">{eventos.length} evento{eventos.length !== 1 ? "s" : ""}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Building2 className="h-3.5 w-3.5" />
+                    <span>{Object.keys(eventosPorHotel).length} hotel{Object.keys(eventosPorHotel).length !== 1 ? "es" : ""}</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Building2 className="h-3.5 w-3.5" />
-                  <span>{Object.keys(eventosPorHotel).length} hotel{Object.keys(eventosPorHotel).length !== 1 ? "es" : ""}</span>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-[11px] gap-1 border-amber-500 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                    onClick={() => irAReservacionInterna()}
+                  >
+                    <Plus className="h-3 w-3" />
+                    Reservación Interna
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-7 text-[11px] gap-1 bg-foreground text-background hover:bg-foreground/90"
+                    onClick={() => irACotizacion()}
+                  >
+                    <Plus className="h-3 w-3" />
+                    Generar Cotización
+                  </Button>
                 </div>
               </div>
 
@@ -202,7 +248,7 @@ export default function DayDetailSheet({
 
               {/* Events grouped by hotel */}
               {Object.entries(eventosPorHotel).map(([hotelName, hotelEventos]) => (
-                <div key={hotelName} className="space-y-2">
+                <div key={hotelName} className="space-y-1.5">
                   <div className="flex items-center gap-2 px-1">
                     <Building2 className="h-4 w-4 text-lime-600" />
                     <h3 className="text-sm font-bold">{hotelName}</h3>
@@ -215,23 +261,24 @@ export default function DayDetailSheet({
                     <Card
                       key={`${evento.tipo}-${evento.id}-${(evento as any).reservacionid ?? (evento as any).salonid ?? "x"}-${(evento as any).horainicio ?? "h"}-${idx}`}
                       className={`border-l-4 ${getStatusColor(evento)} cursor-pointer transition-all hover:shadow-md`}
+                      onClick={() => editarEvento(evento)}
                     >
-                      <CardContent className="p-3 space-y-2">
-                        {/* Header */}
+                      <CardContent className="px-2 py-1.5 space-y-1">
+                        {/* Header — título + folio inline + badges */}
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
-                            <h4 className="text-sm font-semibold truncate">
+                            <h4 className="text-xs font-semibold truncate leading-tight">
                               {evento.nombreevento}
                             </h4>
-                            <p className="text-[11px] text-muted-foreground">
-                              Folio: {evento.folio}
+                            <p className="text-[10px] text-muted-foreground leading-tight">
+                              {evento.folio}
                             </p>
                           </div>
-                          <div className="flex flex-col items-end gap-1">
+                          <div className="flex items-center gap-1 shrink-0">
                             {getStatusBadge(evento)}
                             <Badge
                               variant="outline"
-                              className="text-[9px] px-1.5"
+                              className="text-[9px] px-1 py-0 leading-tight"
                             >
                               {evento.tipo}
                             </Badge>
@@ -239,28 +286,28 @@ export default function DayDetailSheet({
                         </div>
 
                         {/* Details */}
-                        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
-                          <div className="flex items-center gap-1.5">
-                            <DoorClosed className="h-3 w-3 text-muted-foreground" />
+                        <div className="grid grid-cols-2 gap-x-2 gap-y-0 text-[10px] leading-snug">
+                          <div className="flex items-center gap-1">
+                            <DoorClosed className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
                             <span className="truncate">{evento.salon}</span>
                           </div>
-                          <div className="flex items-center gap-1.5">
-                            <Users className="h-3 w-3 text-muted-foreground" />
+                          <div className="flex items-center gap-1">
+                            <Users className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
                             <span className="truncate">{evento.cliente}</span>
                           </div>
-                          <div className="flex items-center gap-1.5">
-                            <Clock className="h-3 w-3 text-muted-foreground" />
+                          <div className="flex items-center gap-1">
+                            <Clock className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
                             <span>
                               {evento.horainicio} - {evento.horafin}
                             </span>
                           </div>
-                          <div className="flex items-center gap-1.5">
-                            <MapPin className="h-3 w-3 text-muted-foreground" />
-                            <span>{evento.montaje}</span>
+                          <div className="flex items-center gap-1">
+                            <MapPin className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
+                            <span className="truncate">{evento.montaje}</span>
                           </div>
                           {evento.numeroinvitados > 0 && (
-                            <div className="flex items-center gap-1.5 col-span-2">
-                              <Users className="h-3 w-3 text-muted-foreground" />
+                            <div className="flex items-center gap-1 col-span-2">
+                              <Users className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
                               <span>{evento.numeroinvitados} invitados</span>
                             </div>
                           )}
@@ -268,31 +315,10 @@ export default function DayDetailSheet({
 
                         {/* Notes */}
                         {evento.notas && (
-                          <p className="text-[10px] text-muted-foreground italic border-t pt-1.5 mt-1">
+                          <p className="text-[10px] text-muted-foreground italic">
                             {evento.notas}
                           </p>
                         )}
-
-                        {/* Acciones */}
-                        <div className="flex justify-end pt-1.5 border-t mt-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-[11px] gap-1.5"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              onOpenChange(false)
-                              const esInterno = (((evento as any).categoriaevento || "") as string).toLowerCase().trim() === "interno"
-                              const ruta = esInterno
-                                ? `/reservacion-interna/new?editId=${evento.id}`
-                                : `/cotizaciones/new?editId=${evento.id}`
-                              router.push(ruta)
-                            }}
-                          >
-                            <Pencil className="h-3 w-3" />
-                            Editar
-                          </Button>
-                        </div>
                       </CardContent>
                     </Card>
                   ))}
@@ -301,25 +327,22 @@ export default function DayDetailSheet({
 
               <Separator />
 
-              {/* Quick Action */}
-              <div className="pt-2 pb-4">
+              {/* Quick Actions: mismos botones que en el header */}
+              <div className="pt-2 pb-4 flex gap-2">
                 <Button
-                  className="w-full gap-2 bg-foreground text-background hover:bg-foreground/90"
-                  onClick={() => {
-                    onOpenChange(false)
-                    const params = new URLSearchParams()
-                    if (selectedHotel !== "all") params.set("hotelId", selectedHotel)
-                    if (selectedSalon !== "all") params.set("salonId", selectedSalon)
-                    if (selectedDate) {
-                      params.set("fechaInicio", selectedDate)
-                      params.set("fechaFin", selectedDate)
-                    }
-                    const qs = params.toString()
-                    router.push(`/cotizaciones/new${qs ? `?${qs}` : ""}`)
-                  }}
+                  variant="outline"
+                  className="flex-1 gap-2 border-amber-500 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                  onClick={() => irAReservacionInterna()}
                 >
                   <Plus className="h-4 w-4" />
-                  Cotizar este salon
+                  Reservación Interna
+                </Button>
+                <Button
+                  className="flex-1 gap-2 bg-foreground text-background hover:bg-foreground/90"
+                  onClick={() => irACotizacion()}
+                >
+                  <Plus className="h-4 w-4" />
+                  Generar Cotización
                 </Button>
               </div>
             </>

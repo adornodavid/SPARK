@@ -85,6 +85,34 @@ export async function listaEstatusCotizacion(seccion = "Cotizacion") {
   }
 }
 
+// Función: listaEstatusComercialVisual: obtiene id y nombre de estatuscomercial.
+// Por defecto filtra visual=true. Acepta extraIds para incluir además filas con esos ids
+// aunque tengan visual=false (ej. id=2 'Definitivo' en modo reservación interna).
+export async function listaEstatusComercialVisual(extraIds: number[] = []) {
+  try {
+    const orClause = extraIds.length > 0
+      ? `visual.eq.true,id.in.(${extraIds.join(",")})`
+      : null
+
+    let query = supabase.from("estatuscomercial").select("id, nombre")
+    if (orClause) query = query.or(orClause)
+    else query = query.eq("visual", true)
+
+    const { data, error } = await query.order("id", { ascending: true })
+
+    if (error) {
+      console.error("Error obteniendo estatuscomercial visual:", error)
+      return { success: false, error: error.message }
+    }
+
+    const lista = (data || []).map((r: any) => ({ value: r.id.toString(), text: r.nombre }))
+    return { success: true, data: lista }
+  } catch (error) {
+    console.error("Error en listaEstatusComercialVisual:", error)
+    return { success: false, error: "Error interno del servidor" }
+  }
+}
+
 // Función: listaDesplegableTipoEvento: obtiene id y nombre de la tabla tipoevento
 export async function listaDesplegableTipoEvento(categoriaevento = "") {
   try {

@@ -195,9 +195,22 @@ export function ProspectsQuotationsBoard() {
   // Active estatus columns
   const activeEstatus = useMemo(() => columnOrder.filter((id) => id.startsWith("estatus-")).map((id) => id.replace("estatus-", "")), [columnOrder])
 
+  // Normaliza removiendo acentos/diacríticos y bajando a minúsculas para búsqueda accent-insensitive
+  // ej. "Cotización" → "cotizacion", "José" → "jose"
+  const normalizeSearch = (s: string | null | undefined) =>
+    (s ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase()
+
   function filterItems(items: BoardItem[]) {
     let f = items
-    if (debouncedSearch) { const q = debouncedSearch.toLowerCase(); f = f.filter((i) => i.cliente?.toLowerCase().includes(q) || i.nombreevento?.toLowerCase().includes(q) || i.folio?.toLowerCase().includes(q) || i.tipoevento?.toLowerCase().includes(q)) }
+    if (debouncedSearch) {
+      const q = normalizeSearch(debouncedSearch)
+      f = f.filter((i) =>
+        normalizeSearch(i.cliente).includes(q) ||
+        normalizeSearch(i.nombreevento).includes(q) ||
+        normalizeSearch(i.folio).includes(q) ||
+        normalizeSearch(i.tipoevento).includes(q)
+      )
+    }
     if (filters.hotel_id && filters.hotel_id !== "all") f = f.filter((i) => i.hotelid === Number(filters.hotel_id))
     if (filters.salon_id && filters.salon_id !== "all") f = f.filter((i) => i.salonid === Number(filters.salon_id))
     if (filters.estatus && filters.estatus !== "all") f = f.filter((i) => i.estatus === filters.estatus)
