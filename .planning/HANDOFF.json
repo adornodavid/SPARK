@@ -1,55 +1,57 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-23T15:39:12.247Z",
-  "phase": "session-2026-04-22",
-  "phase_name": "cotizaciones-reservacion-interna-precio-paquete",
-  "phase_dir": ".planning",
+  "timestamp": "2026-04-28T04:09:15.194Z",
+  "phase": "session-2026-04-27",
+  "phase_name": "dashboard-refinements+estatuscomercial-input+ux-modal",
+  "phase_dir": ".planning/phases/current",
   "plan": null,
   "task": null,
-  "total_tasks": 14,
-  "status": "paused",
-  "last_commit": "0bf01ab",
-  "branch": "main",
+  "total_tasks": null,
+  "status": "shipped",
   "completed_tasks": [
-    {"id": 1, "name": "Reservación interna: calendario sin pre/post, mínimo 1 hora", "status": "done", "commit": "9f319c5"},
-    {"id": 2, "name": "Auto-reload montajes cuando cambia hora en mismo salón (useEffect safety net)", "status": "done", "commit": "9f319c5"},
-    {"id": 3, "name": "Auto-ajuste fechaInicial ↔ fechaFinal cuando invierten rango", "status": "done", "commit": "9f319c5"},
-    {"id": 4, "name": "Detección de empalme al cambiar fecha desde input (re-emit en reconstruction + events load)", "status": "done", "commit": "9f319c5"},
-    {"id": 5, "name": "Fix loop infinito: dep events vs displayEvents en useEffect de re-emit", "status": "done", "commit": "9f319c5"},
-    {"id": 6, "name": "Filtro categoria='menu' en prompt de platillos del paquete", "status": "done", "commit": "9f319c5"},
-    {"id": 7, "name": "PDF preview del menú padre (no del platillo) en modal platillos", "status": "done", "commit": "9f319c5"},
-    {"id": 8, "name": "Rename column platilloid → menuid (3 archivos, replace_all)", "status": "done", "commit": "9f319c5"},
-    {"id": 9, "name": "Auto-expandir alimentos con platillos ya asignados (ref para no reabrir tras colapso manual)", "status": "done", "commit": "9f319c5"},
-    {"id": 10, "name": "Flechas calendario vista día propagan fecha al parent (evita reset por reconstruction effect)", "status": "done", "commit": "9f319c5"},
-    {"id": 11, "name": "obtenerPrecioPaquetePorPlatillo con filtros year + esfinsemana (Vie/Sáb = true)", "status": "done", "commit": "9f319c5"},
-    {"id": 12, "name": "Modal paquete: tabs Elementos/PDF + preview documentopdf (iframe h-[28rem])", "status": "done", "commit": "9f319c5"},
-    {"id": 13, "name": "Header modal platillos muestra nombre del menú padre en dorado (amber-300)", "status": "done", "commit": "9f319c5"},
-    {"id": 14, "name": "Menús opcionales: tarjetas seleccionables obligatorias + asignarPaqueteACotizacion acepta excludeElementoIds", "status": "done", "commit": "9f319c5"}
+    {"id": 1, "name": "Insert eventos.estatuscomercialid en crearCotizacion (default 1, parametrizado vía form)", "status": "done", "commit": "15e72b0"},
+    {"id": 2, "name": "Sesión HotelId desde usuarios.hotelid + dashboard preselect del hotel del usuario", "status": "done", "commit": "15e72b0"},
+    {"id": 3, "name": "Vista Disponibilidad: agregar Próximos Eventos sidebar + grid 3:1 + sidebar compactada", "status": "done", "commit": "15e72b0"},
+    {"id": 4, "name": "Botones Reservación Interna + Generar Cotización en header de Disponibilidad", "status": "done", "commit": "15e72b0"},
+    {"id": 5, "name": "Vista Mes: pill resaltado con total monto programado (tent+def, excluye canc)", "status": "done", "commit": "15e72b0"},
+    {"id": 6, "name": "Vista Semana: celdas con resumen por estatus (igual que Mes)", "status": "done", "commit": "15e72b0"},
+    {"id": 7, "name": "Estatus input: dropdown disabled, fuente estatuscomercial WHERE visual=true (extraIds [2] en resv-interna)", "status": "done", "commit": "15e72b0"},
+    {"id": 8, "name": "Defaults por modo creación: cotización=1 Tentativo, resv-interna=2 Definitivo", "status": "done", "commit": "15e72b0"},
+    {"id": 9, "name": "estatusid hardcodeado por modo solo en CREACIÓN (1 cot/14 resv-int); en edit preserva", "status": "done", "commit": "15e72b0"},
+    {"id": 10, "name": "Cliente selector: limpia email/telefono/empresa/grupo al cambiar selección (fix bug)", "status": "done", "commit": "15e72b0"},
+    {"id": 11, "name": "Filtros del listado de cotizaciones: búsqueda accent-insensitive (NFD + diacritic strip)", "status": "done", "commit": "15e72b0"},
+    {"id": 12, "name": "Hide 'Todos los hoteles' en Disponibilidad + auto-fallback a session.HotelId al toggle", "status": "done", "commit": "15e72b0"},
+    {"id": 13, "name": "Toggle Disponibilidad/Clásico con paleta azul ligera (más visible)", "status": "done", "commit": "15e72b0"},
+    {"id": 14, "name": "DayDetailSheet: tarjetas compactas, click en card = editar (sin barra inferior)", "status": "done", "commit": "15e72b0"},
+    {"id": 15, "name": "DayDetailSheet: botones Reservación Interna + Generar Cotización en header, footer y estado vacío", "status": "done", "commit": "15e72b0"},
+    {"id": 16, "name": "Sync con origin/main (drop wips, descarte de auth.ts/session.ts/types/usuarios.ts equivalentes a Omar)", "status": "done", "commit": "15e72b0"},
+    {"id": 17, "name": "Push a origin/main + Vercel auto-deploy disparado", "status": "done", "commit": "15e72b0"}
   ],
   "remaining_tasks": [
-    {"id": "diag-1", "name": "Validar diagnóstico paqueteprecios en prod (Boda + plato fuerte + jueves 2026) y reportar sufijo", "status": "pending_user_verification"},
-    {"id": "cleanup-1", "name": "Quitar sufijo diagnóstico del renglón Paquete tras validar datos en paqueteprecios", "status": "pending_user_verification"},
-    {"id": "arrastre-1", "name": "Integrar horaPreMontaje/horaPostMontaje/horasExtras en actualizarCotizacion (edición)", "status": "not_started"},
-    {"id": "arrastre-2", "name": "Validaciones de solapamiento con reservaciones al extender pre/post", "status": "not_started"},
-    {"id": "arrastre-3", "name": "Sincronizar calendario de disponibilidad del dashboard con DayDetailSheet", "status": "not_started"}
+    {"id": 18, "name": "Validar Vercel deploy completó exitosamente y los aliases prod sirven el nuevo build", "status": "not_started"},
+    {"id": 19, "name": "Logout + login fresco para regenerar cookie con HotelId (sesiones viejas no lo tienen)", "status": "not_started"},
+    {"id": 20, "name": "Validación user en prod: dashboard preselect, dropdown estatus disabled, modal día con botones, pill total mes", "status": "not_started"},
+    {"id": 21, "name": "Arrastre: horaPreMontaje/Post/horasExtras en actualizarCotizacion modo edición + validaciones solapamiento pre/post con reservaciones", "status": "not_started"},
+    {"id": 22, "name": "Cleanup diagSuffix en recalcularPresupuestoPaquete tras validación en prod de paquetes tipopersona/sin-platobaseid", "status": "not_started"},
+    {"id": 23, "name": "Considerar fix de eventos.totalmonto NULL (root cause: pills muestran $0 porque actualizarCotizacion no recalcula totalmonto al cambiar presupuesto)", "status": "not_started"}
   ],
   "blockers": [],
   "human_actions_pending": [
-    {
-      "action": "Probar en prod: paquete Boda + plato fuerte + jueves 2026 y leer el sufijo diagnóstico del renglón 'Paquete'",
-      "context": "El sufijo muestra year/esfinsemana buscados vs. disponibles en paqueteprecios. Según el resultado: (a) sembrar datos si faltan filas, (b) ajustar tipos de columna si hay mismatch int/string/bool, (c) limpiar diagnóstico si todo OK",
-      "blocking": false
-    }
+    {"action": "Logout + login en prod para que cookie incluya HotelId", "context": "Las cookies emitidas antes de 8d9b4cc/15e72b0 no tienen HotelId; obtenerSesion devuelve fallback '0' y dashboard no preselecciona", "blocking": false},
+    {"action": "Validación de user de las 17 features desplegadas", "context": "Se shippearon en 15e72b0; pendiente que el user verifique cada flujo en prod", "blocking": false}
   ],
   "decisions": [
-    {"decision": "Propagar fecha desde navigate() del calendario solo en vista día", "rationale": "Evita colapsar el rango en vista semana/mes; el bug de 'regresar al día viejo' solo aplicaba a vista día"},
-    {"decision": "Dep [events] en lugar de [displayEvents] en useEffect de re-emit", "rationale": "displayEvents se rederiva por nueva referencia de draftReservaciones/excludeMatch en cada render del parent, causaba infinite loop"},
-    {"decision": "Replace_all global platilloid → menuid en 3 archivos (no edits one-by-one)", "rationale": "Todas las ocurrencias referían a la misma columna renombrada (strings SQL, property access, params, comentarios); case-sensitive mantiene platilloId (camelCase) intacto"},
-    {"decision": "Tarjetas de menús opcionales en modal pre-asignación + excludeElementoIds en server action", "rationale": "Validación pre-asignación es más limpia; los no elegidos nunca entran a elementosxcotizacion. Alternativa (elegir post-asignación) requeriría delete + re-sync"},
-    {"decision": "Dejar el sufijo diagnóstico en prod temporalmente", "rationale": "Usuario necesita verlo en prod para validar qué hay en paqueteprecios ahí (el log console no le sirve); follow-up para limpiarlo tras recolectar datos"},
-    {"decision": "PDF preview del menú padre (no del platillo) en modal platillos", "rationale": "Todos los platillos del modal (entradas/plato fuerte/postres) comparten el mismo menú; un solo fetch al abrir modal alcanza"}
+    {"decision": "Repurpose el input visible 'Estatus' para controlar estatuscomercialid (no estatusid)", "rationale": "Estaba pidiendo lista de estatuscomercial visual=true; se reorganizó para que ese dropdown maneje el campo comercial. estatusid operacional ahora se hardcodea por modo en CREATE.", "phase": "session-2026-04-27"},
+    {"decision": "estatusid hardcodeado por modo solo en CREATE: 1 (cot)/14 (resv-int); preservado en EDIT", "rationale": "Si fuera siempre, EDIT pisaría transiciones operacionales como id=3 'Cotizacion Generada' después del PDF.", "phase": "session-2026-04-27"},
+    {"decision": "estatuscomercial dropdown lista visual=true + extras opcionales [2] cuando isReservacionInterna", "rationale": "User pidió default id=2 'Definitivo' en resv-interna pero ese row tiene visual=false; lo agregamos como extra solo en ese modo.", "phase": "session-2026-04-27"},
+    {"decision": "Total mes programado = tent + def (excluye canc)", "rationale": "User dijo 'cotizaciones y eventos programados'; cancelados no son scheduled events y no generan revenue.", "phase": "session-2026-04-27"},
+    {"decision": "Descarte de mis cambios locales en auth.ts/session.ts/types/usuarios.ts antes de sync", "rationale": "Omar 8d9b4cc ya había implementado HotelId idénticamente; evitar conflicto innecesario.", "phase": "session-2026-04-27"},
+    {"decision": "Vista Disponibilidad oculta 'Todos los hoteles' + auto-fallback a session.HotelId al togglear", "rationale": "El calendario de Disponibilidad requiere un hotel específico para mostrar salones; 'all' no tiene sentido ahí.", "phase": "session-2026-04-27"},
+    {"decision": "Card click = editar en DayDetailSheet (sin barra inferior con botón Editar)", "rationale": "User pidió tarjetas más compactas; eliminar la barra ahorra ~30px por tarjeta. La intuición de click-to-edit está confirmada por cursor-pointer existente.", "phase": "session-2026-04-27"},
+    {"decision": "Pill del total programado: bg-blue-50 + font-semibold (toned down de gradient bold)", "rationale": "User pidió 'menos resaltado'. La iteración inicial era muy llamativa.", "phase": "session-2026-04-27"},
+    {"decision": "Búsqueda accent-insensitive client-side (NFD + diacritic strip)", "rationale": "Filtros operan sobre items ya cargados en memoria; no hace falta tocar SQL ni Supabase RPCs.", "phase": "session-2026-04-27"}
   ],
   "uncommitted_files": [],
-  "next_action": "Esperar reporte del usuario sobre el sufijo diagnóstico en prod (paquete Boda, plato fuerte, jueves 2026). Según lo que reporte: sembrar datos en paqueteprecios, ajustar tipos de columna, o limpiar el diagnóstico. También hay 3 pendientes arrastrados de sesiones anteriores (pre/post en actualizarCotizacion, solapamiento validaciones, sync dashboard/DayDetailSheet) si pide avanzar con eso.",
-  "context_notes": "Sesión larga con 14 features entregados en commit único 9f319c5, mergeado con 5 commits de Omar (extracción-meetinghub + hoteles/elementos Bebidas) en 0bf01ab. Push OK, Vercel auto-deploy Ready en 36s (gubacwedd.vercel.app). Working tree limpio, main al día con origin. La principal incertidumbre abierta: paqueteprecios en prod puede no tener filas para combinaciones year+esfinsemana esperadas; por eso se dejó el sufijo diagnóstico visible en el renglón 'Paquete' del presupuesto. El feedback del usuario en local fue 'no hay fila p/ year=2026, esfinsemana=false; hay 4 otras' — hay filas pero no para la combinación buscada. Siguiente acción depende de lo que vea en prod: si también faltan, hay que sembrar; si hay, puede ser mismatch de tipo. El stack sigue siendo Next.js 16 + React 19 + Supabase + Shadcn + Turbopack; dev server ya no está corriendo."
+  "next_action": "Esperar ~2-3 min a que Vercel termine el build de 15e72b0; luego validar en prod (logout/login fresh + recorrer dashboard, modal día, /cotizaciones/new, /reservacion-interna/new). Si todo OK, atacar tareas 21-23 (arrastres + fix totalmonto NULL).",
+  "context_notes": "Sesión productiva: 17 features shippeadas en un solo commit limpio (15e72b0, +885/-632). Sync con origin/main fue suave porque 3 archivos (auth/session/types) ya los había hecho Omar idénticamente — los descarté antes del rebase para evitar conflicto. Pop stash limpio, sin merge. Working tree ahora limpio. Dev server sigue corriendo en localhost:3000. El issue de eventos.totalmonto NULL persiste — los pills del Vista Mes muestran $0 hasta que arreglemos crearCotizacion/actualizarCotizacion para que recalculen totalmonto al cambiar presupuesto, o que vw_oeventos calcule dinámicamente. User ya fue advertido del root cause."
 }
