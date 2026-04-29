@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { createPortal } from "react-dom"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -43,9 +44,12 @@ export interface NuevoClienteModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onRegistered: (clienteId: number, nombreCompleto: string) => void | Promise<void>
+  /** Cuando el usuario clickea una fila existente de la tabla de matches y confirma asociar.
+   *  Si no se provee, cae en onRegistered con el id local. */
+  onAsociar?: (clienteId: number, nombreCompleto: string) => void | Promise<void>
 }
 
-export function NuevoClienteModal({ open, onOpenChange, onRegistered }: NuevoClienteModalProps) {
+export function NuevoClienteModal({ open, onOpenChange, onRegistered, onAsociar }: NuevoClienteModalProps) {
   const [registrando, setRegistrando] = useState(false)
   const [errorRegistro, setErrorRegistro] = useState<string | null>(null)
 
@@ -75,6 +79,9 @@ export function NuevoClienteModal({ open, onOpenChange, onRegistered }: NuevoCli
   const [paises, setPaises] = useState<DdlItem[]>([])
   const [estados, setEstados] = useState<DdlItem[]>([])
   const [ciudades, setCiudades] = useState<DdlItem[]>([])
+  // Match seleccionado para confirmar asociar a la cotización
+  const [confirmAsociar, setConfirmAsociar] = useState<MatchPipedrive | null>(null)
+  const [asociando, setAsociando] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -184,6 +191,7 @@ export function NuevoClienteModal({ open, onOpenChange, onRegistered }: NuevoCli
   const validando = estado.tipo === "validando"
 
   return (
+    <>
     <Dialog
       open={open}
       onOpenChange={(v) => {
@@ -298,26 +306,34 @@ export function NuevoClienteModal({ open, onOpenChange, onRegistered }: NuevoCli
                       </tr>
                     </thead>
                     <tbody>
-                      {estado.matches.map((m) => (
-                        <tr key={`${m.fuente}-${m.id}`} className="border-t">
-                          <td className="px-3 py-2">
-                            <span
-                              className={`rounded px-2 py-0.5 text-xs ${
-                                m.fuente === "pipedrive"
-                                  ? "bg-blue-100 text-blue-900"
-                                  : "bg-purple-100 text-purple-900"
-                              }`}
-                            >
-                              {m.fuente === "pipedrive" ? "Pipedrive" : "Clientes"}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2">{m.id}</td>
-                          <td className="px-3 py-2">{m.nombre}</td>
-                          <td className="px-3 py-2">{m.emails.join(", ")}</td>
-                          <td className="px-3 py-2">{m.telefonos.join(", ")}</td>
-                          <td className="px-3 py-2 capitalize">{m.origen}</td>
-                        </tr>
-                      ))}
+                      {estado.matches.map((m) => {
+                        const esLocal = m.fuente === "clientes"
+                        return (
+                          <tr
+                            key={`${m.fuente}-${m.id}`}
+                            className={`border-t ${esLocal ? "cursor-pointer hover:bg-blue-50" : "opacity-80"}`}
+                            onClick={() => { if (esLocal) setConfirmAsociar(m) }}
+                            title={esLocal ? "Click para asociar este cliente a la cotización" : "Sincroniza primero desde /clientes para usar este registro"}
+                          >
+                            <td className="px-3 py-2">
+                              <span
+                                className={`rounded px-2 py-0.5 text-xs ${
+                                  m.fuente === "pipedrive"
+                                    ? "bg-blue-100 text-blue-900"
+                                    : "bg-purple-100 text-purple-900"
+                                }`}
+                              >
+                                {m.fuente === "pipedrive" ? "Pipedrive" : "Clientes"}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2">{m.id}</td>
+                            <td className="px-3 py-2">{m.nombre}</td>
+                            <td className="px-3 py-2">{m.emails.join(", ")}</td>
+                            <td className="px-3 py-2">{m.telefonos.join(", ")}</td>
+                            <td className="px-3 py-2 capitalize">{m.origen}</td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -665,5 +681,70 @@ export function NuevoClienteModal({ open, onOpenChange, onRegistered }: NuevoCli
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* Modal de confirmación: asociar cliente existente a la cotización.
+        Portalizado a document.body para que Radix Dialog (también portalizado) no intercepte clicks. */}
+      {confirmAsociar && typeof document !== "undefined" && createPortal(
+        <div
+          className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4"
+          style={{ pointerEvents: "auto" }}
+          onClick={() => { if (!asociando) setConfirmAsociar(null) }}
+        >
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
+                <UserPlus className="w-6 h-6 text-blue-600" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-gray-900">¿Asociar cliente a la cotización?</h3>
+                <p className="text-sm text-gray-600 mt-2">
+                  Se asociará <span className="font-semibold text-blue-700">{confirmAsociar.nombre}</span> y se llenarán automáticamente los campos de email y teléfono.
+                </p>
+                {(confirmAsociar.emails.length > 0 || confirmAsociar.telefonos.length > 0) && (
+                  <div className="mt-3 text-xs text-gray-600 space-y-0.5">
+                    {confirmAsociar.emails.length > 0 && <div><strong>Email:</strong> {confirmAsociar.emails.join(", ")}</div>}
+                    {confirmAsociar.telefonos.length > 0 && <div><strong>Teléfono:</strong> {confirmAsociar.telefonos.join(", ")}</div>}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <Button type="button" variant="outline" disabled={asociando} onClick={() => setConfirmAsociar(null)}>
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                disabled={asociando}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+                onClick={async () => {
+                  setAsociando(true)
+                  try {
+                    const handler = onAsociar ?? onRegistered
+                    await handler(confirmAsociar.id, confirmAsociar.nombre)
+                    setConfirmAsociar(null)
+                    resetAll()
+                    onOpenChange(false)
+                  } catch (e) {
+                    console.error("Error asociando cliente:", e)
+                  } finally {
+                    setAsociando(false)
+                  }
+                }}
+              >
+                {asociando ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Asociando…
+                  </>
+                ) : (
+                  "Aceptar"
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
   )
 }

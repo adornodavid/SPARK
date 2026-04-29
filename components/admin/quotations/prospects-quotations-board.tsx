@@ -19,6 +19,7 @@ import { objetoCotizacion } from "@/app/actions/cotizaciones"
 import { QuotationDetailModal } from "./quotation-detail-modal"
 import type { ddlItem } from "@/types/common"
 import type { oCotizacion } from "@/types/cotizaciones"
+import { getEstatusComercialStyle, normalizarEstatusComercial, ESTATUS_COMERCIAL_ORDER } from "@/components/admin/calendar/estatus-comercial-colors"
 
 /* ==================================================
   Types
@@ -26,7 +27,7 @@ import type { oCotizacion } from "@/types/cotizaciones"
 interface BoardItem {
   id: number; folio: string; cliente: string; nombreevento: string; tipoevento: string
   numeroinvitados: number; fechainicio: string; fechafin: string
-  hotelid?: number; salonid?: number; estatus?: string
+  hotelid?: number; salonid?: number; estatus?: string; estatuscomercial?: string
   hotel?: string; salon?: string; montaje?: string; categoriaevento?: string
   tiporegistro?: string; horainicio?: string; horafin?: string
 }
@@ -59,7 +60,7 @@ function getEstatusColor(idx: number) {
 
 const CORE_COLUMNS: ColumnDef[] = [
   { id: "prospectos", title: "Prospectos", color: "bg-blue-500", type: "prospecto" },
-  { id: "cotizaciones", title: "Cotizaciones", color: "bg-emerald-500", type: "cotizacion" },
+  { id: "cotizaciones", title: "Cotizaciones (Tentativos)", color: "bg-emerald-500", type: "cotizacion" },
 ]
 
 /* ==================================================
@@ -158,10 +159,19 @@ export function ProspectsQuotationsBoard() {
     })
     // Helper: detecta categoria evento "Interno"
     const esInternoRow = (e: any) => ((e.categoriaevento || "") as string).toLowerCase().trim() === "interno"
-    // Separar por sección de estatus. Los eventos con categoría "Interno" SIEMPRE caen en Eventos Programados.
-    setCotizaciones(uniqueEventos.filter((e: any) => !esInternoRow(e) && e.tiporegistro === "Cotizacion" && !segIds.has(e.estatusid) && !resIds.has(e.estatusid)))
-    setSeguimiento(uniqueEventos.filter((e: any) => !esInternoRow(e) && e.tiporegistro === "Cotizacion" && segIds.has(e.estatusid)))
-    setReservaciones(uniqueEventos.filter((e: any) => resIds.has(e.estatusid) || esInternoRow(e)))
+    // Separación por estatuscomercial:
+    //   Cotizaciones      → Tentativo
+    //   Eventos Programados → Definitivo / Cancelado (+ internos sin estatuscomercial como fallback)
+    //   Seguimiento       → estatus operacional (independiente del estatuscomercial)
+    setCotizaciones(uniqueEventos.filter((e: any) => normalizarEstatusComercial(e.estatuscomercial) === "Tentativo"))
+    setSeguimiento(uniqueEventos.filter((e: any) => !esInternoRow(e) && segIds.has(e.estatusid)))
+    setReservaciones(uniqueEventos.filter((e: any) => {
+      const ec = normalizarEstatusComercial(e.estatuscomercial)
+      if (ec === "Definitivo" || ec === "Cancelado") return true
+      // Fallback: internos sin estatuscomercial (para no perder rows)
+      if (!ec && esInternoRow(e)) return true
+      return false
+    }))
 
     const saved = localStorage.getItem("spark-board-column-order")
     if (saved) {
@@ -213,7 +223,8 @@ export function ProspectsQuotationsBoard() {
     }
     if (filters.hotel_id && filters.hotel_id !== "all") f = f.filter((i) => i.hotelid === Number(filters.hotel_id))
     if (filters.salon_id && filters.salon_id !== "all") f = f.filter((i) => i.salonid === Number(filters.salon_id))
-    if (filters.estatus && filters.estatus !== "all") f = f.filter((i) => i.estatus === filters.estatus)
+    // Filtro de estatus comercial (Tentativo / Definitivo / Cancelado)
+    if (filters.estatus && filters.estatus !== "all") f = f.filter((i) => normalizarEstatusComercial(i.estatuscomercial) === filters.estatus)
     return f
   }
 
@@ -314,7 +325,17 @@ export function ProspectsQuotationsBoard() {
                 <SelectTrigger className="w-full h-8 text-xs truncate"><SelectValue placeholder="Todos los estatus" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos los estatus</SelectItem>
-                  {estatusList.map((e) => <SelectItem key={e.value} value={e.text}>{e.text}</SelectItem>)}
+                  {ESTATUS_COMERCIAL_ORDER.map((ec) => {
+                    const style = getEstatusComercialStyle(ec)
+                    return (
+                      <SelectItem key={ec} value={ec}>
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className={`inline-block w-2 h-2 rounded-full ${style.dot}`} />
+                          {ec}
+                        </span>
+                      </SelectItem>
+                    )
+                  })}
                 </SelectContent>
               </Select>
             </div>
@@ -439,14 +460,14 @@ export function ProspectsQuotationsBoard() {
 
           {/* Columna fija: Eventos Programados (incluye Reservaciones + categoría Interno) */}
           {(() => {
-            const resItems = getColumnItems({ id: "reservaciones", title: "Eventos Programados", color: "bg-violet-500", type: "reservacion" })
+            const resItems = getColumnItems({ id: "reservaciones", title: "Eventos Programados (Definitivos)", color: "bg-violet-500", type: "reservacion" })
             return (
               <div className="min-w-0 rounded-xl border border-violet-300 bg-violet-50/50 transition-all">
                 <div className="p-2 border-b border-violet-300">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <div className="h-2.5 w-2.5 rounded-full bg-violet-500 flex-shrink-0" />
-                      <span className="text-[10px] font-bold uppercase tracking-wide truncate">Eventos Programados</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wide truncate">Eventos Programados (Definitivos)</span>
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0">
                       <Select value={colEstatusFilter["reservaciones"] || "all"} onValueChange={(v) => setColEstatusFilter((p) => ({ ...p, reservaciones: v }))}>
@@ -499,6 +520,10 @@ function BoardCard({ item, type, formatDate, estatusList, onOpenDetail }: { item
   const estIdx = item.estatus ? estatusList.findIndex((e) => e.text === item.estatus) : -1
   const estColors = estIdx >= 0 ? getEstatusColor(estIdx) : null
 
+  // Pill de estatus comercial (Tentativo/Definitivo/Cancelado) — preferido sobre estatus operacional.
+  const ecKey = normalizarEstatusComercial(item.estatuscomercial)
+  const ecStyle = ecKey ? getEstatusComercialStyle(item.estatuscomercial) : null
+
   // Prospectos no tienen cotización todavía → siguen llevando a /cotizaciones/new
   // Resto: clic abre modal de detalle
   const cardContent = (
@@ -514,10 +539,10 @@ function BoardCard({ item, type, formatDate, estatusList, onOpenDetail }: { item
             Interno
           </span>
         )}
-        {!esInterno && item.estatus && estColors && (
-          <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${estColors.bg} ${estColors.border} flex-shrink-0`}>
-            <span className={`inline-block w-1.5 h-1.5 rounded-full ${estColors.color} mr-0.5`} />
-            {item.estatus}
+        {ecStyle && (
+          <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border bg-white flex-shrink-0 inline-flex items-center gap-1 ${ecStyle.border}`}>
+            <span className={`inline-block w-1.5 h-1.5 rounded-full ${ecStyle.dot}`} />
+            {ecStyle.label}
           </span>
         )}
         <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(editHref) }} className="p-0.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors flex-shrink-0" title="Editar">

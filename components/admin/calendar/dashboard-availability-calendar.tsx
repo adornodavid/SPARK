@@ -30,6 +30,8 @@ interface DashboardAvailabilityCalendarProps {
     cancelado: boolean
   }
   onDayClick?: (dateStr: string) => void
+  /** Cuando cambia, navega a la vista de día centrada en la fecha indicada (YYYY-MM-DD). El version sirve para re-emitir aunque la fecha sea la misma. */
+  targetDate?: { date: string; version: number } | null
 }
 
 /* ==================================================
@@ -38,8 +40,8 @@ interface DashboardAvailabilityCalendarProps {
 const HOURS = (() => {
   const h: { value: string; label: string; hour24: number }[] = []
   function fmt(hr: number) { if (hr === 0 || hr === 24) return "12AM"; if (hr === 12) return "12PM"; return hr > 12 ? `${hr - 12}PM` : `${hr}AM` }
-  for (let i = 8; i <= 23; i++) { h.push({ value: `${i.toString().padStart(2, "0")}:00`, label: `${fmt(i)}-${fmt(i + 1)}`, hour24: i }) }
-  for (let i = 0; i <= 2; i++) { h.push({ value: `${i.toString().padStart(2, "0")}:00`, label: `${fmt(i)}-${fmt(i + 1)}`, hour24: i }) }
+  for (let i = 8; i <= 23; i++) { h.push({ value: `${i.toString().padStart(2, "0")}:00`, label: fmt(i), hour24: i }) }
+  for (let i = 0; i <= 2; i++) { h.push({ value: `${i.toString().padStart(2, "0")}:00`, label: fmt(i), hour24: i }) }
   return h
 })()
 const DAYS_ES = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"]
@@ -63,11 +65,23 @@ function getEventBarColor(ev: CalendarEvent) {
 /* ==================================================
   Main Component
 ================================================== */
-export default function DashboardAvailabilityCalendar({ hotelId, selectedSalon = "all", filters, onDayClick }: DashboardAvailabilityCalendarProps) {
+export default function DashboardAvailabilityCalendar({ hotelId, selectedSalon = "all", filters, onDayClick, targetDate }: DashboardAvailabilityCalendarProps) {
   const router = useRouter()
   const [viewMode, setViewMode] = useState<ViewMode>("week")
   const [previousView, setPreviousView] = useState<ViewMode | null>(null)
   const [currentDate, setCurrentDate] = useState(new Date())
+
+  // Navegación externa hacia un día específico (input "Buscar por Fecha" del filter panel).
+  useEffect(() => {
+    if (!targetDate?.date) return
+    const [yy, mm, dd] = targetDate.date.split("-").map(Number)
+    if (!yy || !mm || !dd) return
+    const d = new Date(yy, mm - 1, dd)
+    setPreviousView((prev) => (viewMode === "day" ? prev : viewMode))
+    setCurrentDate(d)
+    setViewMode("day")
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetDate?.date, targetDate?.version])
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [salones, setSalones] = useState<SalonItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -316,7 +330,7 @@ function DayView({ date, salones, getEventsForHourCell, onCellClick }: {
     <table className="w-full border-collapse text-[11px] table-fixed">
       <thead className="sticky top-0 z-10"><tr className="bg-blue-50">
         <th className="text-left p-2 font-semibold text-blue-900 border-b border-r border-blue-200 w-[120px] sticky left-0 bg-blue-50 z-20">Salón</th>
-        {HOURS.map((h) => <th key={h.value} className="text-center p-1 font-medium text-blue-700 border-b border-r border-blue-100 whitespace-nowrap text-[10px]">{h.label}</th>)}
+        {HOURS.map((h) => <th key={h.value} className="text-center p-1 font-medium text-blue-700 border-b border-r border-blue-100 text-[10px] overflow-hidden"><span className="block truncate">{h.label}</span></th>)}
       </tr></thead>
       <tbody>
         {salones.map((salon) => (

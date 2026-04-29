@@ -37,6 +37,9 @@ function DashboardContent() {
   const [sheetOpen, setSheetOpen] = useState(false)
   const [selectedDate, setSelectedDate] = useState<string | null>(searchParams.get("date"))
 
+  // Target date para navegar la vista de Disponibilidad a vista de día (input "Buscar por Fecha")
+  const [targetDate, setTargetDate] = useState<{ date: string; version: number } | null>(null)
+
   // Auto-open day sheet when URL trae ?date=YYYY-MM-DD (ej. tras crear una reservación interna)
   useEffect(() => {
     const d = searchParams.get("date")
@@ -108,6 +111,19 @@ function DashboardContent() {
   const handleDayClick = (dateStr: string) => {
     setSelectedDate(dateStr)
     setSheetOpen(true)
+  }
+
+  // Input "Buscar por Fecha": navega el calendario a vista de día (no abre sheet).
+  // Si está en Clásico (no tiene vista día), cambia a Disponibilidad antes de propagar.
+  const handleDateInputSelect = (dateStr: string) => {
+    if (calendarView === "classic") {
+      setCalendarView("availability")
+      // Si Disponibilidad no permite "Todos los hoteles", caer al hotel de sesión.
+      if (selectedHotel === "all" && session?.HotelId && session.HotelId !== "0") {
+        handleHotelChange(session.HotelId)
+      }
+    }
+    setTargetDate((prev) => ({ date: dateStr, version: (prev?.version ?? 0) + 1 }))
   }
 
   if (loading) {
@@ -217,6 +233,7 @@ function DashboardContent() {
         onFiltersChange={setFilters}
         userHoteles={session?.Hoteles || ""}
         hideAllHotels={calendarView === "availability"}
+        onDateSelect={handleDateInputSelect}
       />
 
       {/* Calendar Grid + Sidebar / Availability Calendar */}
@@ -243,6 +260,7 @@ function DashboardContent() {
             selectedSalon={selectedSalon}
             filters={filters}
             onDayClick={handleDayClick}
+            targetDate={targetDate}
           />
 
           <CalendarSidebar

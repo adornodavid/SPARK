@@ -704,6 +704,38 @@ export async function actualizarCotizacion(formData: FormData) {
 /*==================================================
   * SPECIALS: PROCESS / ESPECIAL / SPECIAL
 ================================================== */
+
+// Función: cambiarEstatusComercialEvento: cambia eventos.estatuscomercialid (1=Tentativo, 2=Definitivo, 3=Cancelado).
+// Usado por los botones "Cancelar Reservación" / "Reactivar Reservación" en el form de cotización/reservación-interna.
+export async function cambiarEstatusComercialEvento(
+  eventoId: number,
+  estatusComercialId: number,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (!eventoId || !estatusComercialId) {
+      return { success: false, error: "Parametros invalidos" }
+    }
+    const { error } = await supabase
+      .from("eventos")
+      .update({
+        estatuscomercialid: estatusComercialId,
+        fechaactualizacion: new Date().toISOString(),
+      })
+      .eq("id", eventoId)
+    if (error) {
+      console.error("Error en cambiarEstatusComercialEvento:", error)
+      return { success: false, error: error.message }
+    }
+    revalidatePath("/cotizaciones")
+    revalidatePath("/dashboard")
+    return { success: true }
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    console.error("Error catch en cambiarEstatusComercialEvento:", errorMessage)
+    return { success: false, error: errorMessage }
+  }
+}
+
 // Función: estatusActivoCotizacion / actCotizacion: Función especial para cambiar columna activo, el valor debe ser boolean
 export async function estatusActivoCotizacion(
   id: number,

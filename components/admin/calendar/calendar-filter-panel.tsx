@@ -6,7 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
-import { Calendar, Building2, DoorClosed } from "lucide-react"
+import { Calendar, Building2, DoorClosed, CalendarDays } from "lucide-react"
+import { Input } from "@/components/ui/input"
 import { listaDesplegableHoteles } from "@/app/actions/hoteles"
 
 interface CalendarFilterPanelProps {
@@ -26,6 +27,7 @@ interface CalendarFilterPanelProps {
   }) => void
   userHoteles: string // Comma-separated hotel IDs from session
   hideAllHotels?: boolean // Si true oculta opción "Todos los hoteles" (vista Disponibilidad)
+  onDateSelect?: (date: string) => void // Abre la vista de día para la fecha seleccionada
 }
 
 export default function CalendarFilterPanel({
@@ -37,9 +39,11 @@ export default function CalendarFilterPanel({
   onFiltersChange,
   userHoteles,
   hideAllHotels = false,
+  onDateSelect,
 }: CalendarFilterPanelProps) {
   const [hotelesList, setHotelesList] = useState<{ value: string; text: string }[]>([])
   const [salonesList, setSalonesList] = useState<{ value: string; text: string }[]>([])
+  const [selectedDate, setSelectedDate] = useState<string>("")
 
   // Parse user's assigned hotel IDs
   const userHotelIds = userHoteles
@@ -159,10 +163,10 @@ export default function CalendarFilterPanel({
           </div>
         </div>
 
-        {/* Status Filters */}
+        {/* Status Filters + Date Picker */}
         <div className="mt-6 pt-4 border-t">
           <Label className="text-sm font-semibold mb-3 block">Filtrar por estatus comercial:</Label>
-          <div className="flex flex-wrap gap-4">
+          <div className="flex flex-wrap items-end gap-4">
             <div className="flex items-center space-x-2">
               <Checkbox
                 id="tentativo"
@@ -212,6 +216,27 @@ export default function CalendarFilterPanel({
                 <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-700"></span>
                 Cancelado
               </label>
+            </div>
+
+            {/* Date Picker — abre la vista de día al seleccionar */}
+            <div className="flex items-center gap-2 ml-8 pl-8 border-l">
+              <Label htmlFor="filter-date" className="flex items-center gap-1.5 text-sm font-medium text-blue-700">
+                <CalendarDays className="h-3.5 w-3.5" />
+                Buscar por Fecha
+              </Label>
+              <Input
+                id="filter-date"
+                type="date"
+                value={selectedDate}
+                onChange={(e) => {
+                  const value = e.target.value
+                  setSelectedDate(value)
+                  if (value && onDateSelect) {
+                    onDateSelect(value)
+                  }
+                }}
+                className="h-8 w-40 border-blue-300 bg-blue-50/50 text-blue-900 focus-visible:ring-blue-400 hover:bg-blue-50"
+              />
             </div>
           </div>
         </div>

@@ -6,12 +6,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { NuevoClienteModal } from "./nuevo-cliente-modal"
 import { listaDesplegableHoteles } from "@/app/actions/hoteles"
 import { listaDesplegableSalones, objetoSalon, objetoSalones } from "@/app/actions/salones"
-import { crearCotizacion, actualizarCotizacion, objetoCotizacion, crearReservacion, actualizarReservacion, eliminarReservacion } from "@/app/actions/cotizaciones"
+import { crearCotizacion, actualizarCotizacion, objetoCotizacion, crearReservacion, actualizarReservacion, eliminarReservacion, cambiarEstatusComercialEvento } from "@/app/actions/cotizaciones"
 import { obtenerDisponibilidadSalon, obtenerReservacionesPorDia } from "@/app/actions/reservaciones"
 import { AvailabilityCalendar } from "./availability-calendar"
 import { listaDesplegableTipoEvento, listaDesplegablePaquetes, obtenerElementosPaquete, obtenerElementosCotizacion, asignarPaqueteACotizacion, eliminarElementoCotizacion, limpiarElementosCotizacion, buscarElementosPorTabla, buscarConsumoPorMenu, agregarElementoACotizacion, obtenerPrecioPaquetePorPlatillo, duplicarElementosReservacion, asignarPaqueteAReservacion, buscarLugaresPorHotel, modificarLugarCotizacion, listaEstatusCotizacion, listaEstatusComercialVisual, obtenerDocumentoPDF, obtenerPlatillosCotizacion, buscarPlatillosItems, obtenerFormatoCotizacion, obtenerUsuarioSesionActual, obtenerEmpresaPorCliente, obtenerGrupoEmpresa, obtenerComplementosPorHotel, obtenerPlatilloItemPorId, obtenerAudiovisualPorHotel, obtenerElementosPaqueteOriginal } from "@/app/actions/catalogos"
 import { listaCategoriaEvento } from "@/app/actions/cotizaciones"
-import { Users, MapPin, DollarSign, User, Mail, Phone, Building2, Check, X, CalendarIcon, FileText, UserPlus } from "lucide-react"
+import { Users, MapPin, DollarSign, User, Mail, Phone, Building2, Check, X, CalendarIcon, FileText, UserPlus, Ban, RotateCcw, AlertTriangle } from "lucide-react"
 import { Calendar } from "@/components/ui/calendar"
 import type { DateRange } from "react-day-picker"
 
@@ -144,6 +144,18 @@ function crearPresupuestoPaqueteRow(
 }
 
 // Horarios permitidos: 8:00 AM a 1:00 AM (intervalos de 30 min)
+// Calcula horas entre dos horarios "HH:MM". Si fin <= inicio, asume que cruza medianoche (+24h).
+function calcularDuracionHoras(horaInicio: string, horaFin: string): number {
+  if (!horaInicio || !horaFin) return 0
+  const [sh, sm] = horaInicio.split(":").map(Number)
+  const [eh, em] = horaFin.split(":").map(Number)
+  if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) return 0
+  const sMin = sh * 60 + sm
+  let eMin = eh * 60 + em
+  if (eMin <= sMin) eMin += 24 * 60
+  return (eMin - sMin) / 60
+}
+
 const HORARIOS_EVENTO = (() => {
   const slots: { value: string; label: string }[] = []
   for (let h = 8; h <= 23; h++) {
@@ -248,6 +260,15 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
   const [assigningPaquete, setAssigningPaquete] = useState(false)
   const [showAgregarModal, setShowAgregarModal] = useState(false)
   const [showDuplicarReservacionModal, setShowDuplicarReservacionModal] = useState(false)
+  // Modales de cambio de estatus comercial (Cancelar / Reactivar) — solo visibles cuando ya hay evento creado
+  const [showCancelModal, setShowCancelModal] = useState(false)
+  const [showReactivateModal, setShowReactivateModal] = useState(false)
+  // Modal de advertencia: duración del evento < 4 horas (solo en /cotizaciones, no en reservacion-interna)
+  const [showMinDurationWarning, setShowMinDurationWarning] = useState(false)
+  const [cambioEstatusLoading, setCambioEstatusLoading] = useState(false)
+  // State independiente de formData (que se resetea en otros flujos) para mantener el flag de cancelación.
+  // Inicializa null = no determinado; se setea a true/false explícitamente.
+  const [estatusComercialActual, setEstatusComercialActual] = useState<number | null>(null)
   const [showUnsavedBeforeGenerarModal, setShowUnsavedBeforeGenerarModal] = useState(false)
   const [showConfirmGenerarModal, setShowConfirmGenerarModal] = useState(false)
   const [generarSavingFromModal, setGenerarSavingFromModal] = useState(false)
@@ -1358,9 +1379,10 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
       if (r.success && r.data) {
         const lista = r.data as ddlItem[]
         setEstatusList(lista)
-        // Default en creación: id=2 (Definitivo) si reservación-interna, id=1 (Tentativo) en cotización.
+        // Default en creación: id=1 (Tentativo) tanto para cotización como reservación-interna.
+        // En reservación-interna el dropdown queda habilitado para permitir cambiar a id=2 (Definitivo) u otro.
         if (!effectiveEditId) {
-          const defaultId = isReservacionInterna ? "2" : "1"
+          const defaultId = "1"
           const def = lista.find((e) => e.value === defaultId)
           if (def) setPendingEstatusId(def.value)
           else if (lista.length > 0) setPendingEstatusId(lista[0].value)
@@ -1433,6 +1455,12 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
       // Setear TODO el formData de una sola vez — sin llamar a ninguna función
       // que use el spread de formData para no pisar los valores
       const salonId = c.salonid?.toString() ?? ""
+
+      // Inicializar el estado independiente de cancelación desde el evento cargado
+      const ecRaw = c.estatuscomercialid
+      const ecNum = typeof ecRaw === "number" ? ecRaw : (ecRaw != null && ecRaw !== "" ? Number(ecRaw) : null)
+      console.log("[cargarCotizacion] estatuscomercialid del evento:", ecRaw, "→ parsed:", ecNum)
+      setEstatusComercialActual(ecNum != null && !Number.isNaN(ecNum) ? ecNum : 1)
 
       setFormData({
         hotel:               c.hotelid?.toString()       ?? "",
@@ -2801,7 +2829,31 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
         // Data rows
         for (let idx = 0; idx < presupuestoItems.length; idx++) {
           const item = presupuestoItems[idx]
-          const rowH = 6.5
+
+          const rowData = [
+            String(idx + 1),
+            item.concepto,
+            item.tipo,
+            item.precio > 0 ? fmt(item.precio) : "Por definir",
+            item.iva > 0 ? fmt(item.iva) : "-",
+            item.servicio > 0 ? fmt(item.servicio) : "-",
+            item.subtotal > 0 ? fmt(item.subtotal) : "Por definir",
+            item.cantidad ? String(item.cantidad) : "-",
+            String(item.dias),
+            (item.descuento || 0) >= 100 ? "Cortesía" : (item.total > 0 ? fmt(item.total) : "Por definir"),
+          ]
+
+          // Calcular líneas envueltas para la columna de concepto (i=1) y altura dinámica del renglón.
+          doc.setFontSize(7)
+          doc.setFont("helvetica", "bold")
+          const conceptoMaxW = cols[1] - 4
+          const conceptoLines = doc.splitTextToSize(rowData[1] || "", conceptoMaxW) as string[]
+          const baseRowH = 6.5
+          const lineH = 3.2
+          const rowH = conceptoLines.length <= 1
+            ? baseRowH
+            : Math.max(baseRowH, lineH * conceptoLines.length + 3)
+
           checkNewPage(rowH + 2)
 
           // Si es nueva página, re-dibujar header
@@ -2829,34 +2881,18 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
 
           doc.setFontSize(7)
           doc.setTextColor(40, 40, 40)
-          const rowData = [
-            String(idx + 1),
-            item.concepto,
-            item.tipo,
-            item.precio > 0 ? fmt(item.precio) : "Por definir",
-            item.iva > 0 ? fmt(item.iva) : "-",
-            item.servicio > 0 ? fmt(item.servicio) : "-",
-            item.subtotal > 0 ? fmt(item.subtotal) : "Por definir",
-            item.cantidad ? String(item.cantidad) : "-",
-            String(item.dias),
-            (item.descuento || 0) >= 100 ? "Cortesía" : (item.total > 0 ? fmt(item.total) : "Por definir"),
-          ]
 
           colX = tableX
           for (let i = 0; i < rowData.length; i++) {
             const align = headerAligns[i]
             doc.setFont("helvetica", i === 1 || i === 9 ? "bold" : "normal")
             const textX = align === "right" ? colX + cols[i] - 2 : align === "center" ? colX + cols[i] / 2 : colX + 2
-            // Truncar concepto si es muy largo
-            let cellText = rowData[i]
             if (i === 1) {
-              const maxW = cols[i] - 4
-              while (doc.getTextWidth(cellText) > maxW && cellText.length > 3) {
-                cellText = cellText.slice(0, -1)
-              }
-              if (cellText !== rowData[i]) cellText += "…"
+              // Renderizar concepto en múltiples líneas para mostrar el nombre completo
+              doc.text(conceptoLines, textX, y + 4.5, { align })
+            } else {
+              doc.text(rowData[i], textX, y + 4.5, { align })
             }
-            doc.text(cellText, textX, y + 4.5, { align })
             colX += cols[i]
           }
 
@@ -3872,9 +3908,19 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
       formDataToSubmit.append("porcentajedescuento", formData.descuentoPorcentaje)
       formDataToSubmit.append("montodescuento", formData.montoDescuento)
       // estatusid (operacional) solo se hardcodea en CREACIÓN; en edición el backend lo conserva.
+      // Reservación interna: deriva el estatusid del estatuscomercial elegido.
+      //   estatuscomercial = 1 (Tentativo) → estatusid = 3
+      //   estatuscomercial = 2 (Definitivo) → estatusid = 10
+      // Cotización: estatusid = 1 (default operacional al crear).
       const isCreating = !(effectiveEditId || eventoId)
       if (isCreating) {
-        formDataToSubmit.append("estatusid", isReservacionInterna ? "14" : "1")
+        let estatusOperacional = "1"
+        if (isReservacionInterna) {
+          const ecId = Number(formData.estatusId)
+          if (ecId === 2) estatusOperacional = "10"      // Definitivo
+          else estatusOperacional = "3"                  // Tentativo (default) y cualquier otro
+        }
+        formDataToSubmit.append("estatusid", estatusOperacional)
       }
       // estatuscomercialid lo controla el dropdown disabled (default id=1, lista de visual=true).
       formDataToSubmit.append("estatuscomercialid", formData.estatusId)
@@ -3944,6 +3990,9 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
           const resvId = (result as any).reservacionid ?? result.data
           setEventoId(result.data)
           setCotizacionId(resvId)
+          // Inicializar el estado independiente de cancelación con el valor recién creado (1=Tentativo o 2=Definitivo).
+          const nuevoEstatusComercial = Number(formData.estatusId) || (isReservacionInterna ? 2 : 1)
+          setEstatusComercialActual(nuevoEstatusComercial)
           // Etiquetar la tab actual con el reservacionid recién creado
           setReservacionTabs(prev => prev.map((t, i) => i === activeReservacionIdx ? { ...t, id: resvId } : t))
           setShowPackageSection(true)
@@ -4035,6 +4084,70 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
   const blockedIndices = getBlockedIndicesForRange()
   const horaInicioIdx = HORARIOS_EVENTO.findIndex((h) => h.value === formData.horaInicio)
 
+  // Estatus comercial: 1=Tentativo, 2=Definitivo, 3=Cancelado
+  // isCancelado deriva del state independiente (no de formData.estatusId) para que NO se vea afectado
+  // por flujos que resetean formData (cargarCotizacion, applyTabSnapshot, etc.).
+  const isCancelado = estatusComercialActual === 3
+  // Solo mostrar botones Cancelar/Reactivar cuando ya existe el evento (creado o en edición)
+  const eventExists = !!(effectiveEditId || cotizacionId || eventoId)
+  const eventoIdActualResolved = eventoId ?? (effectiveEditId ? Number(effectiveEditId) : null)
+
+  // DEBUG render log
+  console.log("[QuotationForm RENDER]", { estatusId: formData.estatusId, estatusComercialActual, isCancelado, eventExists })
+
+  async function handleConfirmCancelarReservacion() {
+    if (!eventoIdActualResolved) {
+      console.warn("[CancelarReservacion] No se pudo resolver eventoid", { eventoId, effectiveEditId })
+      alert("No se pudo identificar el evento. Recarga la página e intenta de nuevo.")
+      return
+    }
+    console.log("[CancelarReservacion] Iniciando cancelación", { eventoId: eventoIdActualResolved })
+    setCambioEstatusLoading(true)
+    try {
+      const result = await cambiarEstatusComercialEvento(eventoIdActualResolved, 3)
+      console.log("[CancelarReservacion] Resultado server action:", result)
+      if (result.success) {
+        setShowCancelModal(false)
+        setEstatusComercialActual(3)
+        setFormData((prev) => {
+          const next = { ...prev, estatusId: "3" }
+          console.log("[CancelarReservacion] Nuevo formData.estatusId:", next.estatusId, "estatusComercialActual:", 3)
+          return next
+        })
+      } else {
+        alert(`Error al cancelar: ${result.error ?? "desconocido"}`)
+      }
+    } catch (e) {
+      console.error("Error en handleConfirmCancelarReservacion:", e)
+      alert("Error al cancelar la reservación.")
+    } finally {
+      setCambioEstatusLoading(false)
+    }
+  }
+
+  async function handleConfirmReactivarReservacion() {
+    if (!eventoIdActualResolved) {
+      alert("No se pudo identificar el evento. Recarga la página e intenta de nuevo.")
+      return
+    }
+    setCambioEstatusLoading(true)
+    try {
+      const result = await cambiarEstatusComercialEvento(eventoIdActualResolved, 1)
+      if (result.success) {
+        setShowReactivateModal(false)
+        setEstatusComercialActual(1)
+        setFormData((prev) => ({ ...prev, estatusId: "1" }))
+      } else {
+        alert(`Error al reactivar: ${result.error ?? "desconocido"}`)
+      }
+    } catch (e) {
+      console.error("Error en handleConfirmReactivarReservacion:", e)
+      alert("Error al reactivar la reservación.")
+    } finally {
+      setCambioEstatusLoading(false)
+    }
+  }
+
   return (
     <>
     {/* Pantalla de carga al editar cotización */}
@@ -4067,7 +4180,33 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
     )}
 
     <form onSubmit={handleSubmit} className="space-y-8">
-      <fieldset disabled={readOnly} className="contents">
+      {/* Banner de Cancelación — fuera del fieldset para que el botón Reactivar siempre sea clickeable */}
+      {isCancelado && (
+        <div className="rounded-lg border-2 border-red-500 bg-red-50 px-4 py-3 flex items-center gap-3">
+          <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-500 flex items-center justify-center">
+            <Ban className="w-5 h-5 text-white" />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-bold text-red-900 uppercase tracking-wide">
+              {isReservacionInterna ? "Reservación Cancelada" : "Cotización Cancelada"}
+            </p>
+            <p className="text-xs text-red-700">
+              El salón está desbloqueado para esta fecha. No puedes modificar los datos del evento mientras esté cancelado.
+            </p>
+          </div>
+          <Button
+            type="button"
+            onClick={() => setShowReactivateModal(true)}
+            className="h-9 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
+          >
+            <RotateCcw className="h-4 w-4" />
+            {isReservacionInterna ? "Reactivar Reservación" : "Reactivar Cotización"}
+          </Button>
+        </div>
+      )}
+
+      <fieldset disabled={readOnly || isCancelado} className="contents">
+      <div className={isCancelado ? "space-y-8 opacity-60 grayscale-[30%] transition-opacity duration-200" : "contents"}>
       {isReservacionInterna && (
         <div className="rounded-lg border-2 border-amber-500 bg-amber-50 px-4 py-3 flex items-center gap-3">
           <div className="flex-shrink-0 w-9 h-9 rounded-full bg-amber-500 flex items-center justify-center">
@@ -4096,29 +4235,19 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
           {/* Client Information */}
           <div className="pb-3">
             <h3 className="text-xs font-semibold text-blue-900 mb-2 uppercase tracking-wide">Información del Cliente</h3>
-            <div className="grid md:grid-cols-3 gap-3">
+            <div className="grid md:grid-cols-3 gap-3 items-end">
               <div className="space-y-2 relative">
-                <Label htmlFor="nombreCliente" className="text-sm font-medium flex items-center gap-2">
+                <Label htmlFor="nombreCliente" className="text-sm font-medium flex items-center gap-2 flex-wrap">
                   <User className="h-4 w-4" />
                   Buscar Cliente <span className="text-red-500">*</span>
-                  <span className="relative inline-flex group/tip">
-                    <span
-                      tabIndex={0}
-                      className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 text-white text-[10px] font-bold cursor-help shadow-sm ring-1 ring-blue-700/20 hover:scale-110 transition-transform focus:outline-none focus:ring-2 focus:ring-blue-400"
-                      aria-label="Ayuda sobre búsqueda de cliente"
-                    >
-                      ?
-                    </span>
-                    <span
-                      role="tooltip"
-                      className="pointer-events-none absolute left-1/2 bottom-full mb-2 -translate-x-1/2 z-30 w-64 opacity-0 translate-y-1 group-hover/tip:opacity-100 group-hover/tip:translate-y-0 group-focus-within/tip:opacity-100 group-focus-within/tip:translate-y-0 transition-all duration-150"
-                    >
-                      <span className="block rounded-lg bg-slate-900 text-white text-xs font-normal leading-relaxed px-3 py-2 shadow-xl ring-1 ring-black/5">
-                        <span className="block font-semibold text-blue-200 mb-0.5">Búsqueda flexible</span>
-                        Puedes buscar al cliente escribiendo su <span className="font-semibold text-white">nombre</span>, <span className="font-semibold text-white">apellidos</span>, <span className="font-semibold text-white">email</span> o <span className="font-semibold text-white">teléfono</span>.
-                      </span>
-                      <span className="absolute left-1/2 -bottom-1 -translate-x-1/2 w-2 h-2 rotate-45 bg-slate-900 ring-1 ring-black/5" />
-                    </span>
+                  <span
+                    className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 text-white text-[10px] font-bold shadow-sm ring-1 ring-blue-700/20"
+                    aria-hidden="true"
+                  >
+                    ?
+                  </span>
+                  <span className="text-[11px] font-normal text-blue-800 leading-tight bg-blue-50 border border-blue-200 rounded-md px-2 py-0.5">
+                    Puedes buscar por <span className="font-semibold text-blue-900">nombre, apellidos, email o teléfono</span>
                   </span>
                 </Label>
                 <Input
@@ -4185,35 +4314,23 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="email" className="text-sm font-medium flex items-center gap-2">
+                <Label className="text-sm font-medium flex items-center gap-2">
                   <Mail className="h-4 w-4" />
                   Email
                 </Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={formData.email}
-                  placeholder="Se completa al seleccionar cliente"
-                  className="border-blue-200 bg-gray-50 text-gray-500 cursor-not-allowed"
-                  disabled
-                  readOnly
-                />
+                <div className="h-9 flex items-center px-3 text-sm text-gray-800 break-all">
+                  {formData.email || <span className="text-gray-400 italic">Se completa al seleccionar cliente</span>}
+                </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="telefono" className="text-sm font-medium flex items-center gap-2">
+                <Label className="text-sm font-medium flex items-center gap-2">
                   <Phone className="h-4 w-4" />
                   Teléfono
                 </Label>
-                <Input
-                  id="telefono"
-                  type="tel"
-                  value={formData.telefono}
-                  placeholder="Se completa al seleccionar cliente"
-                  className="border-blue-200 bg-gray-50 text-gray-500 cursor-not-allowed"
-                  disabled
-                  readOnly
-                />
+                <div className="h-9 flex items-center px-3 text-sm text-gray-800">
+                  {formData.telefono || <span className="text-gray-400 italic">Se completa al seleccionar cliente</span>}
+                </div>
               </div>
 
               {categoriasEvento.find(c => c.id.toString() === formData.categoriaEvento)?.nombre?.toUpperCase() === "EMPRESARIAL" && (
@@ -4258,7 +4375,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
             <div className="flex flex-wrap gap-5">
               <div className="space-y-1 w-48">
                 <Label htmlFor="categoriaEvento" className="text-xs font-medium">
-                  Categoría del Evento
+                  Segmento
                 </Label>
                 <Select
                   value={formData.categoriaEvento}
@@ -4452,87 +4569,6 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
               </Select>
             </div>
 
-            {/* Row 2: Calendario de Disponibilidad — full width */}
-            <AvailabilityCalendar
-              key={`resv-${activeReservacionIdx}-${reservacionTabs[activeReservacionIdx]?.id ?? "new"}`}
-              hotelId={formData.hotel}
-              salones={salones}
-              isReservacionInterna={isReservacionInterna}
-              onSelectSlot={async (fecha, salonId, horaPreMontaje, horaInicio, horaFin, horaPostMontaje, horasExtras, fechaFin2, overlappingCotizacion) => {
-                setOverlapWarning(overlappingCotizacion || null)
-                const prevSalon = formData.salon
-                setFormData(prev => ({
-                  ...prev,
-                  // Solo actualizar fechas si viene fecha (selección de día), no cuando solo cambian horas
-                  ...(fecha ? { fechaInicial: fecha, fechaFinal: fechaFin2 || fecha } : {}),
-                  ...(salonId ? { salon: salonId } : {}),
-                  ...(horaPreMontaje !== undefined ? { horaPreMontaje } : {}),
-                  ...(horaInicio !== undefined ? { horaInicio } : {}),
-                  ...(horaFin !== undefined ? { horaFin } : {}),
-                  ...(horaPostMontaje !== undefined ? { horaPostMontaje } : {}),
-                  horasExtras: (horasExtras ?? 0).toString(),
-                }))
-                if (fecha) {
-                  setCalendarRange({ from: new Date(fecha + "T00:00:00"), to: new Date((fechaFin2 || fecha) + "T00:00:00") })
-                }
-                // Solo recargar montajes/reservaciones/presupuesto cuando cambia el salón
-                if (salonId !== prevSalon) {
-                  setFormData(prev => ({ ...prev, montaje: "" }))
-                  setMontajes([])
-                  setSalonReservaciones([])
-                  setReservacionesDia([])
-                  await loadMontajes(salonId)
-                  const salonItem = salones.find((s) => s.value === salonId)
-                  const salonResult = await objetoSalon(Number(salonId))
-                  const precioSalon = salonResult.success && salonResult.data?.preciopordia ? Number(salonResult.data.preciopordia) : 0
-                  const nombreSalon = salonResult.success && salonResult.data?.nombre ? salonResult.data.nombre : salonItem?.text || "Salón"
-                  setPresupuestoItems(prev => {
-                    const sinSalon = prev.filter(p => p.tipo !== "Salón")
-                    return [crearPresupuestoItem(nombreSalon, "Salón", precioSalon, 1, 0, 1), ...sinSalon]
-                  })
-                }
-              }}
-              selectedFechaInicio={formData.fechaInicial}
-              selectedFechaFin={formData.fechaFinal}
-              selectedSalonId={formData.salon}
-              selectedHoraPreMontaje={formData.horaPreMontaje}
-              selectedHoraInicio={formData.horaInicio}
-              selectedHoraFin={formData.horaFin}
-              selectedHoraPostMontaje={formData.horaPostMontaje}
-              draftReservaciones={reservacionTabs.map((tab, idx) => {
-                if (idx === activeReservacionIdx) return null
-                const snap = tabSnapshotsRef.current[idx]
-                if (!snap?.formData) return null
-                const fd = snap.formData
-                if (!fd.salon || !fd.fechaInicial || !fd.horaInicio || !fd.horaFin) return null
-                return {
-                  salonid: fd.salon,
-                  fechainicio: fd.fechaInicial,
-                  fechafin: fd.fechaFinal || fd.fechaInicial,
-                  horainicio: fd.horaInicio,
-                  horafin: fd.horaFin,
-                  horapremontaje: fd.horaPreMontaje,
-                  horapostmontaje: fd.horaPostMontaje,
-                  label: tab.label,
-                }
-              }).filter(Boolean) as any[]}
-              initialViewMode={formData.fechaInicial ? "day" : (searchParams.get("fechaInicio") ? "day" : undefined)}
-              initialDate={formData.fechaInicial || searchParams.get("fechaInicio") || undefined}
-              excludeMatch={(() => {
-                // Usar baseline del último guardado para que la exclusión no se pierda cuando el usuario arrastra.
-                // El calendario ahora mapea horainicio = horapremontaje para los eventos cargados,
-                // así que matcheamos contra horaPreMontaje (o horaInicio si no hay pre).
-                const baseline = lastSavedTabSnapshotsRef.current[activeReservacionIdx]?.formData
-                if (!eventoId || !baseline) return undefined
-                return {
-                  eventoid: eventoId,
-                  salonid: baseline.salon || undefined,
-                  fechainicio: baseline.fechaInicial || undefined,
-                  horainicio: baseline.horaPreMontaje || baseline.horaInicio || undefined,
-                }
-              })()}
-            />
-
             {/* Salón, Montaje, Fechas, Horarios + Galería */}
             <div className="grid md:grid-cols-[1fr_380px] gap-3">
               {/* Izquierda: inputs */}
@@ -4607,9 +4643,12 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                       onChange={(e) => {
                         const newInicial = e.target.value
                         setFormData(prev => {
-                          // Si la nueva fecha inicial supera la fecha final, igualarlas.
                           const next: typeof prev = { ...prev, fechaInicial: newInicial }
-                          if (newInicial && prev.fechaFinal && newInicial > prev.fechaFinal) {
+                          // Auto-actualizar fechaFinal cuando:
+                          //   - está vacía, o
+                          //   - es igual a la fechaInicial anterior (el usuario no la había puesto distinta), o
+                          //   - la nueva inicial supera la final actual.
+                          if (newInicial && (!prev.fechaFinal || prev.fechaFinal === prev.fechaInicial || newInicial > prev.fechaFinal)) {
                             next.fechaFinal = newInicial
                           }
                           return next
@@ -4658,14 +4697,28 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                   </div>
                   <div className="space-y-1 w-[120px]">
                     <Label className="text-[10px] font-semibold text-blue-900 uppercase tracking-wide">Hora Inicio <span className="text-red-500">*</span></Label>
-                    <Select value={formData.horaInicio} onValueChange={(value) => setFormData(prev => ({ ...prev, horaInicio: value }))} required>
+                    <Select value={formData.horaInicio} onValueChange={(value) => {
+                      setFormData(prev => ({ ...prev, horaInicio: value }))
+                      // Validación duración mínima 4h — solo en /cotizaciones (no reservacion-interna)
+                      if (!isReservacionInterna && value && formData.horaFin) {
+                        const dur = calcularDuracionHoras(value, formData.horaFin)
+                        if (dur > 0 && dur < 4) setShowMinDurationWarning(true)
+                      }
+                    }} required>
                       <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-7 text-xs"><SelectValue placeholder="Hora" /></SelectTrigger>
                       <SelectContent>{HORARIOS_EVENTO.map((h) => <SelectItem key={h.value} value={h.value}>{h.label}</SelectItem>)}</SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-1 w-[120px]">
                     <Label className="text-[10px] font-semibold text-blue-900 uppercase tracking-wide">Hora Fin <span className="text-red-500">*</span></Label>
-                    <Select value={formData.horaFin} onValueChange={(value) => setFormData(prev => ({ ...prev, horaFin: value }))} required>
+                    <Select value={formData.horaFin} onValueChange={(value) => {
+                      setFormData(prev => ({ ...prev, horaFin: value }))
+                      // Validación duración mínima 4h — solo en /cotizaciones (no reservacion-interna)
+                      if (!isReservacionInterna && formData.horaInicio && value) {
+                        const dur = calcularDuracionHoras(formData.horaInicio, value)
+                        if (dur > 0 && dur < 4) setShowMinDurationWarning(true)
+                      }
+                    }} required>
                       <SelectTrigger className="border-blue-200 focus:ring-blue-500 h-7 text-xs"><SelectValue placeholder="Hora" /></SelectTrigger>
                       <SelectContent>{HORARIOS_EVENTO.map((h, idx) => { const d = horaInicioIdx >= 0 && idx <= horaInicioIdx; return <SelectItem key={h.value} value={h.value} disabled={d}>{h.label}</SelectItem> })}</SelectContent>
                     </Select>
@@ -4744,20 +4797,103 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                 )}
               </div>
             </div>
+
+            {/* Calendario de Disponibilidad — full width, debajo de salón/fechas */}
+            <AvailabilityCalendar
+              key={`resv-${activeReservacionIdx}-${reservacionTabs[activeReservacionIdx]?.id ?? "new"}`}
+              hotelId={formData.hotel}
+              salones={salones}
+              isReservacionInterna={isReservacionInterna}
+              onSelectSlot={async (fecha, salonId, horaPreMontaje, horaInicio, horaFin, horaPostMontaje, horasExtras, fechaFin2, overlappingCotizacion) => {
+                setOverlapWarning(overlappingCotizacion || null)
+                const prevSalon = formData.salon
+                setFormData(prev => ({
+                  ...prev,
+                  ...(fecha ? { fechaInicial: fecha, fechaFinal: fechaFin2 || fecha } : {}),
+                  ...(salonId ? { salon: salonId } : {}),
+                  ...(horaPreMontaje !== undefined ? { horaPreMontaje } : {}),
+                  ...(horaInicio !== undefined ? { horaInicio } : {}),
+                  ...(horaFin !== undefined ? { horaFin } : {}),
+                  ...(horaPostMontaje !== undefined ? { horaPostMontaje } : {}),
+                  horasExtras: (horasExtras ?? 0).toString(),
+                }))
+                if (fecha) {
+                  setCalendarRange({ from: new Date(fecha + "T00:00:00"), to: new Date((fechaFin2 || fecha) + "T00:00:00") })
+                }
+                if (salonId !== prevSalon) {
+                  setFormData(prev => ({ ...prev, montaje: "" }))
+                  setMontajes([])
+                  setSalonReservaciones([])
+                  setReservacionesDia([])
+                  await loadMontajes(salonId)
+                  const salonItem = salones.find((s) => s.value === salonId)
+                  const salonResult = await objetoSalon(Number(salonId))
+                  const precioSalon = salonResult.success && salonResult.data?.preciopordia ? Number(salonResult.data.preciopordia) : 0
+                  const nombreSalon = salonResult.success && salonResult.data?.nombre ? salonResult.data.nombre : salonItem?.text || "Salón"
+                  setPresupuestoItems(prev => {
+                    const sinSalon = prev.filter(p => p.tipo !== "Salón")
+                    return [crearPresupuestoItem(nombreSalon, "Salón", precioSalon, 1, 0, 1), ...sinSalon]
+                  })
+                }
+              }}
+              selectedFechaInicio={formData.fechaInicial}
+              selectedFechaFin={formData.fechaFinal}
+              selectedSalonId={formData.salon}
+              selectedHoraPreMontaje={formData.horaPreMontaje}
+              selectedHoraInicio={formData.horaInicio}
+              selectedHoraFin={formData.horaFin}
+              selectedHoraPostMontaje={formData.horaPostMontaje}
+              draftReservaciones={reservacionTabs.map((tab, idx) => {
+                if (idx === activeReservacionIdx) return null
+                const snap = tabSnapshotsRef.current[idx]
+                if (!snap?.formData) return null
+                const fd = snap.formData
+                if (!fd.salon || !fd.fechaInicial || !fd.horaInicio || !fd.horaFin) return null
+                return {
+                  salonid: fd.salon,
+                  fechainicio: fd.fechaInicial,
+                  fechafin: fd.fechaFinal || fd.fechaInicial,
+                  horainicio: fd.horaInicio,
+                  horafin: fd.horaFin,
+                  horapremontaje: fd.horaPreMontaje,
+                  horapostmontaje: fd.horaPostMontaje,
+                  label: tab.label,
+                }
+              }).filter(Boolean) as any[]}
+              initialViewMode={formData.fechaInicial ? "day" : (searchParams.get("fechaInicio") ? "day" : undefined)}
+              initialDate={formData.fechaInicial || searchParams.get("fechaInicio") || undefined}
+              excludeMatch={(() => {
+                const baseline = lastSavedTabSnapshotsRef.current[activeReservacionIdx]?.formData
+                if (!eventoId || !baseline) return undefined
+                return {
+                  eventoid: eventoId,
+                  salonid: baseline.salon || undefined,
+                  fechainicio: baseline.fechaInicial || undefined,
+                  horainicio: baseline.horaPreMontaje || baseline.horaInicio || undefined,
+                }
+              })()}
+            />
           </div>
 
           {/* Event Details */}
           <div className="border-t pt-3">
             <h3 className="text-xs font-semibold text-blue-900 mb-2 uppercase tracking-wide">Información del Evento</h3>
-            <div className="flex flex-wrap gap-5">
+            <div className="flex flex-wrap items-end gap-5">
               <div className="space-y-1 w-48">
                 <Label htmlFor="estatus" className="text-xs font-medium">
                   Estatus
                 </Label>
                 <Select
-                  value={formData.estatusId}
-                  onValueChange={(v) => setFormData(prev => ({ ...prev, estatusId: v }))}
-                  disabled
+                  value={isCancelado ? "3" : (formData.estatusId || (estatusComercialActual != null ? estatusComercialActual.toString() : ""))}
+                  onValueChange={(v) => {
+                    // Solo actualizar si v es un valor válido — Radix puede emitir "" en transiciones internas
+                    // y eso resetearía estatusComercialActual a null causando un loop con cargarCotizacion.
+                    if (!v) return
+                    setFormData(prev => ({ ...prev, estatusId: v }))
+                    const n = Number(v)
+                    if (!Number.isNaN(n) && n > 0) setEstatusComercialActual(n)
+                  }}
+                  disabled={!isReservacionInterna || isCancelado}
                 >
                   <SelectTrigger id="estatus" className="border-blue-200 focus:ring-blue-500 h-8 text-sm w-full">
                     <SelectValue placeholder="Selecciona estatus" />
@@ -4766,9 +4902,26 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                     {estatusList.map((e) => (
                       <SelectItem key={e.value} value={e.value}>{e.text}</SelectItem>
                     ))}
+                    {/* Cuando el evento está cancelado (id=3) lo agregamos a la lista para que el trigger lo muestre */}
+                    {isCancelado && !estatusList.some((e) => e.value === "3") && (
+                      <SelectItem value="3">Cancelado</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Botón Cancelar — solo cuando ya existe el evento y NO está cancelado */}
+              {/* (el botón Reactivar vive en el banner rojo arriba para que sea clickeable cuando el form está disabled) */}
+              {eventExists && !isCancelado && (
+                <Button
+                  type="button"
+                  onClick={() => setShowCancelModal(true)}
+                  className="h-8 gap-1.5 bg-red-600 hover:bg-red-700 text-white"
+                >
+                  <Ban className="h-3.5 w-3.5" />
+                  {isReservacionInterna ? "Cancelar Reservación" : "Cancelar Cotización"}
+                </Button>
+              )}
             </div>
 
             {/* Checkbox Requerimiento de Habitaciones (oculto en modo reservación interna) */}
@@ -7768,14 +7921,20 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
               </div>
 
               {/* Preview PDF (solo para tipos con PDF) */}
-              {supportsPreview && (
+              {supportsPreview && (() => {
+                // En las pestañas de Platillos (tanto el genérico "platillos" como las pestañas
+                // específicas ENTRADAS/PLATO FUERTE/POSTRES) mostramos el PDF del menú padre
+                // (menus.documentopdf), el mismo de la pestaña Alimento.
+                const usaMenuPadre = isPlatillosMultiTab || isPlatilloTipoTab
+                const pdfActual = usaMenuPadre ? selectedAlimentoParentPdf : previewElementoPdf
+                return (
                 <div className="bg-gray-100 flex flex-col min-h-0 overflow-hidden relative">
-                  {previewElementoPdf ? (
+                  {pdfActual ? (
                     <>
-                      <iframe src={`${previewElementoPdf}#navpanes=0`} className="w-full h-full border-0" title="Vista previa PDF" />
+                      <iframe src={`${pdfActual}#navpanes=0`} className="w-full h-full border-0" title="Vista previa PDF" />
                       <button
                         type="button"
-                        onClick={() => { setPdfModalUrl(previewElementoPdf); setShowPDFModal(true) }}
+                        onClick={() => { setPdfModalUrl(pdfActual); setShowPDFModal(true) }}
                         className="absolute bottom-3 right-3 z-10 bg-white/95 hover:bg-white text-[#1a3d2e] text-xs font-semibold px-3 py-1.5 rounded-full shadow-lg flex items-center gap-1.5 transition-colors cursor-zoom-in"
                         title="Ampliar PDF"
                       >
@@ -7798,13 +7957,16 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
                           </svg>
                         </div>
                         <p className="text-sm text-gray-500">
-                          {previewElementoId ? "Este elemento no tiene PDF asociado" : "Haz clic en un elemento para ver su PDF"}
+                          {usaMenuPadre
+                            ? "Selecciona primero un menú en la pestaña Alimento"
+                            : (previewElementoId ? "Este elemento no tiene PDF asociado" : "Haz clic en un elemento para ver su PDF")}
                         </p>
                       </div>
                     </div>
                   )}
                 </div>
-              )}
+                )
+              })()}
 
               {/* Resumen lateral (flujo Alimentos) */}
               {isAlimentosFlow && (() => {
@@ -8117,6 +8279,7 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
         @keyframes scaleIn { from { opacity: 0; transform: scale(0.88) } to { opacity: 1; transform: scale(1) } }
         @keyframes loading-bar { 0% { width: 0% } 50% { width: 70% } 100% { width: 100% } }
       `}</style>
+      </div>
       </fieldset>
     </form>
 
@@ -8298,6 +8461,120 @@ export function QuotationForm({ readOnly = false, initialEditId, mode = "cotizac
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* Modal: Confirmar Cancelación de Reservación/Cotización */}
+    {showCancelModal && (
+      <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+          <div className="flex items-start gap-3">
+            <div className="flex-shrink-0 w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
+              <AlertTriangle className="w-6 h-6 text-red-600" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-gray-900">
+                ¿Cancelar {isReservacionInterna ? "reservación" : "cotización"}?
+              </h3>
+              <p className="text-sm text-gray-600 mt-2">
+                Esta acción cambiará el estatus comercial a <span className="font-semibold text-red-700">Cancelado</span> y el salón quedará desbloqueado para esta fecha.
+              </p>
+              <p className="text-sm text-gray-600 mt-2">
+                Mientras esté cancelada no podrás modificar los datos del evento. Podrás reactivarla más tarde si lo necesitas.
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={cambioEstatusLoading}
+              onClick={() => setShowCancelModal(false)}
+            >
+              Volver
+            </Button>
+            <Button
+              type="button"
+              disabled={cambioEstatusLoading}
+              className="bg-red-600 hover:bg-red-700 text-white gap-1.5"
+              onClick={handleConfirmCancelarReservacion}
+            >
+              <Ban className="h-3.5 w-3.5" />
+              {cambioEstatusLoading ? "Cancelando..." : "Sí, cancelar"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Modal: Confirmar Reactivación de Reservación/Cotización */}
+    {showReactivateModal && (
+      <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+          <div className="flex items-start gap-3">
+            <div className="flex-shrink-0 w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center">
+              <RotateCcw className="w-6 h-6 text-emerald-600" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-gray-900">
+                ¿Reactivar {isReservacionInterna ? "reservación" : "cotización"}?
+              </h3>
+              <p className="text-sm text-gray-600 mt-2">
+                El estatus comercial volverá a <span className="font-semibold text-emerald-700">Tentativo</span> y podrás modificar nuevamente todos los datos del evento.
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={cambioEstatusLoading}
+              onClick={() => setShowReactivateModal(false)}
+            >
+              Volver
+            </Button>
+            <Button
+              type="button"
+              disabled={cambioEstatusLoading}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+              onClick={handleConfirmReactivarReservacion}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              {cambioEstatusLoading ? "Reactivando..." : "Sí, reactivar"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Modal de advertencia: duración mínima del evento — solo /cotizaciones */}
+    {showMinDurationWarning && (
+      <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+          <div className="flex items-start gap-3">
+            <div className="flex-shrink-0 w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center">
+              <AlertTriangle className="w-6 h-6 text-amber-600" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-gray-900">Duración insuficiente</h3>
+              <p className="text-sm text-gray-600 mt-2">
+                La hora ingresada es <span className="font-semibold">menor a la duración mínima</span> de un evento <span className="font-semibold">Social, Comercial y Grupal</span>, que es de <span className="font-semibold text-amber-700">4 horas</span>.
+              </p>
+              <p className="text-xs text-gray-500 mt-2">
+                Ajusta la hora de inicio o fin para cumplir con la duración mínima.
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end pt-2">
+            <Button
+              type="button"
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={() => setShowMinDurationWarning(false)}
+            >
+              Entendido
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
     </>
   )
 }
